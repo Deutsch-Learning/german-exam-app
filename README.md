@@ -84,5 +84,5 @@ This project is licensed under the MIT License.
 
 For questions or suggestions, feel free to reach out:
 
-Email: [your-email@example.com](mailto:yongjusticeanimbomnumfor@gmail.com) / [your-email@example.com](mailto:stephanierossa53@gmail.com)
-GitHub: [My Profile](https://github.com/Yong-Justice) / [My Profile](https://github.com/miaShiota)
+Email: [yongjusticeanimbomnumfor@gmail.com](mailto:yongjusticeanimbomnumfor@gmail.com) / [stephanierossa53@gmail.com](mailto:stephanierossa53@gmail.com)
+GitHub: [https://github.com/Yong-Justice](https://github.com/Yong-Justice) / [https://github.com/miaShiota](https://github.com/miaShiota)
