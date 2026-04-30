@@ -1,80 +1,26 @@
 import React from "react";
 import "./LandingPage.css";
-
-const StatCard = ({ icon, value, label }) => (
-  <div className="stat-card">
-    <div className="stat-icon">{icon}</div>
-    <h3 className="stat-value">{value}</h3>
-    <p className="stat-label">{label}</p>
-  </div>
-);
-
-const ServiceCard = ({ iconPath, title }) => (
-  <div className="service-card">
-    <div className="service-icon-wrapper">
-      <img src={iconPath} alt="" className="service-icon" />
-    </div>
-    <p className="service-title">{title}</p>
-  </div>
-);
-
-const PricingCard = ({
-  theme,
-  title,
-  price,
-  subtitle,
-  features,
-  isHighlighted,
-}) => (
-  <div
-    className={`pricing-card ${isHighlighted ? "highlighted" : ""} theme-${theme}`}
-  >
-    <div className="pricing-header">
-      <h3>{title}</h3>
-    </div>
-    <div className="pricing-body">
-      <h2 className="price">{price}</h2>
-      <p className="pricing-subtitle">{subtitle}</p>
-      <button className="btn btn-full">Choisir ce forfait</button>
-      <ul className="pricing-features">
-        {features.map((feature, idx) => (
-          <li key={idx}>
-            <span className="check-icon">✓</span>
-            {feature}
-          </li>
-        ))}
-      </ul>
-    </div>
-  </div>
-);
-
-const TestimonialCard = ({ avatar, text }) => (
-  <div className="testimonial-card">
-    <img src={avatar} alt="User Avatar" className="testimonial-avatar" />
-    <p className="testimonial-text">"{text}"</p>
-  </div>
-);
+import logo from "../assets/images/logo.png";
+import frenchFlag from "../assets/images/french_flag.png";
+import iconProfile from "../assets/images/icon-profile.png";
+import iconAudio from "../assets/images/icon-audio.png";
+import iconWrite from "../assets/images/icon-write.png";
+import iconSpeak from "../assets/images/icon-speak.png";
+import avatar1 from "../assets/images/avatar-1.png";
+import avatar2 from "../assets/images/avatar-2.png";
+import contactWoman from "../assets/images/contact-woman.jpg";
+import trophy from "../assets/images/trophy.png";
+import Navbar from "../components/landing/Navbar";
+import Footer from "../components/landing/Footer";
+import StatCard from "../components/landing/StatCard";
+import ServiceCard from "../components/landing/ServiceCard";
+import PricingCard from "../components/landing/PricingCard";
+import TestimonialCard from "../components/landing/TestimonialCard";
 
 export default function LandingPage() {
   return (
     <div className="landing-page">
-      {/* HEADER / NAV */}
-      <header className="top-nav">
-        <div className="container nav-container">
-          <div className="logo">
-            <img src="/assets/images/logo.png" alt="Logo" />
-          </div>
-          <nav className="desktop-nav">
-            <a href="#services">Accueil</a>
-            <a href="#forfaits">Nos forfaits</a>
-            <a href="#contact">Contact</a>
-            <div className="language-selector">
-              <img src="/assets/images/flag-fr.png" alt="FR" />
-            </div>
-            <button className="btn-login">Connexion</button>
-          </nav>
-        </div>
-      </header>
+      <Navbar logo={logo} frenchFlag={frenchFlag} />
 
       {/* HERO SECTION */}
       <section className="hero-section">
@@ -93,18 +39,6 @@ export default function LandingPage() {
             <button className="btn btn-primary btn-large">
               Lancer ma simulation <span className="arrow">→</span>
             </button>
-          </div>
-          <div className="hero-visuals">
-            <img
-              src="/assets/images/student-hero.png"
-              alt="Student studying"
-              className="hero-image"
-            />
-            <img
-              src="/assets/images/german-flag-wave.png"
-              alt="German Flag"
-              className="hero-flag"
-            />
           </div>
         </div>
       </section>
@@ -177,19 +111,19 @@ export default function LandingPage() {
           <h2 className="section-title">Nos services</h2>
           <div className="services-grid">
             <ServiceCard
-              iconPath="/assets/images/icon-exam.svg"
+              iconPath={iconProfile}
               title="Simulations d'examens realistes"
             />
             <ServiceCard
-              iconPath="/assets/images/icon-audio.svg"
+              iconPath={iconAudio}
               title="Entrainement audio et comprehension orale"
             />
             <ServiceCard
-              iconPath="/assets/images/icon-write.svg"
+              iconPath={iconWrite}
               title="Correction d'exercices ecrits"
             />
             <ServiceCard
-              iconPath="/assets/images/icon-speak.svg"
+              iconPath={iconSpeak}
               title="Pratique de la prononciation"
             />
           </div>
@@ -252,11 +186,11 @@ export default function LandingPage() {
             <button className="slider-arrow">&lt;</button>
             <div className="testimonials-track">
               <TestimonialCard
-                avatar="/assets/images/avatar-1.png"
+                avatar={avatar1}
                 text="Grace a cette plateforme, j'ai obtenu mon certificat B2 du premier coup. Les simulations sont extremement fideles a la realite."
               />
               <TestimonialCard
-                avatar="/assets/images/avatar-2.png"
+                avatar={avatar2}
                 text="Un accompagnement exceptionnel. Le suivi personnalise m'a permis de corriger mes erreurs recurrentes a l'ecrit."
               />
             </div>
@@ -273,10 +207,10 @@ export default function LandingPage() {
         <div className="container">
           <h2 className="section-title">Nos partenaires</h2>
           <div className="partners-grid">
-            <img src="/assets/images/partner-placeholder.svg" alt="Partner 1" />
-            <img src="/assets/images/partner-placeholder.svg" alt="Partner 2" />
-            <img src="/assets/images/partner-placeholder.svg" alt="Partner 3" />
-            <img src="/assets/images/partner-placeholder.svg" alt="Partner 4" />
+            <img src={logo} alt="Partner 1" />
+            <img src={trophy} alt="Partner 2" />
+            <img src={logo} alt="Partner 3" />
+            <img src={trophy} alt="Partner 4" />
           </div>
         </div>
       </section>
@@ -287,7 +221,7 @@ export default function LandingPage() {
           <h2 className="section-title">Contactez-nous</h2>
           <div className="contact-container">
             <div className="contact-image">
-              <img src="/assets/images/contact-woman.jpg" alt="Contact us" />
+              <img src={contactWoman} alt="Contact us" />
             </div>
             <form className="contact-form">
               <div className="form-row">
@@ -309,12 +243,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* FOOTER */}
-      <footer className="footer">
-        <div className="container">
-          <p>Copyright © 2024 Deutsch Learning. All rights reserved.</p>
-        </div>
-      </footer>
+      <Footer />
     </div>
   );
 }
