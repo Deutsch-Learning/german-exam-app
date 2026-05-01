@@ -86,3 +86,6 @@ For questions or suggestions, feel free to reach out:
 
 Email: [yongjusticeanimbomnumfor@gmail.com](mailto:yongjusticeanimbomnumfor@gmail.com) / [stephanierossa53@gmail.com](mailto:stephanierossa53@gmail.com)
 GitHub: [https://github.com/Yong-Justice](https://github.com/Yong-Justice) / [https://github.com/miaShiota](https://github.com/miaShiota)
+
+## License
+This project is licensed under the MIT License.
