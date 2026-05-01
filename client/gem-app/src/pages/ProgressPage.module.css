@@ -1,0 +1,61 @@
+.page {
+  min-height: 100vh;
+  background: #f8fafc;
+  font-family: "Inter", sans-serif;
+}
+
+.container {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 44px 20px;
+}
+
+.container h1 {
+  margin: 0 0 8px;
+}
+
+.container p {
+  margin: 0 0 24px;
+  color: #6b7280;
+}
+
+.list {
+  display: grid;
+  gap: 14px;
+}
+
+.card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.header h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.header span {
+  font-weight: 700;
+  color: #d32f2f;
+}
+
+.barWrap {
+  height: 10px;
+  background: #e5e7eb;
+  border-radius: 9999px;
+  overflow: hidden;
+}
+
+.barFill {
+  height: 100%;
+  background: linear-gradient(90deg, #f59e0b, #d32f2f);
+}

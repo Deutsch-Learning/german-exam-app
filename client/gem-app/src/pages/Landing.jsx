@@ -1,7 +1,7 @@
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 import "./LandingPage.css";
 import logo from "../assets/images/logo.png";
-import frenchFlag from "../assets/images/french_flag.png";
 import iconProfile from "../assets/images/icon-profile.png";
 import iconAudio from "../assets/images/icon-audio.png";
 import iconWrite from "../assets/images/icon-write.png";
@@ -9,36 +9,157 @@ import iconSpeak from "../assets/images/icon-speak.png";
 import avatar1 from "../assets/images/avatar-1.png";
 import avatar2 from "../assets/images/avatar-2.png";
 import contactWoman from "../assets/images/contact-woman.jpg";
-import trophy from "../assets/images/trophy.png";
 import Navbar from "../components/landing/Navbar";
 import Footer from "../components/landing/Footer";
 import StatCard from "../components/landing/StatCard";
 import ServiceCard from "../components/landing/ServiceCard";
 import PricingCard from "../components/landing/PricingCard";
 import TestimonialCard from "../components/landing/TestimonialCard";
-import { Link } from "react-router-dom";
+import API from "../services/api";
+import { useLanguage } from "../context/LanguageContext";
 
 export default function LandingPage() {
+  const { hash } = useLocation();
+  const { language, setLanguage } = useLanguage();
+  const [contactLoading, setContactLoading] = useState(false);
+  const [contactMessage, setContactMessage] = useState("");
+  const [contactForm, setContactForm] = useState({
+    firstName: "",
+    lastName: "",
+    email: "",
+    phone: "",
+    message: "",
+  });
+
+  const t = useMemo(() => {
+    const dict = {
+      fr: {
+        nav: { services: "Services", pricing: "Nos forfaits", contact: "Contact", login: "Connexion" },
+        heroTitleA: "Dominez l'examen d'allemand.",
+        heroTitleB: "Assurez votre certificat.",
+        heroSubtitle:
+          "Transformez votre stress en automatisme. Des simulations realistes et un encadrement continu des lacunes avant de passer l'examen officiel.",
+        launch: "Lancer ma simulation",
+        servicesTitle: "Nos services",
+        pricingTitle: "Nos forfaits",
+        testimonials: "Avis de nos candidats",
+        leaveComment: "Laissez un commentaire",
+        partners: "Nos partenaires",
+        contact: "Contactez-nous",
+        lastName: "Nom",
+        firstName: "Prenom",
+        email: "Email",
+        phone: "Telephone",
+        question: "Comment pouvons-nous vous aider ?",
+        send: "Envoyer",
+        sent: "Message envoyé avec succès.",
+        commentPrompt: "Laissez votre commentaire :",
+      },
+      en: {
+        nav: { services: "Services", pricing: "Pricing", contact: "Contact", login: "Login" },
+        heroTitleA: "Master your German exam.",
+        heroTitleB: "Secure your certificate.",
+        heroSubtitle:
+          "Turn exam stress into confidence with realistic simulations and continuous guidance before your official exam.",
+        launch: "Start my simulation",
+        servicesTitle: "Our services",
+        pricingTitle: "Our plans",
+        testimonials: "Student reviews",
+        leaveComment: "Leave a comment",
+        partners: "Our partners",
+        contact: "Contact us",
+        lastName: "Last name",
+        firstName: "First name",
+        email: "Email",
+        phone: "Phone",
+        question: "How can we help you?",
+        send: "Send",
+        sent: "Message sent successfully.",
+        commentPrompt: "Leave your comment:",
+      },
+      de: {
+        nav: { services: "Leistungen", pricing: "Pakete", contact: "Kontakt", login: "Anmelden" },
+        heroTitleA: "Meistern Sie die Deutschprüfung.",
+        heroTitleB: "Sichern Sie Ihr Zertifikat.",
+        heroSubtitle:
+          "Verwandeln Sie Prüfungsstress in Sicherheit mit realistischen Simulationen und kontinuierlicher Betreuung.",
+        launch: "Simulation starten",
+        servicesTitle: "Unsere Leistungen",
+        pricingTitle: "Unsere Pakete",
+        testimonials: "Erfahrungen unserer Kandidaten",
+        leaveComment: "Kommentar hinterlassen",
+        partners: "Unsere Partner",
+        contact: "Kontaktieren Sie uns",
+        lastName: "Nachname",
+        firstName: "Vorname",
+        email: "E-Mail",
+        phone: "Telefon",
+        question: "Wie können wir Ihnen helfen?",
+        send: "Senden",
+        sent: "Nachricht erfolgreich gesendet.",
+        commentPrompt: "Hinterlassen Sie Ihren Kommentar:",
+      },
+    };
+    return dict[language] ?? dict.fr;
+  }, [language]);
+
+  useEffect(() => {
+    if (hash === "#contact") {
+      setTimeout(() => {
+        document.getElementById("contact")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 50);
+    }
+  }, [hash]);
+
+  const handleLanguageChange = (lang) => setLanguage(lang);
+
+  const handleContactChange = (e) => {
+    const { name, value } = e.target;
+    setContactForm((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleContactSubmit = async (e) => {
+    e.preventDefault();
+    setContactMessage("");
+    setContactLoading(true);
+    try {
+      const res = await API.post("/contact", contactForm);
+      if (res.data?.ok) {
+        setContactMessage(t.sent);
+        setContactForm({ firstName: "", lastName: "", email: "", phone: "", message: "" });
+      } else {
+        setContactMessage(res.data?.error ?? "Erreur d'envoi.");
+      }
+    } catch {
+      setContactMessage("Impossible d'envoyer le message.");
+    } finally {
+      setContactLoading(false);
+    }
+  };
+
+  const onLeaveComment = () => {
+    const message = window.prompt(t.commentPrompt);
+    if (message && message.trim()) {
+      window.alert("Merci pour votre commentaire.");
+    }
+  };
+
   return (
     <div className="landing-page">
-      <Navbar logo={logo} frenchFlag={frenchFlag} />
+      <Navbar logo={logo} language={language} onChangeLanguage={handleLanguageChange} labels={t.nav} />
 
       {/* HERO SECTION */}
       <section className="hero-section">
         <div className="container hero-container">
           <div className="hero-content">
             <h1 className="hero-title">
-              Dominez l'examen d'allemand.
+              {t.heroTitleA}
               <br />
-              Assurez votre certificat.
+              {t.heroTitleB}
             </h1>
-            <p className="hero-subtitle">
-              Transformez votre stress en automatisme. Des simulations realistes
-              et un encadrement continu des lacunes avant de passer l'examen
-              officiel.
-            </p>
+            <p className="hero-subtitle">{t.heroSubtitle}</p>
             <Link className="btn btn-primary btn-large" to="/login">
-              Lancer ma simulation <span className="arrow">→</span>
+              {t.launch} <span className="arrow">→</span>
             </Link>
           </div>
         </div>
@@ -109,7 +230,7 @@ export default function LandingPage() {
       {/* SERVICES SECTION */}
       <section className="services-section" id="services">
         <div className="container">
-          <h2 className="section-title">Nos services</h2>
+          <h2 className="section-title">{t.servicesTitle}</h2>
           <div className="services-grid">
             <ServiceCard
               iconPath={iconProfile}
@@ -134,7 +255,7 @@ export default function LandingPage() {
       {/* PRICING SECTION */}
       <section className="pricing-section" id="forfaits">
         <div className="container">
-          <h2 className="section-title">Nos forfaits</h2>
+          <h2 className="section-title">{t.pricingTitle}</h2>
           <div className="pricing-grid">
             <PricingCard
               theme="bronze"
@@ -182,7 +303,7 @@ export default function LandingPage() {
       {/* TESTIMONIALS SECTION */}
       <section className="testimonials-section">
         <div className="container">
-          <h2 className="section-title">Avis de nos candidats</h2>
+          <h2 className="section-title">{t.testimonials}</h2>
           <div className="testimonials-slider">
             <button className="slider-arrow">&lt;</button>
             <div className="testimonials-track">
@@ -198,7 +319,7 @@ export default function LandingPage() {
             <button className="slider-arrow">&gt;</button>
           </div>
           <div className="text-center">
-            <button className="btn btn-primary mt-4">Laissez un commentaire</button>
+            <button className="btn btn-primary mt-4" type="button" onClick={onLeaveComment}>{t.leaveComment}</button>
           </div>
         </div>
       </section>
@@ -206,12 +327,12 @@ export default function LandingPage() {
       {/* PARTNERS SECTION */}
       <section className="partners-section">
         <div className="container">
-          <h2 className="section-title">Nos partenaires</h2>
+          <h2 className="section-title">{t.partners}</h2>
           <div className="partners-grid">
-            <img src={logo} alt="Partner 1" />
-            <img src={trophy} alt="Partner 2" />
-            <img src={logo} alt="Partner 3" />
-            <img src={trophy} alt="Partner 4" />
+            <img src="https://upload.wikimedia.org/wikipedia/commons/0/0f/Logo_Goethe-Institut.svg" alt="Goethe Institut" />
+            <img src="https://upload.wikimedia.org/wikipedia/commons/1/17/Duolingo_logo.svg" alt="Duolingo" />
+            <img src="https://upload.wikimedia.org/wikipedia/commons/3/3f/Technische_Universit%C3%A4t_Berlin_Logo.svg" alt="TU Berlin" />
+            <img src="https://upload.wikimedia.org/wikipedia/commons/1/18/BAMF_Logo.svg" alt="BAMF" />
           </div>
         </div>
       </section>
@@ -219,25 +340,29 @@ export default function LandingPage() {
       {/* CONTACT SECTION */}
       <section className="contact-section" id="contact">
         <div className="container">
-          <h2 className="section-title">Contactez-nous</h2>
+          <h2 className="section-title">{t.contact}</h2>
           <div className="contact-container">
             <div className="contact-image">
               <img src={contactWoman} alt="Contact us" />
             </div>
-            <form className="contact-form">
+            <form className="contact-form" onSubmit={handleContactSubmit}>
               <div className="form-row">
-                <input type="text" placeholder="Nom" required />
-                <input type="text" placeholder="Prenom" required />
+                <input type="text" name="lastName" value={contactForm.lastName} onChange={handleContactChange} placeholder={t.lastName} required />
+                <input type="text" name="firstName" value={contactForm.firstName} onChange={handleContactChange} placeholder={t.firstName} required />
               </div>
-              <input type="email" placeholder="Email" required />
-              <input type="tel" placeholder="Telephone" />
+              <input type="email" name="email" value={contactForm.email} onChange={handleContactChange} placeholder={t.email} required />
+              <input type="tel" name="phone" value={contactForm.phone} onChange={handleContactChange} placeholder={t.phone} />
               <textarea
-                placeholder="Comment pouvons-nous vous aider ?"
+                name="message"
+                value={contactForm.message}
+                onChange={handleContactChange}
+                placeholder={t.question}
                 rows="4"
                 required
               />
+              {contactMessage ? <p className="contact-feedback">{contactMessage}</p> : null}
               <button type="submit" className="btn btn-primary btn-full">
-                Envoyer
+                {contactLoading ? "..." : t.send}
               </button>
             </form>
           </div>

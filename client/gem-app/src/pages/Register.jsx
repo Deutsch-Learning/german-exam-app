@@ -1,10 +1,15 @@
 import React, { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import "./LoginPage.css";
 import logo from "../assets/images/logo.png";
+import API from "../services/api";
+import { useLanguage } from "../context/LanguageContext";
 
 export default function RegisterPage() {
+  const { t } = useLanguage();
+  const navigate = useNavigate();
   const [formData, setFormData] = useState({
+    username: "",
     firstName: "",
     lastName: "",
     email: "",
@@ -29,6 +34,11 @@ export default function RegisterPage() {
 
   const validateForm = () => {
     const newErrors = {};
+    if (!formData.username.trim()) {
+      newErrors.username = "Le nom d'utilisateur est requis.";
+    } else if (!/^[a-zA-Z0-9._-]{3,30}$/.test(formData.username.trim())) {
+      newErrors.username = "3-30 caractères (lettres, chiffres, . _ -).";
+    }
     if (!formData.firstName.trim())
       newErrors.firstName = "Le prénom est requis.";
     if (!formData.lastName.trim()) newErrors.lastName = "Le nom est requis.";
@@ -62,8 +72,19 @@ export default function RegisterPage() {
     if (!validateForm()) return;
     setIsLoading(true);
     try {
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-      console.log("Inscription", formData);
+      const res = await API.post("/register", {
+        email: formData.email,
+        password: formData.password,
+        username: formData.username,
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+      });
+      if (res.data?.ok) {
+        localStorage.setItem("auth", JSON.stringify(res.data.user));
+        navigate("/dashboard");
+        return;
+      }
+      setErrors({ submit: res.data?.error ?? "Une erreur est survenue. Réessayez." });
     } catch {
       setErrors({ submit: "Une erreur est survenue. Réessayez." });
     } finally {
@@ -96,7 +117,7 @@ export default function RegisterPage() {
           </Link>
 
           <div className="form-header">
-            <h1>Créer un compte</h1>
+            <h1>{t.auth.registerTitle}</h1>
             <p>Remplissez le formulaire pour commencer votre préparation.</p>
           </div>
 
@@ -106,6 +127,23 @@ export default function RegisterPage() {
                 {errors.submit}
               </div>
             )}
+
+            <div className="form-group">
+              <label htmlFor="username">Nom d'utilisateur</label>
+              <input
+                id="username"
+                name="username"
+                type="text"
+                value={formData.username}
+                onChange={handleChange}
+                placeholder="abdoul.mohamed"
+                autoComplete="username"
+                className={errors.username ? "input-error" : ""}
+              />
+              {errors.username && (
+                <span className="error-text">{errors.username}</span>
+              )}
+            </div>
 
             <div className="form-row-register">
               <div className="form-group">
@@ -297,7 +335,7 @@ export default function RegisterPage() {
             </div>
 
             <button type="submit" className="btn-submit" disabled={isLoading}>
-              {isLoading ? <div className="spinner" /> : "S'inscrire"}
+              {isLoading ? <div className="spinner" /> : t.auth.registerCta}
             </button>
           </form>
 

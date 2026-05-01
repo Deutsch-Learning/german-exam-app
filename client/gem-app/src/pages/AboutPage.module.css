@@ -1,0 +1,275 @@
+:root {
+  --color-primary: #d32f2f;
+  --color-bg-light: #f8f9fa;
+  --color-white: #ffffff;
+  --color-text-dark: #1a1a1a;
+  --color-text-muted: #4b5563;
+  --color-yellow: #fbc02d;
+  --shadow-soft: 0 4px 20px rgba(0, 0, 0, 0.08);
+  --shadow-hover: 0 10px 30px rgba(0, 0, 0, 0.12);
+  --radius-lg: 12px;
+  --radius-pill: 50px;
+  --transition: all 0.3s ease;
+}
+
+.pageWrapper {
+  background-color: var(--color-white);
+  min-height: 100vh;
+  font-family: "Inter", sans-serif;
+  color: var(--color-text-dark);
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 40px 20px;
+}
+
+.navbar {
+  border-bottom: 1px solid #eee;
+  background: var(--color-white);
+  padding: 15px 0;
+}
+
+.navContainer {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+}
+
+.logo {
+  height: 45px;
+}
+
+.navLinks {
+  display: none;
+  list-style: none;
+  gap: 25px;
+  align-items: center;
+}
+
+.navLinks a,
+.navLinks button,
+.navLinks li {
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--color-text-dark);
+  text-decoration: none;
+  background: none;
+  border: none;
+  font-size: 0.95rem;
+}
+
+.navLinks .active {
+  color: var(--color-primary);
+}
+
+.navRight {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.dropdownWrap {
+  position: relative;
+}
+
+.langSelector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #ddd;
+  padding: 5px 12px;
+  border-radius: 20px;
+  cursor: pointer;
+  background: #fff;
+}
+
+.langSelector img {
+  width: 22px;
+}
+
+.langMenu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 160px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  box-shadow: var(--shadow-soft);
+  padding: 6px;
+  display: grid;
+  gap: 4px;
+}
+
+.langMenu button {
+  border: none;
+  background: transparent;
+  text-align: left;
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.langMenu button:hover {
+  background: #f3f4f6;
+}
+
+.userProfile {
+  width: 35px;
+  height: 35px;
+  background: var(--color-yellow);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.userProfile img {
+  width: 20px;
+}
+
+.header {
+  margin-bottom: 60px;
+}
+
+.header h1 {
+  font-size: 2.5rem;
+  margin-bottom: 10px;
+  font-weight: 600;
+}
+
+.subtitle {
+  font-size: 1.25rem;
+  color: var(--color-text-muted);
+}
+
+.missionGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 40px;
+  align-items: start;
+}
+
+.missionCard {
+  background: var(--color-white);
+  padding: 40px;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-soft);
+  position: relative;
+}
+
+.missionIcons {
+  display: flex;
+  gap: 30px;
+  margin-bottom: 30px;
+}
+
+.missionIcons img {
+  height: 40px;
+}
+
+.missionText p {
+  line-height: 1.7;
+  font-size: 1.1rem;
+  color: var(--color-text-muted);
+  margin-bottom: 20px;
+}
+
+.sectionTitle {
+  font-size: 1.5rem;
+  margin-bottom: 25px;
+  font-weight: 600;
+}
+
+.pillarList {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.pillarCard {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  background: var(--color-white);
+  padding: 20px 25px;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-soft);
+  transition: var(--transition);
+  cursor: default;
+}
+
+.pillarCard:hover {
+  transform: translateY(-5px);
+  box-shadow: var(--shadow-hover);
+}
+
+.pillarIcon img {
+  width: 24px;
+  height: 24px;
+}
+
+.pillarCard h3 {
+  font-size: 1rem;
+  letter-spacing: 1px;
+  font-weight: 700;
+}
+
+.valuesSection {
+  margin-top: 80px;
+}
+
+.valuesGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.valueCard {
+  background: var(--color-white);
+  padding: 20px;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-soft);
+  text-align: center;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  border: 1px solid transparent;
+  transition: var(--transition);
+}
+
+.valueCard:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+@media (min-width: 768px) {
+  .navLinks {
+    display: flex;
+  }
+
+  .valuesGrid {
+    flex-direction: row;
+    justify-content: space-between;
+  }
+
+  .valueCard {
+    flex: 1;
+    border-radius: var(--radius-pill);
+  }
+}
+
+@media (min-width: 1024px) {
+  .missionGrid {
+    grid-template-columns: 1.2fr 0.8fr;
+    gap: 60px;
+  }
+
+  .container {
+    padding: 60px 20px;
+  }
+}

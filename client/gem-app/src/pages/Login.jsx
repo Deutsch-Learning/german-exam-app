@@ -1,9 +1,13 @@
 import React, { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import "./LoginPage.css";
 import logo from "../assets/images/logo.png";
+import API from "../services/api";
+import { useLanguage } from "../context/LanguageContext";
 
 export default function LoginPage() {
+  const { t } = useLanguage();
+  const navigate = useNavigate();
   const [formData, setFormData] = useState({
     email: "",
     password: "",
@@ -44,8 +48,16 @@ export default function LoginPage() {
     if (!validateForm()) return;
     setIsLoading(true);
     try {
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-      console.log("Connexion réussie", formData);
+      const res = await API.post("/login", {
+        email: formData.email,
+        password: formData.password,
+      });
+      if (res.data?.ok) {
+        localStorage.setItem("auth", JSON.stringify(res.data.user));
+        navigate("/dashboard");
+        return;
+      }
+      setErrors({ submit: res.data?.error ?? "Identifiants incorrects. Réessayez." });
     } catch {
       setErrors({ submit: "Identifiants incorrects. Réessayez." });
     } finally {
@@ -78,7 +90,7 @@ export default function LoginPage() {
           </Link>
 
           <div className="form-header">
-            <h1>Bon retour</h1>
+            <h1>{t.auth.loginTitle}</h1>
             <p>Entrez vos identifiants pour continuer vers la simulation.</p>
           </div>
 
@@ -212,7 +224,7 @@ export default function LoginPage() {
             </div>
 
             <button type="submit" className="btn-submit" disabled={isLoading}>
-              {isLoading ? <div className="spinner" /> : "Se connecter"}
+              {isLoading ? <div className="spinner" /> : t.auth.loginCta}
             </button>
           </form>
 

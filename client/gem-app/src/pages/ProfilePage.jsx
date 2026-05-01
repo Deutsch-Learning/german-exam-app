@@ -1,0 +1,199 @@
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import API from "../services/api";
+import styles from "./ProfilePage.module.css";
+import { useLanguage } from "../context/LanguageContext";
+
+export default function ProfilePage() {
+  const { t } = useLanguage();
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [user, setUser] = useState(null);
+  const [formData, setFormData] = useState({
+    username: "",
+    firstName: "",
+    lastName: "",
+    email: "",
+    dateOfBirth: "",
+  });
+
+  const auth = useMemo(() => {
+    try {
+      return JSON.parse(localStorage.getItem("auth") ?? "null");
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const fullName = useMemo(() => {
+    const first = user?.first_name ?? "";
+    const last = user?.last_name ?? "";
+    const joined = `${first} ${last}`.trim();
+    return joined || "Utilisateur";
+  }, [user]);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      if (!auth?.id) {
+        setError("Vous n’êtes pas connecté.");
+        setUser(null);
+        return;
+      }
+      const res = await API.get("/me", { headers: { "x-user-id": String(auth.id) } });
+      if (!res.data?.ok) {
+        setError(res.data?.error ?? "Impossible de charger le profil.");
+        setUser(null);
+        return;
+      }
+      setUser(res.data.user);
+      setFormData({
+        username: res.data.user.username ?? "",
+        firstName: res.data.user.first_name ?? "",
+        lastName: res.data.user.last_name ?? "",
+        email: res.data.user.email ?? "",
+        dateOfBirth: res.data.user.date_of_birth ? String(res.data.user.date_of_birth).slice(0, 10) : "",
+      });
+    } catch {
+      setError("Impossible de joindre le serveur.");
+      setUser(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [auth?.id]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const save = async (e) => {
+    e.preventDefault();
+    setError("");
+    setSuccess("");
+    setSaving(true);
+    try {
+      if (!auth?.id) {
+        setError("Vous n’êtes pas connecté.");
+        return;
+      }
+      const res = await API.put(
+        "/me",
+        {
+          username: formData.username,
+          firstName: formData.firstName,
+          lastName: formData.lastName,
+          email: formData.email,
+          dateOfBirth: formData.dateOfBirth,
+        },
+        { headers: { "x-user-id": String(auth.id) } }
+      );
+      if (!res.data?.ok) {
+        setError(res.data?.error ?? "Impossible de sauvegarder.");
+        return;
+      }
+      setUser(res.data.user);
+      localStorage.setItem("auth", JSON.stringify(res.data.user));
+      setSuccess("Profil mis à jour.");
+    } catch {
+      setError("Impossible de sauvegarder le profil.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className={styles.page}>
+      <button type="button" onClick={() => navigate("/dashboard")} className={styles.backBtn}>
+        ← Dashboard
+      </button>
+      <h1 className={styles.title}>{t.common.profile}</h1>
+
+      {error ? <p className={styles.error}>{error}</p> : null}
+      {success ? <p className={styles.success}>{success}</p> : null}
+      {loading ? <p className={styles.loading}>Chargement...</p> : null}
+
+      {!loading && user ? (
+        <div className={styles.layout}>
+          <div className={styles.card}>
+            <p>
+              <strong>Nom</strong>: {fullName}
+            </p>
+            <p>
+              <strong>Email</strong>: {user.email}
+            </p>
+            <p>
+              <strong>Date de naissance</strong>:{" "}
+              {user.date_of_birth ? new Date(user.date_of_birth).toLocaleDateString("fr-FR") : "-"}
+            </p>
+            <p>
+              <strong>Compte créé</strong>: {new Date(user.created_at).toLocaleString("fr-FR")}
+            </p>
+          </div>
+
+          <form onSubmit={save} className={styles.form}>
+            <label className={styles.label}>
+              Nom d'utilisateur
+              <input
+                name="username"
+                value={formData.username}
+                onChange={handleChange}
+                className={styles.input}
+              />
+            </label>
+            <label className={styles.label}>
+              Prénom
+              <input
+                name="firstName"
+                value={formData.firstName}
+                onChange={handleChange}
+                className={styles.input}
+              />
+            </label>
+            <label className={styles.label}>
+              Nom
+              <input
+                name="lastName"
+                value={formData.lastName}
+                onChange={handleChange}
+                className={styles.input}
+              />
+            </label>
+            <label className={styles.label}>
+              Email
+              <input
+                name="email"
+                type="email"
+                value={formData.email}
+                onChange={handleChange}
+                className={styles.input}
+              />
+            </label>
+            <label className={styles.label}>
+              Date de naissance
+              <input
+                name="dateOfBirth"
+                type="date"
+                value={formData.dateOfBirth}
+                onChange={handleChange}
+                className={styles.input}
+              />
+            </label>
+            <button type="submit" disabled={saving} className={styles.submitBtn}>
+              {saving ? "Sauvegarde..." : "Enregistrer les modifications"}
+            </button>
+          </form>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
