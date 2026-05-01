@@ -16,6 +16,7 @@ import StatCard from "../components/landing/StatCard";
 import ServiceCard from "../components/landing/ServiceCard";
 import PricingCard from "../components/landing/PricingCard";
 import TestimonialCard from "../components/landing/TestimonialCard";
+import { Link } from "react-router-dom";
 
 export default function LandingPage() {
   return (
@@ -36,9 +37,9 @@ export default function LandingPage() {
               et un encadrement continu des lacunes avant de passer l'examen
               officiel.
             </p>
-            <button className="btn btn-primary btn-large">
+            <Link className="btn btn-primary btn-large" to="/login">
               Lancer ma simulation <span className="arrow">→</span>
-            </button>
+            </Link>
           </div>
         </div>
       </section>
