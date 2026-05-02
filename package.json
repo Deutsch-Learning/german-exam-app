@@ -1,0 +1,8 @@
+{
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  },
+  "scripts": {
+  "start": "concurrently \"cd server && npm run dev\" \"cd client/gem-app && npm run dev\""
+}
+}

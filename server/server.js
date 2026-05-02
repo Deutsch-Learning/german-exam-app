@@ -5,6 +5,9 @@ const bcrypt = require("bcrypt");
 const nodemailer = require("nodemailer");
 
 const app = express();
+app.get('/', (req, res) => {
+  res.send('Server is running 🚀');
+});
 
 app.use(
   cors({
