@@ -1,132 +1,162 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import styles from "./AboutPage.module.css";
 import logo from "../assets/images/logo.png";
 import userIcon from "../assets/images/icon-profile.png";
-import iconAudio from "../assets/images/icon-audio.png";
-import iconWrite from "../assets/images/icon-write.png";
-import iconSpeak from "../assets/images/icon-speak.png";
-import iconProfile from "../assets/images/icon-profile.png";
-import trophy from "../assets/images/trophy.png";
-import { useLanguage } from "../context/LanguageContext";
+import calendarIcon from "../assets/images/calendar.png";
+import brainIcon from "../assets/images/brain.png";
+import graphIcon from "../assets/images/graph.png";
+import handshakeIcon from "../assets/images/handshake.jpg";
+import certificateIcon from "../assets/images/certificate.png";
+import BackButton from "../components/BackButton";
 import { languageOptions } from "../utils/language";
+import { useLanguage } from "../context/LanguageContext";
 
-const PillarCard = ({ icon, title }) => (
-  <div className={styles.pillarCard}>
-    <div className={styles.pillarIcon}>
-      <img src={icon} alt="" />
-    </div>
-    <h3>{title}</h3>
-  </div>
+const ChevronDownIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="6 9 12 15 18 9" />
+  </svg>
 );
 
-const ValueCard = ({ text }) => (
-  <div className={styles.valueCard}>
-    <span>{text}</span>
-  </div>
-);
-
-const AboutPage = () => {
+const Navbar = () => {
   const navigate = useNavigate();
-  const { language, setLanguage } = useLanguage();
+  const { language, setLanguage, t } = useLanguage();
   const [openLang, setOpenLang] = useState(false);
-  const selectedLanguage = languageOptions.find((o) => o.id === language) ?? languageOptions[0];
+  const [openFormation, setOpenFormation] = useState(false);
+  const selected = languageOptions.find((option) => option.id === language) ?? languageOptions[0];
 
-  const pillars = [
-    { icon: iconAudio, title: "SIMULATIONS REELLES" },
-    { icon: iconWrite, title: "CORRECTION PAR IA" },
-    { icon: iconSpeak, title: "SUIVI DE PROGRES" },
+  const modules = [
+    { id: "listen", label: t.modules.listen },
+    { id: "read", label: t.modules.read },
+    { id: "speak", label: t.modules.speak },
+    { id: "write", label: t.modules.write },
   ];
 
-  const values = ["EXCELLENCE ACADEMIQUE", "ACCESSIBILITE", "INNOVATION TECHNOLOGIQUE"];
-
   return (
-    <div className={styles.pageWrapper}>
-      <nav className={styles.navbar}>
-        <div className={styles.navContainer}>
-          <img src={logo} alt="Logo" className={styles.logo} />
-
-          <ul className={styles.navLinks}>
-            <li><button type="button" onClick={() => navigate("/")}>Accueil</button></li>
-            <li>Actualités <span>▾</span></li>
-            <li className={styles.active}>A propos <span>▾</span></li>
-            <li>Formations <span>▾</span></li>
-            <li>Pages <span>▾</span></li>
-            <li><button type="button" onClick={() => navigate("/contact")}>Contact</button></li>
-          </ul>
-
-          <div className={styles.navRight}>
-            <div className={styles.dropdownWrap}>
-              <button className={styles.langSelector} type="button" onClick={() => setOpenLang((v) => !v)}>
-                {selectedLanguage.flag ? <img src={selectedLanguage.flag} alt={selectedLanguage.label} /> : <span>🌐</span>}
-                <span>{selectedLanguage.id.toUpperCase()}</span>
-                <span>▾</span>
-              </button>
-              {openLang ? (
-                <div className={styles.langMenu}>
-                  {languageOptions.map((lang) => (
-                    <button key={lang.id} type="button" onClick={() => { setLanguage(lang.id); setOpenLang(false); }}>
-                      {lang.label}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-            <div className={styles.userProfile}>
-              <img src={userIcon} alt="User" />
-            </div>
-          </div>
+    <nav className={styles.topNav}>
+      <div className={styles.navContainer}>
+        <div className={styles.navLeft}>
+          <button type="button" className={styles.logoButton} onClick={() => navigate("/")}>
+            <img src={logo} alt="Deutsch Lernen Logo" className={styles.logo} />
+          </button>
         </div>
-      </nav>
 
-      <main className={styles.container}>
-        <header className={styles.header}>
-          <h1>A propos de nous</h1>
-          <p className={styles.subtitle}>Notre Mission : Votre Réussite</p>
-        </header>
-
-        <section className={styles.missionSection}>
-          <div className={styles.missionGrid}>
-            <article className={styles.missionCard}>
-              <div className={styles.missionIcons}>
-                <img src={iconProfile} alt="Partnership" />
-                <img src={trophy} alt="Certification" />
-              </div>
-              <div className={styles.missionText}>
-                <p>
-                  Nous avons créé le <strong>Deutsch Prüfung</strong> pour rendre les
-                  certification allemandes, moins stressantes et plus efficaces.
-                </p>
-                <p>
-                  Notre simulation en conditions réelles, couplée à la
-                  correction par IA vous guide pas à pas vers votre diplôme.
-                </p>
-              </div>
-            </article>
-
-            <aside className={styles.pillarsWrapper}>
-              <h2 className={styles.sectionTitle}>Les trois piliers de notre solution</h2>
-              <div className={styles.pillarList}>
-                {pillars.map((pillar, idx) => (
-                  <PillarCard key={idx} {...pillar} />
+        <div className={styles.navCenter}>
+          <button type="button" className={styles.navLink} onClick={() => navigate("/dashboard")}>{t.common.home}</button>
+          <button type="button" className={styles.navLink} onClick={() => navigate("/actualites")}>{t.common.news} <ChevronDownIcon /></button>
+          <button type="button" className={`${styles.navLink} ${styles.active}`} onClick={() => navigate("/about")}>{t.common.about} <ChevronDownIcon /></button>
+          <div className={styles.dropdown}>
+            <button type="button" className={styles.navLink} onClick={() => setOpenFormation((value) => !value)}>
+              {t.common.training} <ChevronDownIcon />
+            </button>
+            {openFormation ? (
+              <div className={styles.dropdownMenu}>
+                {modules.map((module) => (
+                  <button key={module.id} type="button" onClick={() => navigate(`/simulation/${module.id}`)}>
+                    {module.label}
+                  </button>
                 ))}
               </div>
-            </aside>
+            ) : null}
+          </div>
+          <button type="button" className={styles.navLink} onClick={() => navigate("/lessons")}>{t.common.pages} <ChevronDownIcon /></button>
+          <button type="button" className={styles.navLink} onClick={() => navigate("/contact")}>{t.common.contact}</button>
+        </div>
+
+        <div className={styles.navRight}>
+          <div className={styles.langWrap}>
+            <button className={styles.langButton} aria-label="Changer de langue" type="button" onClick={() => setOpenLang((value) => !value)}>
+              <img src={selected.flag} alt={selected.label} className={styles.flagIcon} />
+              <span>{selected.id.toUpperCase()}</span>
+              <ChevronDownIcon />
+            </button>
+            {openLang ? (
+              <div className={styles.langMenu}>
+                {languageOptions.map((option) => (
+                  <button key={option.id} type="button" onClick={() => { setLanguage(option.id); setOpenLang(false); }}>
+                    <img src={option.flag} alt="" />
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          <button className={styles.profileButton} aria-label={t.common.profile} type="button" onClick={() => navigate("/profile")}>
+            <div className={styles.userAvatar}>
+              <img src={userIcon} alt="" />
+            </div>
+          </button>
+        </div>
+      </div>
+    </nav>
+  );
+};
+
+const PillarCard = ({ iconPath, title }) => (
+  <div className={styles.pillarCard}>
+    <img src={iconPath} alt="" className={styles.pillarIcon} />
+    <span className={styles.pillarTitle}>{title}</span>
+  </div>
+);
+
+const ValueCard = ({ title }) => (
+  <div className={styles.valueCard}>
+    <span className={styles.valueTitle}>{title}</span>
+  </div>
+);
+
+export default function AboutPage() {
+  const { t } = useLanguage();
+  const pillars = [
+    { iconPath: calendarIcon, title: t.about.pillars[0] },
+    { iconPath: brainIcon, title: t.about.pillars[1] },
+    { iconPath: graphIcon, title: t.about.pillars[2] },
+  ];
+
+  return (
+    <div className={styles.pageContainer}>
+      <Navbar />
+
+      <main className={styles.mainContent}>
+        <BackButton fallback="/dashboard" />
+        <header className={styles.headerSection}>
+          <h1 className={styles.pageTitle}>{t.about.title}</h1>
+          <h2 className={styles.pageSubtitle}>{t.about.subtitle}</h2>
+        </header>
+
+        <section className={styles.twoColumnSection}>
+          <div className={styles.missionWrapper}>
+            <div className={styles.missionCard}>
+              <div className={styles.missionIcons}>
+                <img src={handshakeIcon} alt="Partenariat" className={`${styles.missionIcon} ${styles.handshakeIcon}`} />
+                <img src={certificateIcon} alt="Certification" className={styles.missionIcon} />
+              </div>
+              <div className={styles.missionText}>
+                <p>{t.about.mission1}</p>
+                <p>{t.about.mission2}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className={styles.pillarsWrapper}>
+            <h3 className={styles.sectionTitle}>{t.about.pillarsTitle}</h3>
+            <div className={styles.pillarsList}>
+              {pillars.map((pillar) => (
+                <PillarCard key={pillar.title} iconPath={pillar.iconPath} title={pillar.title} />
+              ))}
+            </div>
           </div>
         </section>
 
         <section className={styles.valuesSection}>
-          <h2 className={styles.sectionTitle}>Nos Valeurs</h2>
+          <h3 className={styles.sectionTitle}>{t.about.valuesTitle}</h3>
           <div className={styles.valuesGrid}>
-            {values.map((val, idx) => (
-              <ValueCard key={idx} text={val} />
+            {t.about.values.map((value) => (
+              <ValueCard key={value} title={value} />
             ))}
           </div>
         </section>
       </main>
     </div>
   );
-};
-
-export default AboutPage;
-
+}

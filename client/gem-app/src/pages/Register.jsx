@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import "./LoginPage.css";
 import logo from "../assets/images/logo.png";
@@ -101,11 +101,8 @@ export default function RegisterPage() {
             <span>Deutsch Learning</span>
           </div>
           <div className="brand-text">
-            <h2>Créez votre compte en quelques minutes.</h2>
-            <p>
-              Accédez aux simulations, suivez vos lacunes et préparez votre
-              certificat d&apos;allemand.
-            </p>
+            <h2>{t.auth.registerBrandTitle}</h2>
+            <p>{t.auth.registerBrandText}</p>
           </div>
         </div>
       </div>
@@ -113,12 +110,12 @@ export default function RegisterPage() {
       <div className="login-form-panel">
         <div className="form-container">
           <Link className="auth-back-home" to="/">
-            ← Retour à l&apos;accueil
+            ← {t.auth.backHome}
           </Link>
 
           <div className="form-header">
             <h1>{t.auth.registerTitle}</h1>
-            <p>Remplissez le formulaire pour commencer votre préparation.</p>
+            <p>{t.auth.registerIntro}</p>
           </div>
 
           <form onSubmit={handleSubmit} className="auth-form" noValidate>
@@ -129,7 +126,7 @@ export default function RegisterPage() {
             )}
 
             <div className="form-group">
-              <label htmlFor="username">Nom d'utilisateur</label>
+              <label htmlFor="username">{t.auth.username}</label>
               <input
                 id="username"
                 name="username"
@@ -147,7 +144,7 @@ export default function RegisterPage() {
 
             <div className="form-row-register">
               <div className="form-group">
-                <label htmlFor="firstName">Prénom</label>
+                <label htmlFor="firstName">{t.auth.firstName}</label>
                 <input
                   id="firstName"
                   name="firstName"
@@ -162,7 +159,7 @@ export default function RegisterPage() {
                 )}
               </div>
               <div className="form-group">
-                <label htmlFor="lastName">Nom</label>
+                <label htmlFor="lastName">{t.auth.lastName}</label>
                 <input
                   id="lastName"
                   name="lastName"
@@ -179,7 +176,7 @@ export default function RegisterPage() {
             </div>
 
             <div className="form-group">
-              <label htmlFor="reg-email">Email</label>
+              <label htmlFor="reg-email">{t.auth.email}</label>
               <input
                 id="reg-email"
                 name="email"
@@ -196,7 +193,7 @@ export default function RegisterPage() {
             </div>
 
             <div className="form-group">
-              <label htmlFor="phone">Téléphone (optionnel)</label>
+              <label htmlFor="phone">{t.auth.phoneOptional}</label>
               <input
                 id="phone"
                 name="phone"
@@ -213,7 +210,7 @@ export default function RegisterPage() {
             </div>
 
             <div className="form-group">
-              <label htmlFor="reg-password">Mot de passe</label>
+              <label htmlFor="reg-password">{t.auth.password}</label>
               <div className="password-input-wrapper">
                 <input
                   id="reg-password"
@@ -265,7 +262,7 @@ export default function RegisterPage() {
             </div>
 
             <div className="form-group">
-              <label htmlFor="confirmPassword">Confirmer le mot de passe</label>
+              <label htmlFor="confirmPassword">{t.auth.confirmPassword}</label>
               <div className="password-input-wrapper">
                 <input
                   id="confirmPassword"
@@ -327,7 +324,7 @@ export default function RegisterPage() {
                   onChange={handleChange}
                 />
                 <span className="checkbox-custom" />
-                J&apos;accepte les conditions d&apos;utilisation
+                {t.auth.terms}
               </label>
               {errors.acceptTerms && (
                 <span className="error-text">{errors.acceptTerms}</span>
@@ -340,8 +337,8 @@ export default function RegisterPage() {
           </form>
 
           <p className="form-footer">
-            Déjà un compte ?
-            <Link to="/login">Connectez-vous</Link>
+            {t.auth.alreadyAccount}
+            <Link to="/login">{t.auth.loginHere}</Link>
           </p>
         </div>
       </div>

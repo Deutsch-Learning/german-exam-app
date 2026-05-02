@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import styles from "./SimulationSelectionPage.module.css";
 
@@ -8,6 +8,7 @@ import userIcon from "../assets/images/icon-profile.png";
 import iconListen from "../assets/images/icon-audio.png";
 import iconWrite from "../assets/images/icon-write.png";
 import iconSpeak from "../assets/images/icon-speak.png";
+import BackButton from "../components/BackButton";
 import { languageOptions } from "../utils/language";
 import { useLanguage } from "../context/LanguageContext";
 
@@ -73,23 +74,23 @@ const TopNav = ({ onGoAbout, onGoProfile, onGoDashboard, onGoActualites, onGoCon
           {openFormation ? (
             <div className={styles.dropdownMenu}>
               <button type="button" className={styles.dropdownItem} onClick={() => onGoModule("listen")}>
-                Compréhension Orale
+                {t.modules.listen}
               </button>
               <button type="button" className={styles.dropdownItem} onClick={() => onGoModule("read")}>
-                Compréhension Ecrite
+                {t.modules.read}
               </button>
               <button type="button" className={styles.dropdownItem} onClick={() => onGoModule("speak")}>
-                Expression Orale
+                {t.modules.speak}
               </button>
               <button type="button" className={styles.dropdownItem} onClick={() => onGoModule("write")}>
-                Expression Ecrite
+                {t.modules.write}
               </button>
             </div>
           ) : null}
         </div>
-        <a href="#pages" className={styles.navLink}>
+        <button type="button" className={styles.navLink} onClick={() => onGoModule("lessons")}>
           {t.common.pages} <ChevronIcon />
-        </a>
+        </button>
         <button type="button" className={styles.navLink} onClick={onGoContact}>
           {t.common.contact}
         </button>
@@ -99,7 +100,7 @@ const TopNav = ({ onGoAbout, onGoProfile, onGoDashboard, onGoActualites, onGoCon
         <div className={styles.dropdown}>
           <button className={styles.langButton} aria-label="Changer de langue" type="button" onClick={() => setOpenLang((v) => !v)}>
             {selectedLanguage.flag ? <img src={selectedLanguage.flag} alt={selectedLanguage.label} className={styles.flagIcon} /> : <span className={styles.flagFallback}>🌐</span>}
-            <span>{language.toUpperCase()}</span>
+              <span>{language.toUpperCase()}</span>
             <ChevronIcon />
           </button>
           {openLang ? (
@@ -114,6 +115,7 @@ const TopNav = ({ onGoAbout, onGoProfile, onGoDashboard, onGoActualites, onGoCon
                     setOpenLang(false);
                   }}
                 >
+                  <img src={opt.flag} alt="" className={styles.flagIcon} />
                   {opt.label}
                 </button>
               ))}
@@ -131,7 +133,7 @@ const TopNav = ({ onGoAbout, onGoProfile, onGoDashboard, onGoActualites, onGoCon
   );
 };
 
-const DisciplineCard = ({ iconPath, iconNode, title, time, questions, onClick }) => (
+const DisciplineCard = ({ iconPath, iconNode, title, time, questions, minuteLabel, questionLabel, onClick }) => (
   <button type="button" className={styles.card} onClick={onClick}>
     <div className={styles.cardIconWrapper}>
       {iconNode ? iconNode : <img src={iconPath} alt={`Icone ${title}`} className={styles.cardIcon} />}
@@ -140,11 +142,11 @@ const DisciplineCard = ({ iconPath, iconNode, title, time, questions, onClick })
     <div className={styles.cardStats}>
       <div className={styles.statItem}>
         <ClockIcon />
-        <span>{time} Minutes</span>
+        <span>{time} {minuteLabel}</span>
       </div>
       <div className={styles.statItem}>
         <ClipboardIcon />
-        <span>{questions} Questions</span>
+        <span>{questions} {questionLabel}</span>
       </div>
     </div>
   </button>
@@ -152,12 +154,13 @@ const DisciplineCard = ({ iconPath, iconNode, title, time, questions, onClick })
 
 export default function SimulationSelectionPage() {
   const navigate = useNavigate();
+  const { t } = useLanguage();
 
   const disciplines = [
-    { id: "read", iconNode: <OpenBookIcon />, title: "Compréhension Ecrite", time: 60, questions: 39 },
-    { id: "listen", iconPath: iconListen, title: "Compréhension Orale", time: 60, questions: 39 },
-    { id: "write", iconPath: iconWrite, title: "Expression Ecrite", time: 60, questions: 39 },
-    { id: "speak", iconPath: iconSpeak, title: "Expression Orale", time: 60, questions: 39 },
+    { id: "read", iconNode: <OpenBookIcon />, title: t.modules.read, time: 60, questions: 39 },
+    { id: "listen", iconPath: iconListen, title: t.modules.listen, time: 60, questions: 39 },
+    { id: "write", iconPath: iconWrite, title: t.modules.write, time: 60, questions: 39 },
+    { id: "speak", iconPath: iconSpeak, title: t.modules.speak, time: 60, questions: 39 },
   ];
 
   return (
@@ -168,13 +171,14 @@ export default function SimulationSelectionPage() {
         onGoDashboard={() => navigate("/dashboard")}
         onGoActualites={() => navigate("/actualites")}
         onGoContact={() => navigate("/contact")}
-        onGoModule={(moduleId) => navigate(`/simulation/${moduleId}`)}
+        onGoModule={(moduleId) => moduleId === "lessons" ? navigate("/lessons") : navigate(`/simulation/${moduleId}`)}
       />
 
       <main className={styles.mainContent}>
+        <BackButton fallback="/dashboard" />
         <header className={styles.headerSection}>
-          <h1 className={styles.title}>Vous êtes sur le point de commencer votre immersion</h1>
-          <p className={styles.subtitle}>Choisissez une discipline pour débuter votre simulation.</p>
+          <h1 className={styles.title}>{t.simulations.title}</h1>
+          <p className={styles.subtitle}>{t.simulations.subtitle}</p>
         </header>
 
         <section className={styles.gridSection}>
@@ -187,6 +191,8 @@ export default function SimulationSelectionPage() {
                 title={discipline.title}
                 time={discipline.time}
                 questions={discipline.questions}
+                minuteLabel={t.simulations.minutes}
+                questionLabel={t.simulations.questions}
                 onClick={() => navigate(`/simulation/${discipline.id}`)}
               />
             ))}
@@ -196,4 +202,3 @@ export default function SimulationSelectionPage() {
     </div>
   );
 }
-

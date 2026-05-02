@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import "./LandingPage.css";
 import logo from "../assets/images/logo.png";
@@ -9,6 +9,10 @@ import iconSpeak from "../assets/images/icon-speak.png";
 import avatar1 from "../assets/images/avatar-1.png";
 import avatar2 from "../assets/images/avatar-2.png";
 import contactWoman from "../assets/images/contact-woman.jpg";
+import duolingoLogo from "../assets/images/Duolingo-logo.png";
+import goetheInstitutLogo from "../assets/images/goethe_institut.png";
+import tuBerlinLogo from "../assets/images/TU-Berlin.png";
+import bmflLogo from "../assets/images/BMFL.png";
 import Navbar from "../components/landing/Navbar";
 import Footer from "../components/landing/Footer";
 import StatCard from "../components/landing/StatCard";
@@ -20,7 +24,8 @@ import { useLanguage } from "../context/LanguageContext";
 
 export default function LandingPage() {
   const { hash } = useLocation();
-  const { language, setLanguage } = useLanguage();
+  const { language, setLanguage, t } = useLanguage();
+  const copy = t.landing;
   const [contactLoading, setContactLoading] = useState(false);
   const [contactMessage, setContactMessage] = useState("");
   const [contactForm, setContactForm] = useState({
@@ -31,78 +36,6 @@ export default function LandingPage() {
     message: "",
   });
 
-  const t = useMemo(() => {
-    const dict = {
-      fr: {
-        nav: { services: "Services", pricing: "Nos forfaits", contact: "Contact", login: "Connexion" },
-        heroTitleA: "Dominez l'examen d'allemand.",
-        heroTitleB: "Assurez votre certificat.",
-        heroSubtitle:
-          "Transformez votre stress en automatisme. Des simulations realistes et un encadrement continu des lacunes avant de passer l'examen officiel.",
-        launch: "Lancer ma simulation",
-        servicesTitle: "Nos services",
-        pricingTitle: "Nos forfaits",
-        testimonials: "Avis de nos candidats",
-        leaveComment: "Laissez un commentaire",
-        partners: "Nos partenaires",
-        contact: "Contactez-nous",
-        lastName: "Nom",
-        firstName: "Prenom",
-        email: "Email",
-        phone: "Telephone",
-        question: "Comment pouvons-nous vous aider ?",
-        send: "Envoyer",
-        sent: "Message envoyé avec succès.",
-        commentPrompt: "Laissez votre commentaire :",
-      },
-      en: {
-        nav: { services: "Services", pricing: "Pricing", contact: "Contact", login: "Login" },
-        heroTitleA: "Master your German exam.",
-        heroTitleB: "Secure your certificate.",
-        heroSubtitle:
-          "Turn exam stress into confidence with realistic simulations and continuous guidance before your official exam.",
-        launch: "Start my simulation",
-        servicesTitle: "Our services",
-        pricingTitle: "Our plans",
-        testimonials: "Student reviews",
-        leaveComment: "Leave a comment",
-        partners: "Our partners",
-        contact: "Contact us",
-        lastName: "Last name",
-        firstName: "First name",
-        email: "Email",
-        phone: "Phone",
-        question: "How can we help you?",
-        send: "Send",
-        sent: "Message sent successfully.",
-        commentPrompt: "Leave your comment:",
-      },
-      de: {
-        nav: { services: "Leistungen", pricing: "Pakete", contact: "Kontakt", login: "Anmelden" },
-        heroTitleA: "Meistern Sie die Deutschprüfung.",
-        heroTitleB: "Sichern Sie Ihr Zertifikat.",
-        heroSubtitle:
-          "Verwandeln Sie Prüfungsstress in Sicherheit mit realistischen Simulationen und kontinuierlicher Betreuung.",
-        launch: "Simulation starten",
-        servicesTitle: "Unsere Leistungen",
-        pricingTitle: "Unsere Pakete",
-        testimonials: "Erfahrungen unserer Kandidaten",
-        leaveComment: "Kommentar hinterlassen",
-        partners: "Unsere Partner",
-        contact: "Kontaktieren Sie uns",
-        lastName: "Nachname",
-        firstName: "Vorname",
-        email: "E-Mail",
-        phone: "Telefon",
-        question: "Wie können wir Ihnen helfen?",
-        send: "Senden",
-        sent: "Nachricht erfolgreich gesendet.",
-        commentPrompt: "Hinterlassen Sie Ihren Kommentar:",
-      },
-    };
-    return dict[language] ?? dict.fr;
-  }, [language]);
-
   useEffect(() => {
     if (hash === "#contact") {
       setTimeout(() => {
@@ -111,21 +44,19 @@ export default function LandingPage() {
     }
   }, [hash]);
 
-  const handleLanguageChange = (lang) => setLanguage(lang);
-
-  const handleContactChange = (e) => {
-    const { name, value } = e.target;
+  const handleContactChange = (event) => {
+    const { name, value } = event.target;
     setContactForm((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleContactSubmit = async (e) => {
-    e.preventDefault();
+  const handleContactSubmit = async (event) => {
+    event.preventDefault();
     setContactMessage("");
     setContactLoading(true);
     try {
       const res = await API.post("/contact", contactForm);
       if (res.data?.ok) {
-        setContactMessage(t.sent);
+        setContactMessage(copy.sent);
         setContactForm({ firstName: "", lastName: "", email: "", phone: "", message: "" });
       } else {
         setContactMessage(res.data?.error ?? "Erreur d'envoi.");
@@ -138,7 +69,7 @@ export default function LandingPage() {
   };
 
   const onLeaveComment = () => {
-    const message = window.prompt(t.commentPrompt);
+    const message = window.prompt(copy.commentPrompt);
     if (message && message.trim()) {
       window.alert("Merci pour votre commentaire.");
     }
@@ -146,38 +77,34 @@ export default function LandingPage() {
 
   return (
     <div className="landing-page">
-      <Navbar logo={logo} language={language} onChangeLanguage={handleLanguageChange} labels={t.nav} />
+      <Navbar
+        logo={logo}
+        language={language}
+        onChangeLanguage={setLanguage}
+        labels={{ ...copy.nav, lessons: t.common.lessons }}
+      />
 
-      {/* HERO SECTION */}
       <section className="hero-section">
         <div className="container hero-container">
           <div className="hero-content">
             <h1 className="hero-title">
-              {t.heroTitleA}
+              {copy.heroTitleA}
               <br />
-              {t.heroTitleB}
+              {copy.heroTitleB}
             </h1>
-            <p className="hero-subtitle">{t.heroSubtitle}</p>
+            <p className="hero-subtitle">{copy.heroSubtitle}</p>
             <Link className="btn btn-primary btn-large" to="/login">
-              {t.launch} <span className="arrow">→</span>
+              {copy.launch} <span className="arrow">→</span>
             </Link>
           </div>
         </div>
       </section>
 
-      {/* STATS SECTION */}
       <section className="stats-section">
         <div className="container stats-container">
           <StatCard
             icon={
-              <svg
-                viewBox="0 0 24 24"
-                width="32"
-                height="32"
-                stroke="currentColor"
-                strokeWidth="2"
-                fill="none"
-              >
+              <svg viewBox="0 0 24 24" width="32" height="32" stroke="currentColor" strokeWidth="2" fill="none">
                 <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
                 <circle cx="9" cy="7" r="4" />
                 <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
@@ -185,18 +112,11 @@ export default function LandingPage() {
               </svg>
             }
             value="1000+"
-            label="Etudiants actifs"
+            label={copy.stats[0]}
           />
           <StatCard
             icon={
-              <svg
-                viewBox="0 0 24 24"
-                width="32"
-                height="32"
-                stroke="currentColor"
-                strokeWidth="2"
-                fill="none"
-              >
+              <svg viewBox="0 0 24 24" width="32" height="32" stroke="currentColor" strokeWidth="2" fill="none">
                 <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" />
                 <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" />
                 <path d="M4 22h16" />
@@ -206,163 +126,118 @@ export default function LandingPage() {
               </svg>
             }
             value="99%"
-            label="Taux de reussite"
+            label={copy.stats[1]}
           />
           <StatCard
             icon={
-              <svg
-                viewBox="0 0 24 24"
-                width="32"
-                height="32"
-                stroke="currentColor"
-                strokeWidth="2"
-                fill="none"
-              >
+              <svg viewBox="0 0 24 24" width="32" height="32" stroke="currentColor" strokeWidth="2" fill="none">
                 <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
               </svg>
             }
             value="4.9/5"
-            label="Note moyenne"
+            label={copy.stats[2]}
           />
         </div>
       </section>
 
-      {/* SERVICES SECTION */}
       <section className="services-section" id="services">
         <div className="container">
-          <h2 className="section-title">{t.servicesTitle}</h2>
+          <h2 className="section-title">{copy.servicesTitle}</h2>
           <div className="services-grid">
-            <ServiceCard
-              iconPath={iconProfile}
-              title="Simulations d'examens realistes"
-            />
-            <ServiceCard
-              iconPath={iconAudio}
-              title="Entrainement audio et comprehension orale"
-            />
-            <ServiceCard
-              iconPath={iconWrite}
-              title="Correction d'exercices ecrits"
-            />
-            <ServiceCard
-              iconPath={iconSpeak}
-              title="Pratique de la prononciation"
-            />
+            <ServiceCard iconPath={iconProfile} title={copy.services[0]} />
+            <ServiceCard iconPath={iconAudio} title={copy.services[1]} />
+            <ServiceCard iconPath={iconWrite} title={copy.services[2]} />
+            <ServiceCard iconPath={iconSpeak} title={copy.services[3]} />
           </div>
         </div>
       </section>
 
-      {/* PRICING SECTION */}
       <section className="pricing-section" id="forfaits">
         <div className="container">
-          <h2 className="section-title">{t.pricingTitle}</h2>
+          <h2 className="section-title">{copy.pricingTitle}</h2>
           <div className="pricing-grid">
             <PricingCard
               theme="bronze"
               title="Bronze"
               price="$30.99"
-              subtitle="Ideal pour se familiariser avec l'examen"
-              features={[
-                "Test de niveau complet",
-                "Acces a 5 simulations d'examen",
-                "Correction automatique",
-                "Support par email",
-              ]}
+              subtitle={copy.pricing.bronze.subtitle}
+              features={copy.pricing.bronze.features}
             />
             <PricingCard
               theme="silver"
               title="Silver"
               price="$45.99"
-              subtitle="Le choix prefere de nos candidats"
+              subtitle={copy.pricing.silver.subtitle}
               isHighlighted={true}
-              features={[
-                "Tout le contenu Bronze",
-                "Acces illimite aux simulations",
-                "Corrections par un tuteur",
-                "Session de conversation (1h/mois)",
-                "Support prioritaire",
-              ]}
+              features={copy.pricing.silver.features}
             />
             <PricingCard
               theme="gold"
               title="Gold"
               price="$99.99"
-              subtitle="L'accompagnement premium pour reussir"
-              features={[
-                "Tout le contenu Silver",
-                "Coaching personnel",
-                "Sessions de conversation illimitees",
-                "Garantie de reussite ou rembourse",
-                "Support 24/7",
-              ]}
+              subtitle={copy.pricing.gold.subtitle}
+              features={copy.pricing.gold.features}
             />
           </div>
         </div>
       </section>
 
-      {/* TESTIMONIALS SECTION */}
       <section className="testimonials-section">
         <div className="container">
-          <h2 className="section-title">{t.testimonials}</h2>
+          <h2 className="section-title">{copy.testimonials}</h2>
           <div className="testimonials-slider">
-            <button className="slider-arrow">&lt;</button>
+            <button className="slider-arrow" type="button">&lt;</button>
             <div className="testimonials-track">
-              <TestimonialCard
-                avatar={avatar1}
-                text="Grace a cette plateforme, j'ai obtenu mon certificat B2 du premier coup. Les simulations sont extremement fideles a la realite."
-              />
-              <TestimonialCard
-                avatar={avatar2}
-                text="Un accompagnement exceptionnel. Le suivi personnalise m'a permis de corriger mes erreurs recurrentes a l'ecrit."
-              />
+              <TestimonialCard avatar={avatar1} text={copy.testimonialsText[0]} />
+              <TestimonialCard avatar={avatar2} text={copy.testimonialsText[1]} />
             </div>
-            <button className="slider-arrow">&gt;</button>
+            <button className="slider-arrow" type="button">&gt;</button>
           </div>
           <div className="text-center">
-            <button className="btn btn-primary mt-4" type="button" onClick={onLeaveComment}>{t.leaveComment}</button>
+            <button className="btn btn-primary mt-4" type="button" onClick={onLeaveComment}>
+              {copy.leaveComment}
+            </button>
           </div>
         </div>
       </section>
 
-      {/* PARTNERS SECTION */}
       <section className="partners-section">
         <div className="container">
-          <h2 className="section-title">{t.partners}</h2>
+          <h2 className="section-title">{copy.partners}</h2>
           <div className="partners-grid">
-            <img src="https://upload.wikimedia.org/wikipedia/commons/0/0f/Logo_Goethe-Institut.svg" alt="Goethe Institut" />
-            <img src="https://upload.wikimedia.org/wikipedia/commons/1/17/Duolingo_logo.svg" alt="Duolingo" />
-            <img src="https://upload.wikimedia.org/wikipedia/commons/3/3f/Technische_Universit%C3%A4t_Berlin_Logo.svg" alt="TU Berlin" />
-            <img src="https://upload.wikimedia.org/wikipedia/commons/1/18/BAMF_Logo.svg" alt="BAMF" />
+            <img src={duolingoLogo} alt="Duolingo" />
+            <img src={goetheInstitutLogo} alt="Goethe Institut" />
+            <img src={tuBerlinLogo} alt="TU Berlin" />
+            <img src={bmflLogo} alt="BMFL" />
           </div>
         </div>
       </section>
 
-      {/* CONTACT SECTION */}
       <section className="contact-section" id="contact">
         <div className="container">
-          <h2 className="section-title">{t.contact}</h2>
+          <h2 className="section-title">{copy.contact}</h2>
           <div className="contact-container">
             <div className="contact-image">
-              <img src={contactWoman} alt="Contact us" />
+              <img src={contactWoman} alt={copy.contact} />
             </div>
             <form className="contact-form" onSubmit={handleContactSubmit}>
               <div className="form-row">
-                <input type="text" name="lastName" value={contactForm.lastName} onChange={handleContactChange} placeholder={t.lastName} required />
-                <input type="text" name="firstName" value={contactForm.firstName} onChange={handleContactChange} placeholder={t.firstName} required />
+                <input type="text" name="lastName" value={contactForm.lastName} onChange={handleContactChange} placeholder={copy.lastName} required />
+                <input type="text" name="firstName" value={contactForm.firstName} onChange={handleContactChange} placeholder={copy.firstName} required />
               </div>
-              <input type="email" name="email" value={contactForm.email} onChange={handleContactChange} placeholder={t.email} required />
-              <input type="tel" name="phone" value={contactForm.phone} onChange={handleContactChange} placeholder={t.phone} />
+              <input type="email" name="email" value={contactForm.email} onChange={handleContactChange} placeholder={copy.email} required />
+              <input type="tel" name="phone" value={contactForm.phone} onChange={handleContactChange} placeholder={copy.phone} />
               <textarea
                 name="message"
                 value={contactForm.message}
                 onChange={handleContactChange}
-                placeholder={t.question}
+                placeholder={copy.question}
                 rows="4"
                 required
               />
               {contactMessage ? <p className="contact-feedback">{contactMessage}</p> : null}
               <button type="submit" className="btn btn-primary btn-full">
-                {contactLoading ? "..." : t.send}
+                {contactLoading ? "..." : copy.send}
               </button>
             </form>
           </div>

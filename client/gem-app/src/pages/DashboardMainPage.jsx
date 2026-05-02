@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+/* eslint-disable react-hooks/set-state-in-effect */
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import styles from "./DashboardPage.module.css";
 import API from "../services/api";
@@ -6,11 +7,18 @@ import API from "../services/api";
 import logo from "../assets/images/logo.png";
 import userIcon from "../assets/images/icon-profile.png";
 import { languageOptions } from "../utils/language";
+import { readSimulationHistory } from "../utils/simulationHistory";
 import { useLanguage } from "../context/LanguageContext";
 
-const formatDateFr = (iso) => {
+const formatDateTimeFr = (iso) => {
   try {
-    return new Date(iso).toLocaleDateString("fr-FR");
+    return new Date(iso).toLocaleString("fr-FR", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
   } catch {
     return "-";
   }
@@ -76,6 +84,7 @@ const LanguageDropdown = ({ language, setLanguage }) => {
         <div className={styles.dropdownMenu}>
           {languageOptions.map((opt) => (
             <button key={opt.id} type="button" className={styles.dropdownItem} onClick={() => { setLanguage(opt.id); setOpen(false); }}>
+              {opt.flag ? <img src={opt.flag} alt="" className={styles.flagIconMenu} /> : null}
               {opt.label}
             </button>
           ))}
@@ -85,7 +94,7 @@ const LanguageDropdown = ({ language, setLanguage }) => {
   );
 };
 
-const TopNav = ({ onToggleMenu, onGoProfile, onGoActualites, onGoAbout, onGoContact, onGoModule, language, setLanguage, labels }) => {
+const TopNav = ({ onToggleMenu, onGoProfile, onGoActualites, onGoAbout, onGoContact, onGoModule, onGoLessons, language, setLanguage, labels }) => {
   const [openFormation, setOpenFormation] = useState(false);
 
   return (
@@ -102,14 +111,14 @@ const TopNav = ({ onToggleMenu, onGoProfile, onGoActualites, onGoAbout, onGoCont
           <button type="button" className={`${styles.linkBtn} ${styles.withDropdown}`} onClick={() => setOpenFormation((v) => !v)}>{labels.training} <ChevronDownIcon /></button>
           {openFormation ? (
             <div className={styles.dropdownMenu}>
-              <button type="button" className={styles.dropdownItem} onClick={() => onGoModule("listen")}>Compréhension Orale</button>
-              <button type="button" className={styles.dropdownItem} onClick={() => onGoModule("read")}>Compréhension Ecrite</button>
-              <button type="button" className={styles.dropdownItem} onClick={() => onGoModule("speak")}>Expression Orale</button>
-              <button type="button" className={styles.dropdownItem} onClick={() => onGoModule("write")}>Expression Ecrite</button>
+              <button type="button" className={styles.dropdownItem} onClick={() => onGoModule("listen")}>{labels.modules.listen}</button>
+              <button type="button" className={styles.dropdownItem} onClick={() => onGoModule("read")}>{labels.modules.read}</button>
+              <button type="button" className={styles.dropdownItem} onClick={() => onGoModule("speak")}>{labels.modules.speak}</button>
+              <button type="button" className={styles.dropdownItem} onClick={() => onGoModule("write")}>{labels.modules.write}</button>
             </div>
           ) : null}
         </div>
-        <a href="/simulations" className={styles.withDropdown}>{labels.pages} <ChevronDownIcon /></a>
+        <button type="button" className={styles.linkBtn} onClick={onGoLessons}>{labels.pages} <ChevronDownIcon /></button>
         <button type="button" className={styles.linkBtn} onClick={onGoContact}>{labels.contact}</button>
       </div>
       <div className={styles.navRight}>
@@ -147,12 +156,12 @@ const Sidebar = ({ isOpen, onClose, onGoProfile, onGoSimulations, onGoProgress, 
   );
 };
 
-const ProgressCard = ({ progress }) => {
+const ProgressCard = ({ progress, labels }) => {
   const percent = progress?.percent ?? 0;
   const level = progress?.currentLevel ?? "B2";
   return (
     <div className={styles.card}>
-      <h3 className={styles.cardTitle}>Mon progrès de Certification</h3>
+      <h3 className={styles.cardTitle}>{labels.certificationProgress}</h3>
       <div className={styles.chartContainer}>
         <svg viewBox="0 0 36 36" className={styles.donutChart}>
           <path className={styles.donutBg} d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
@@ -161,16 +170,16 @@ const ProgressCard = ({ progress }) => {
         </svg>
       </div>
       <div className={styles.legendContainer}>
-        <div className={styles.legendItem}><div className={styles.legendBox} style={{ backgroundColor: "#facc15" }} /><span>Niveau actuel au {level}</span></div>
-        <div className={styles.legendItem}><div className={styles.legendBox} style={{ backgroundColor: "#e5e7eb" }} /><span>Objectif à atteindre</span></div>
+        <div className={styles.legendItem}><div className={styles.legendBox} style={{ backgroundColor: "#facc15" }} /><span>{labels.currentLevel} {level}</span></div>
+        <div className={styles.legendItem}><div className={styles.legendBox} style={{ backgroundColor: "#e5e7eb" }} /><span>{labels.target}</span></div>
       </div>
     </div>
   );
 };
 
-const RecommendationsCard = ({ recommendations }) => (
+const RecommendationsCard = ({ recommendations, labels }) => (
   <div className={styles.card}>
-    <h3 className={styles.cardTitle}>Recommandations de Révision</h3>
+    <h3 className={styles.cardTitle}>{labels.recommendations}</h3>
     <div className={styles.recommendationsList}>
       {(recommendations?.length ? recommendations : ["Améliorer l'expression Ecrite"]).slice(0, 3).map((rec, index) => (
         <div key={index} className={styles.recommendationItem}><div className={styles.redPill} /><p>{rec}</p></div>
@@ -217,9 +226,9 @@ const buildHexRings = (radius, center = 120) =>
     })
     .join(" ");
 
-const SkillsCard = ({ scores }) => (
+const SkillsCard = ({ scores, labels, moduleLabels }) => (
   <div className={`${styles.card} ${styles.skillsCard}`}>
-    <h3 className={styles.cardTitle}>Mon Equilibre de compétences</h3>
+    <h3 className={styles.cardTitle}>{labels.skillsBalance}</h3>
     <div className={styles.hexMapContainer}>
       <svg viewBox="0 0 240 240" className={styles.hexMap} role="img" aria-label="Carte de maîtrise des compétences">
         <polygon points={buildHexRings(96)} className={styles.hexRingOuter} />
@@ -236,7 +245,7 @@ const SkillsCard = ({ scores }) => (
           const p = labelPosition(idx);
           return (
             <text key={skill.key} x={p.x} y={p.y} className={styles.hexLabel}>
-              {skill.label}
+            {moduleLabels?.[skill.key] ?? skill.label}
             </text>
           );
         })}
@@ -249,26 +258,29 @@ const SkillsCard = ({ scores }) => (
   </div>
 );
 
-const RecentSimulationsCard = ({ simulations }) => (
+const RecentSimulationsCard = ({ simulations, labels, onResume, onMore }) => (
   <div className={styles.card}>
-    <h3 className={styles.cardTitle}>Mes simulations récentes</h3>
+    <div className={styles.cardTitleRow}>
+      <h3 className={styles.cardTitle}>{labels.recent}</h3>
+      <button type="button" className={styles.moreButton} onClick={onMore}>More</button>
+    </div>
     <div className={styles.simulationList}>
-      {simulations?.length ? simulations.slice(0, 4).map((sim) => (
-        <div key={sim.id} className={styles.simCardInner}>
-          <div className={styles.simCardHeader}><h4>{sim.exam_name}</h4><ChevronRightIcon /></div>
+      {simulations?.length ? simulations.slice(0, 3).map((sim) => (
+        <div key={sim.id} className={`${styles.simCardInner} ${styles.resumeCard}`}>
+          <button type="button" className={styles.resumeCardButton} onClick={() => onResume(sim)}>
+            <div className={styles.simCardHeader}><h4>{sim.title ?? sim.exam_name}</h4><ChevronRightIcon /></div>
+            <p className={styles.simDate}>{sim.moduleType}</p>
+            <div className={styles.resumeProgressTrack}><span style={{ width: `${sim.progressPercent ?? sim.score_pct ?? 0}%` }} /></div>
+          </button>
           <div className={styles.simCardBody}>
             <div>
-              <p className={styles.simDate}>Date : {formatDateFr(sim.taken_at)}</p>
-              <p className={styles.simScore}>{sim.score_pct}%</p>
+              <p className={styles.simDate}>Dernier acces : {formatDateTimeFr(sim.lastAccessedAt ?? sim.taken_at)}</p>
+              <p className={styles.simScore}>{sim.progressPercent ?? sim.score_pct ?? 0}% completed</p>
             </div>
-            <button className={styles.btnDetails} onClick={() => {
-              const recs = sim.ai_corrections?.recommendations;
-              const text = Array.isArray(recs) && recs.length ? recs.map((r) => `- ${r}`).join("\n") : "Aucune correction IA enregistrée.";
-              window.alert(text);
-            }}>Détails</button>
+            <button className={styles.btnDetails} onClick={() => onResume(sim)}>Resume</button>
           </div>
         </div>
-      )) : <p className={styles.simDate}>Aucune simulation disponible.</p>}
+      )) : <p className={styles.simDate}>{labels.none}</p>}
     </div>
   </div>
 );
@@ -278,6 +290,7 @@ export default function DashboardMainPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { language, setLanguage, t } = useLanguage();
   const [data, setData] = useState(null);
+  const [localSimulations, setLocalSimulations] = useState(() => readSimulationHistory());
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
@@ -303,6 +316,15 @@ export default function DashboardMainPage() {
 
   useEffect(() => { fetchDashboard(); }, [fetchDashboard]);
 
+  const refreshLocalSimulations = useCallback(() => {
+    setLocalSimulations(readSimulationHistory());
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener("focus", refreshLocalSimulations);
+    return () => window.removeEventListener("focus", refreshLocalSimulations);
+  }, [refreshLocalSimulations]);
+
   const displayName = useMemo(() => {
     const first = data?.user?.first_name ?? "";
     const last = data?.user?.last_name ?? "";
@@ -325,10 +347,11 @@ export default function DashboardMainPage() {
       pages: common.pages,
       contact: common.contact,
       profile: common.profile,
-      progress: language === "de" ? "Fortschritt" : language === "en" ? "Progress" : "Progrès",
+      progress: common.progress,
       logout: common.logout,
+      modules: t.modules,
     };
-  }, [language, t]);
+  }, [t]);
 
   return (
     <div className={styles.appWrapper}>
@@ -339,6 +362,7 @@ export default function DashboardMainPage() {
         onGoAbout={() => navigate("/about")}
         onGoContact={() => navigate("/contact")}
         onGoModule={(moduleId) => navigate(`/simulation/${moduleId}`)}
+        onGoLessons={() => navigate("/lessons")}
         language={language}
         setLanguage={setLanguage}
         labels={labels}
@@ -357,22 +381,28 @@ export default function DashboardMainPage() {
 
         <main className={styles.contentArea}>
           <header className={styles.pageHeader}>
-            <h1>Bienvenue {loading ? "..." : displayName}</h1>
+            <h1>{t.dashboard.welcome} {loading ? "..." : displayName}</h1>
             {error ? <p className={styles.errorText}>{error}</p> : null}
           </header>
           <div className={styles.dashboardGrid}>
             <div className={styles.colLeft}>
-              <ProgressCard progress={data?.progress} />
-              <RecommendationsCard recommendations={data?.recommendations ?? []} />
+              <ProgressCard progress={data?.progress} labels={t.dashboard} />
+              <RecommendationsCard recommendations={data?.recommendations ?? []} labels={t.dashboard} />
             </div>
-            <div className={styles.colCenter}><SkillsCard scores={data?.skills} /></div>
-            <div className={styles.colRight}><RecentSimulationsCard simulations={data?.simulations ?? []} /></div>
+            <div className={styles.colCenter}><SkillsCard scores={data?.skills} labels={t.dashboard} moduleLabels={t.modules} /></div>
+            <div className={styles.colRight}>
+              <RecentSimulationsCard
+                simulations={localSimulations}
+                labels={t.dashboard}
+                onResume={(simulation) => navigate(simulation.route)}
+                onMore={() => navigate("/recent-simulations")}
+              />
+            </div>
           </div>
         </main>
       </div>
 
-      <button className={styles.floatingCta} onClick={() => navigate("/simulations")}>COMMENCER UNE NOUVELLE SIMULATION</button>
+      <button className={styles.floatingCta} onClick={() => navigate("/simulations")}>{t.dashboard.newSimulation}</button>
     </div>
   );
 }
-

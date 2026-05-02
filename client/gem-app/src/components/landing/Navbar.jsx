@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { languageOptions } from "../../utils/language";
 
@@ -19,6 +19,7 @@ export default function Navbar({ logo, language = "fr", onChangeLanguage, labels
         <nav className="desktop-nav">
           <a href="#services">{labels.services}</a>
           <a href="#forfaits">{labels.pricing}</a>
+          {labels.lessons ? <Link to="/lessons">{labels.lessons}</Link> : null}
           <a href="#contact">{labels.contact}</a>
           <div className="language-selector">
             <button
@@ -45,6 +46,7 @@ export default function Navbar({ logo, language = "fr", onChangeLanguage, labels
                       setOpenLang(false);
                     }}
                   >
+                    <img src={item.flag} alt="" />
                     {item.label}
                   </button>
                 ))}

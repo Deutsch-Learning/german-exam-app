@@ -1,12 +1,12 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+/* eslint-disable react-hooks/set-state-in-effect */
+import { useCallback, useEffect, useMemo, useState } from "react";
 import API from "../services/api";
 import styles from "./ProfilePage.module.css";
+import BackButton from "../components/BackButton";
 import { useLanguage } from "../context/LanguageContext";
 
 export default function ProfilePage() {
   const { t } = useLanguage();
-  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -40,7 +40,7 @@ export default function ProfilePage() {
     setError("");
     try {
       if (!auth?.id) {
-        setError("Vous n’êtes pas connecté.");
+        setError("Utilisateur non connecté.");
         setUser(null);
         return;
       }
@@ -70,19 +70,19 @@ export default function ProfilePage() {
     load();
   }, [load]);
 
-  const handleChange = (e) => {
-    const { name, value } = e.target;
+  const handleChange = (event) => {
+    const { name, value } = event.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  const save = async (e) => {
-    e.preventDefault();
+  const save = async (event) => {
+    event.preventDefault();
     setError("");
     setSuccess("");
     setSaving(true);
     try {
       if (!auth?.id) {
-        setError("Vous n’êtes pas connecté.");
+        setError("Utilisateur non connecté.");
         return;
       }
       const res = await API.put(
@@ -102,7 +102,7 @@ export default function ProfilePage() {
       }
       setUser(res.data.user);
       localStorage.setItem("auth", JSON.stringify(res.data.user));
-      setSuccess("Profil mis à jour.");
+      setSuccess(t.profilePage.saved);
     } catch {
       setError("Impossible de sauvegarder le profil.");
     } finally {
@@ -112,83 +112,54 @@ export default function ProfilePage() {
 
   return (
     <div className={styles.page}>
-      <button type="button" onClick={() => navigate("/dashboard")} className={styles.backBtn}>
-        ← Dashboard
-      </button>
+      <BackButton fallback="/dashboard" label={t.common.back} />
       <h1 className={styles.title}>{t.common.profile}</h1>
 
       {error ? <p className={styles.error}>{error}</p> : null}
       {success ? <p className={styles.success}>{success}</p> : null}
-      {loading ? <p className={styles.loading}>Chargement...</p> : null}
+      {loading ? <p className={styles.loading}>{t.common.loading}</p> : null}
 
       {!loading && user ? (
         <div className={styles.layout}>
           <div className={styles.card}>
             <p>
-              <strong>Nom</strong>: {fullName}
+              <strong>{t.profilePage.fullName}</strong>: {fullName}
             </p>
             <p>
               <strong>Email</strong>: {user.email}
             </p>
             <p>
-              <strong>Date de naissance</strong>:{" "}
+              <strong>{t.profilePage.birthDate}</strong>:{" "}
               {user.date_of_birth ? new Date(user.date_of_birth).toLocaleDateString("fr-FR") : "-"}
             </p>
             <p>
-              <strong>Compte créé</strong>: {new Date(user.created_at).toLocaleString("fr-FR")}
+              <strong>{t.profilePage.createdAt}</strong>: {new Date(user.created_at).toLocaleString("fr-FR")}
             </p>
           </div>
 
           <form onSubmit={save} className={styles.form}>
             <label className={styles.label}>
-              Nom d'utilisateur
-              <input
-                name="username"
-                value={formData.username}
-                onChange={handleChange}
-                className={styles.input}
-              />
+              {t.profilePage.username}
+              <input name="username" value={formData.username} onChange={handleChange} className={styles.input} />
             </label>
             <label className={styles.label}>
-              Prénom
-              <input
-                name="firstName"
-                value={formData.firstName}
-                onChange={handleChange}
-                className={styles.input}
-              />
+              {t.profilePage.firstName}
+              <input name="firstName" value={formData.firstName} onChange={handleChange} className={styles.input} />
             </label>
             <label className={styles.label}>
-              Nom
-              <input
-                name="lastName"
-                value={formData.lastName}
-                onChange={handleChange}
-                className={styles.input}
-              />
+              {t.profilePage.lastName}
+              <input name="lastName" value={formData.lastName} onChange={handleChange} className={styles.input} />
             </label>
             <label className={styles.label}>
               Email
-              <input
-                name="email"
-                type="email"
-                value={formData.email}
-                onChange={handleChange}
-                className={styles.input}
-              />
+              <input name="email" type="email" value={formData.email} onChange={handleChange} className={styles.input} />
             </label>
             <label className={styles.label}>
-              Date de naissance
-              <input
-                name="dateOfBirth"
-                type="date"
-                value={formData.dateOfBirth}
-                onChange={handleChange}
-                className={styles.input}
-              />
+              {t.profilePage.birthDate}
+              <input name="dateOfBirth" type="date" value={formData.dateOfBirth} onChange={handleChange} className={styles.input} />
             </label>
             <button type="submit" disabled={saving} className={styles.submitBtn}>
-              {saving ? "Sauvegarde..." : "Enregistrer les modifications"}
+              {saving ? t.profilePage.saving : t.profilePage.saveChanges}
             </button>
           </form>
         </div>
@@ -196,4 +167,3 @@ export default function ProfilePage() {
     </div>
   );
 }
-

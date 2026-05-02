@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import "./LoginPage.css";
 import logo from "../assets/images/logo.png";
@@ -74,11 +74,8 @@ export default function LoginPage() {
             <span>Deutsch Learning</span>
           </div>
           <div className="brand-text">
-            <h2>Préparez-vous à l&apos;examen d&apos;allemand.</h2>
-            <p>
-              Simulations réalistes, suivi des progrès et accompagnement pour
-              passer l&apos;examen en confiance.
-            </p>
+            <h2>{t.auth.loginBrandTitle}</h2>
+            <p>{t.auth.loginBrandText}</p>
           </div>
         </div>
       </div>
@@ -86,12 +83,12 @@ export default function LoginPage() {
       <div className="login-form-panel">
         <div className="form-container">
           <Link className="auth-back-home" to="/">
-            ← Retour à l&apos;accueil
+            ← {t.auth.backHome}
           </Link>
 
           <div className="form-header">
             <h1>{t.auth.loginTitle}</h1>
-            <p>Entrez vos identifiants pour continuer vers la simulation.</p>
+            <p>{t.auth.loginIntro}</p>
           </div>
 
           <div className="social-login">
@@ -125,7 +122,7 @@ export default function LoginPage() {
           </div>
 
           <div className="divider">
-            <span>ou avec votre email</span>
+            <span>{t.auth.emailLogin}</span>
           </div>
 
           <form onSubmit={handleSubmit} className="auth-form" noValidate>
@@ -136,7 +133,7 @@ export default function LoginPage() {
             )}
 
             <div className="form-group">
-              <label htmlFor="email">Email</label>
+              <label htmlFor="email">{t.auth.email}</label>
               <input
                 id="email"
                 name="email"
@@ -154,7 +151,7 @@ export default function LoginPage() {
             </div>
 
             <div className="form-group">
-              <label htmlFor="password">Mot de passe</label>
+              <label htmlFor="password">{t.auth.password}</label>
               <div className="password-input-wrapper">
                 <input
                   id="password"
@@ -216,10 +213,10 @@ export default function LoginPage() {
                   onChange={handleChange}
                 />
                 <span className="checkbox-custom" />
-                Se souvenir de moi
+                {t.auth.remember}
               </label>
               <a href="#forgot" className="link-forgot">
-                Mot de passe oublié ?
+                {t.auth.forgot}
               </a>
             </div>
 
@@ -229,8 +226,8 @@ export default function LoginPage() {
           </form>
 
           <p className="form-footer">
-            Pas encore de compte ?
-            <Link to="/register">Inscrivez-vous ici</Link>
+            {t.auth.noAccount}
+            <Link to="/register">{t.auth.signupHere}</Link>
           </p>
         </div>
       </div>

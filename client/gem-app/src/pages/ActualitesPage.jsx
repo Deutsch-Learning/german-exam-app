@@ -1,43 +1,19 @@
-import React from "react";
+import BackButton from "../components/BackButton";
 import { useLanguage } from "../context/LanguageContext";
 
-const news = [
-  {
-    title: "Nouveaux sujets B2 ajoutés",
-    date: "Mai 2026",
-    text: "10 nouvelles simulations orientées grammaire et compréhension orale sont disponibles.",
-  },
-  {
-    title: "Atelier live : réussir l'expression écrite",
-    date: "Avril 2026",
-    text: "Webinaire hebdomadaire avec correction de copies et méthodologie d'examen.",
-  },
-  {
-    title: "Mise à jour des recommandations IA",
-    date: "Mars 2026",
-    text: "Les feedbacks sont désormais plus détaillés avec priorisation des lacunes.",
-  },
-];
-
 export default function ActualitesPage() {
-  const { language, t } = useLanguage();
-  const heading = language === "de" ? "Nachrichten" : language === "en" ? "News" : "Actualités";
-  const subtitle =
-    language === "de"
-      ? "Hier finden Sie aktuelle Neuigkeiten, Lernressourcen und Plattform-Updates."
-      : language === "en"
-      ? "Find the latest updates, resources, and exam preparation announcements."
-      : "Retrouvez ici les dernières nouvelles, ressources et mises à jour de préparation à l'examen.";
+  const { t } = useLanguage();
 
   return (
     <div style={{ minHeight: "100vh", background: "#f8fafc", padding: 24, fontFamily: "Inter, sans-serif" }}>
-      <div style={{ maxWidth: 980, margin: "0 auto" }}>
-        <h1 style={{ marginTop: 0 }}>{heading}</h1>
-        <p style={{ color: "#6b7280", marginBottom: 20 }}>
-          {subtitle}
-        </p>
+      <div style={{ maxWidth: 980, margin: "0 auto", display: "grid", gap: 18 }}>
+        <BackButton fallback="/dashboard" />
+        <div>
+          <h1 style={{ marginTop: 0 }}>{t.newsPage.title}</h1>
+          <p style={{ color: "#6b7280", marginBottom: 20 }}>{t.newsPage.subtitle}</p>
+        </div>
         <div style={{ display: "grid", gap: 14 }}>
-          {news.map((item) => (
+          {t.newsPage.items.map((item) => (
             <article
               key={item.title}
               style={{
@@ -58,4 +34,3 @@ export default function ActualitesPage() {
     </div>
   );
 }
-

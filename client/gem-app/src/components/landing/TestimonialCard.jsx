@@ -1,5 +1,3 @@
-import React from "react";
-
 export default function TestimonialCard({ avatar, text }) {
   return (
     <div className="testimonial-card">

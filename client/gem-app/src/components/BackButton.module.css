@@ -1,0 +1,21 @@
+.backButton {
+  min-height: 38px;
+  width: fit-content;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #111827;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  font: inherit;
+  font-weight: 750;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(17, 24, 39, 0.06);
+}
+
+.backButton:hover {
+  background: #f9fafb;
+  border-color: #d1d5db;
+}

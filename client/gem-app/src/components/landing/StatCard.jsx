@@ -1,5 +1,3 @@
-import React from "react";
-
 export default function StatCard({ icon, value, label }) {
   return (
     <div className="stat-card">

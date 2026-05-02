@@ -114,6 +114,9 @@
   cursor: pointer;
   padding: 8px 10px;
   border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .dropdownItem:hover {
@@ -189,6 +192,11 @@
   max-width: 1200px;
   margin: 0 auto;
   width: 100%;
+}
+
+.mainContent > button {
+  align-self: flex-start;
+  margin-bottom: 20px;
 }
 
 /* --- HEADER SECTION --- */
@@ -323,4 +331,3 @@
     padding-left: 20px; /* Aligns the icons and text uniformly inside the card */
   }
 }
-

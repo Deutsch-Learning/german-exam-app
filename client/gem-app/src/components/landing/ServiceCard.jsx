@@ -1,5 +1,3 @@
-import React from "react";
-
 export default function ServiceCard({ iconPath, title }) {
   return (
     <div className="service-card">
