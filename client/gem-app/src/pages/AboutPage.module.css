@@ -386,6 +386,38 @@
   color: var(--color-text-main);
 }
 
+.examInfoSection {
+  margin-top: 60px;
+}
+
+.examInfoGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 18px;
+}
+
+.examInfoCard {
+  scroll-margin-top: 110px;
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-left: 5px solid var(--color-primary-red);
+  border-radius: var(--radius-md);
+  padding: 24px;
+  box-shadow: var(--shadow-sm);
+}
+
+.examInfoCard h4 {
+  margin: 0 0 10px;
+  font-size: 1.05rem;
+  color: var(--color-text-main);
+}
+
+.examInfoCard p {
+  margin: 0;
+  color: var(--color-text-muted);
+  line-height: 1.65;
+}
+
 @media (min-width: 768px) {
   .navCenter {
     display: flex;
@@ -403,6 +435,10 @@
   .valuesGrid {
     grid-template-columns: repeat(3, 1fr);
     gap: 24px;
+  }
+
+  .examInfoGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

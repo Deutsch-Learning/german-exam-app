@@ -39,6 +39,7 @@ import logo from "../assets/images/logo.png";
 import speakingImage from "../assets/images/active_people.png";
 import BackButton from "../components/BackButton";
 import { useLanguage } from "../context/LanguageContext";
+import { getSeriesById, getSeriesModuleContent } from "../data/testSeries";
 import { getProgressKey, upsertSimulationHistoryEntry } from "../utils/simulationHistory";
 
 const LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"];
@@ -875,6 +876,143 @@ const getNextLevel = (level) => {
   return LEVELS[Math.min(LEVELS.length - 1, index + 1)] ?? level;
 };
 
+const buildSeriesTask = (moduleId, task, index, content, series) => {
+  const override = content?.taskOverrides?.[index] ?? {};
+  const base = {
+    ...task,
+    ...override,
+    id: `${series.examId}-${series.id}-${moduleId}-${task.id}`,
+    hint: override.hint ?? `Use the ${series.code} context: ${content.theme}.`,
+    explanation:
+      override.explanation ??
+      `This answer is linked to ${series.examName} ${series.code}, whose theme is ${content.theme}.`,
+  };
+
+  if (moduleId === "write") {
+    return {
+      ...base,
+      title: override.title ?? `${series.code}: ${task.title}`,
+      prompt:
+        override.prompt ??
+        `${task.prompt}\n\nSeries context: ${series.theme}. Connect your answer to ${series.setting}.`,
+      criteria: override.criteria ?? [...(task.criteria ?? []), series.code],
+    };
+  }
+
+  if (moduleId === "speak") {
+    return {
+      ...base,
+      title: override.title ?? `${series.code}: ${task.title}`,
+      prompt:
+        override.prompt ??
+        `${task.prompt} Include one detail from ${series.theme} and one example from ${series.setting}.`,
+      checklist: override.checklist ?? [...(task.checklist ?? []), series.code],
+    };
+  }
+
+  if (task.type === "multiple") {
+    return {
+      ...base,
+      question:
+        override.question ??
+        `In ${series.code}, what is the main topic for this ${content.shortLabel.toLowerCase()} task?`,
+      options:
+        override.options ??
+        [
+          { value: "a", label: content.theme },
+          { value: "b", label: "a holiday recipe" },
+          { value: "c", label: "a sports ranking" },
+        ],
+      correct: override.correct ?? "a",
+    };
+  }
+
+  if (task.type === "trueFalse") {
+    return {
+      ...base,
+      question:
+        override.question ??
+        `${series.code} belongs to ${series.examName} and uses the theme ${content.theme}.`,
+      correct: override.correct ?? "true",
+    };
+  }
+
+  if (task.type === "blank") {
+    return {
+      ...base,
+      question:
+        override.question ??
+        `Complete the sentence: This exercise set is called ____.`,
+      correct: override.correct ?? series.code,
+      alternatives: override.alternatives ?? [series.id, series.code.toLowerCase()],
+    };
+  }
+
+  if (task.type === "match") {
+    const paragraphs = task.paragraphs ?? ["A", "B", "C"];
+    const headings = [
+      `${series.code} context`,
+      `Topic: ${content.theme}`,
+      `Exam: ${series.examName}`,
+      `Level: ${series.level}`,
+    ].slice(0, paragraphs.length);
+    return {
+      ...base,
+      question:
+        override.question ??
+        `Match each item to the correct ${series.code} series heading.`,
+      paragraphs,
+      headings: override.headings ?? headings,
+      correct:
+        override.correct ??
+        Object.fromEntries(paragraphs.map((paragraph, paragraphIndex) => [paragraph, headings[paragraphIndex]])),
+    };
+  }
+
+  if (task.type === "order") {
+    const events =
+      override.events ??
+      [
+        { value: "topic", label: `Identify ${content.theme}` },
+        { value: "details", label: "Note dates and key details" },
+        { value: "answer", label: "Choose the answer for the task" },
+      ];
+    return {
+      ...base,
+      question:
+        override.question ??
+        `Put the ${series.code} listening steps in the best order.`,
+      events,
+      correct: override.correct ?? events.map((event) => event.value),
+    };
+  }
+
+  return base;
+};
+
+const buildSeriesModule = (baseModule, content, series) => {
+  if (!content || !series) return baseModule;
+
+  return {
+    ...baseModule,
+    eyebrow: `${series.code} / ${baseModule.eyebrow}`,
+    examPart: `${series.examName} ${series.code} - ${baseModule.examPart}`,
+    tasks: baseModule.tasks.map((task, index) => buildSeriesTask(baseModule.id, task, index, content, series)),
+    passage: content.passage ?? baseModule.passage,
+    audio: content.audio ?? baseModule.audio,
+    focus: content.focus ?? baseModule.focus,
+    advancement: content.advancement ?? baseModule.advancement,
+    seriesContext: {
+      examId: series.examId,
+      examName: series.examName,
+      seriesId: series.id,
+      seriesCode: series.code,
+      seriesTitle: series.title,
+      theme: series.theme,
+    },
+  };
+};
+
 function FeedbackBox({ task, answer }) {
   if (!isQuestionAnswered(task, answer)) return null;
 
@@ -896,12 +1034,36 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const navigate = useNavigate();
   const params = useParams();
   const routeModuleId = moduleIdOverride ?? params.moduleId ?? "read";
-  const module = MODULES[routeModuleId] ?? MODULES.read;
+  const baseModule = MODULES[routeModuleId] ?? MODULES.read;
+  const selectedSeries = useMemo(
+    () => getSeriesById(params.examId, params.seriesId),
+    [params.examId, params.seriesId]
+  );
+  const selectedSeriesContent = useMemo(
+    () => getSeriesModuleContent(params.examId, params.seriesId, baseModule.id),
+    [baseModule.id, params.examId, params.seriesId]
+  );
+  const module = useMemo(
+    () => buildSeriesModule(baseModule, selectedSeriesContent, selectedSeries),
+    [baseModule, selectedSeriesContent, selectedSeries]
+  );
   const ModuleIcon = module.Icon;
   const moduleTitle = t.modules[module.id] ?? module.title;
   const totalTasks = module.tasks.length;
-  const progressKey = getProgressKey(module.id);
+  const progressScopeId = selectedSeries
+    ? `${selectedSeries.examId}-${selectedSeries.id}-${module.id}`
+    : module.id;
+  const progressKey = getProgressKey(progressScopeId);
   const firstTaskDuration = getTaskDuration(module, module.tasks[0]);
+  const seriesRoute = selectedSeries
+    ? `/simulations/${selectedSeries.examId}/${selectedSeries.id}`
+    : "/simulations";
+  const currentRoute = selectedSeries
+    ? `/simulation/${selectedSeries.examId}/${selectedSeries.id}/${module.id}`
+    : `/simulation/${module.id}`;
+  const examHeading = selectedSeries
+    ? `${selectedSeries.examName} ${selectedSeries.code}`
+    : "Goethe-Zertifikat B2";
 
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answers, setAnswers] = useState({});
@@ -1008,7 +1170,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
         await API.post(
           "/simulations",
           {
-            examName: `${moduleTitle} - ${simulationMode ? "Simulation" : "Entraînement"}`,
+            examName: `${examHeading} - ${moduleTitle} - ${simulationMode ? "Simulation" : "Entraînement"}`,
             scorePct: finalScore,
             levelCurrent: level,
             levelTarget: getNextLevel(level),
@@ -1025,7 +1187,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
         setResultStatus("Résultat gardé en local. Le backend n'est pas joignable pour le moment.");
       }
     },
-    [auth?.id, level, module.focus, module.id, moduleTitle, simulationMode]
+    [auth?.id, examHeading, level, module.focus, module.id, moduleTitle, simulationMode]
   );
 
   const finishModule = useCallback(() => {
@@ -1039,10 +1201,12 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
   const buildProgressSnapshot = useCallback(
     () => ({
-      moduleId: module.id,
-      moduleTitle: `Goethe B2 - ${moduleTitle}`,
+      moduleId: progressScopeId,
+      moduleTitle: selectedSeries
+        ? `${selectedSeries.examName} ${selectedSeries.code} - ${moduleTitle}`
+        : `Goethe B2 - ${moduleTitle}`,
       moduleType: module.examPart,
-      route: `/simulation/${module.id}`,
+      route: currentRoute,
       currentIndex,
       totalTasks,
       answeredCount,
@@ -1071,15 +1235,17 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       completed,
       currentIndex,
       currentTaskDuration,
+      currentRoute,
       elapsedSeconds,
       flagged,
       module.examPart,
-      module.id,
       moduleTitle,
       notes,
       prepRemaining,
       progressPercent,
+      progressScopeId,
       replaysUsed,
+      selectedSeries,
       simulationMode,
       skipped,
       speakingPhase,
@@ -2023,7 +2189,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               <RotateCcw size={16} />
               Recommencer
             </button>
-            <button type="button" className={styles.primaryButton} onClick={() => navigate("/simulations")}>
+            <button type="button" className={styles.primaryButton} onClick={() => navigate(seriesRoute)}>
               {t.modulePage.chooseModule}
               <ChevronRight size={16} />
             </button>
@@ -2049,7 +2215,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             <Home size={16} />
             {t.common.home}
           </button>
-          <button type="button" onClick={() => navigate("/simulations")}>
+          <button type="button" onClick={() => navigate(seriesRoute)}>
             <ClipboardCheck size={16} />
             {t.common.modules}
           </button>
@@ -2057,11 +2223,11 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       </nav>
 
       <main className={styles.shell}>
-        <BackButton fallback="/simulations" />
+        <BackButton fallback={seriesRoute} />
         <header className={styles.moduleHeader}>
           <div className={styles.examHeaderTop}>
             <div className={styles.titleBlock}>
-              <h1>Simulation: Goethe-Zertifikat B2</h1>
+              <h1>Simulation: {examHeading}</h1>
               <p>
                 <ModuleIcon size={18} />
                 Module: {moduleTitle} ({module.examPart})

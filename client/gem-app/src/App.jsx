@@ -16,6 +16,16 @@ import ContactPage from "./pages/ContactPage";
 import ProgressPage from "./pages/ProgressPage";
 import LessonsPage from "./pages/LessonsPage";
 import AllRecentSimulationsPage from "./pages/AllRecentSimulationsPage";
+import TopicPage from "./pages/TopicPage";
+import InfoPage from "./pages/InfoPage";
+import SeriesSelectionPage from "./pages/SeriesSelectionPage";
+import SeriesSimulationPage from "./pages/SeriesSimulationPage";
+import OffersPage from "./pages/OffersPage";
+import StartPreparationPage from "./pages/StartPreparationPage";
+import FreeTestPage from "./pages/FreeTestPage";
+import SessionExpiredPage from "./pages/SessionExpiredPage";
+import CheckoutPage from "./pages/CheckoutPage";
+import NotFoundPage from "./pages/NotFoundPage";
 import { LanguageProvider } from "./context/LanguageContext";
 
 function App() {
@@ -29,7 +39,19 @@ function App() {
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/dashboard" element={<DashboardMainPage />} />
           <Route path="/simulations" element={<SimulationSelectionPage />} />
+          <Route path="/simulations/:examId/:seriesId" element={<SeriesSimulationPage />} />
+          <Route path="/simulations/:examId" element={<SeriesSelectionPage />} />
+          <Route path="/simulation/:examId/:seriesId/:moduleId" element={<SimulationModulePage />} />
           <Route path="/simulation/:moduleId" element={<SimulationModulePage />} />
+          <Route path="/topics/:topicId" element={<TopicPage />} />
+          <Route path="/faq" element={<InfoPage type="faq" />} />
+          <Route path="/privacy-policy" element={<InfoPage type="privacy" />} />
+          <Route path="/refund-condition" element={<InfoPage type="refund" />} />
+          <Route path="/offers" element={<OffersPage />} />
+          <Route path="/checkout/:offerId" element={<CheckoutPage />} />
+          <Route path="/start-preparation" element={<StartPreparationPage />} />
+          <Route path="/free-test/:seriesId" element={<FreeTestPage />} />
+          <Route path="/session-expired" element={<SessionExpiredPage />} />
           <Route path="/reading" element={<ReadingPage />} />
           <Route path="/listening" element={<ListeningPage />} />
           <Route path="/writing" element={<WritingPage />} />
@@ -41,6 +63,7 @@ function App() {
           <Route path="/about" element={<AboutPage />} />
           <Route path="/actualites" element={<ActualitesPage />} />
           <Route path="/contact" element={<ContactPage />} />
+          <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </BrowserRouter>
     </LanguageProvider>

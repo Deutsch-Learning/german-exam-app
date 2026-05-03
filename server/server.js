@@ -5,9 +5,6 @@ const bcrypt = require("bcrypt");
 const nodemailer = require("nodemailer");
 
 const app = express();
-app.get('/', (req, res) => {
-  res.send('Server is running 🚀');
-});
 
 app.use(
   cors({
@@ -417,6 +414,9 @@ app.post("/contact", async (req, res) => {
     console.error(err);
     return res.status(500).json({ ok: false, error: "Unable to send message" });
   }
+});
+app.get('/', (req, res) => {
+  res.send('Server is running 🚀');
 });
 
 app.listen(3000, () => {
