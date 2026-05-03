@@ -82,61 +82,61 @@ export default function LandingPage() {
     {
       iconPath: iconProfile,
       title: copy.services[0],
-      description: "Practice complete exam flows with realistic timing and structure.",
+      description: copy.serviceDescriptions?.[0] ?? "Practice complete exam flows with realistic timing and structure.",
     },
     {
       iconPath: iconAudio,
       title: copy.services[1],
-      description: "Build confidence with focused listening exercises and replay practice.",
+      description: copy.serviceDescriptions?.[1] ?? "Build confidence with focused listening exercises and replay practice.",
     },
     {
       iconPath: iconWrite,
       title: copy.services[2],
-      description: "Improve written answers with correction-oriented training.",
+      description: copy.serviceDescriptions?.[2] ?? "Improve written answers with correction-oriented training.",
     },
     {
       iconPath: iconSpeak,
       title: copy.services[3],
-      description: "Train clear pronunciation and exam-ready speaking responses.",
+      description: copy.serviceDescriptions?.[3] ?? "Train clear pronunciation and exam-ready speaking responses.",
     },
     {
       iconPath: graphIcon,
-      title: "Progress Tracking",
-      description: "See your growth by skill and know what to revise next.",
+      title: copy.extraServiceTitles?.[0] ?? "Progress Tracking",
+      description: copy.serviceDescriptions?.[4] ?? "See your growth by skill and know what to revise next.",
     },
     {
       iconPath: calendarIcon,
-      title: "Flexible Schedule",
-      description: "Prepare at your own pace with sessions that fit your week.",
+      title: copy.extraServiceTitles?.[1] ?? "Flexible Schedule",
+      description: copy.serviceDescriptions?.[5] ?? "Prepare at your own pace with sessions that fit your week.",
     },
     {
       iconPath: certificateIcon,
-      title: "Certified and Recognized",
-      description: "Work toward exams trusted by universities and institutions.",
+      title: copy.extraServiceTitles?.[2] ?? "Certified and Recognized",
+      description: copy.serviceDescriptions?.[6] ?? "Work toward exams trusted by universities and institutions.",
     },
     {
       iconPath: activePeopleIcon,
-      title: "Active Community",
-      description: "Learn beside other motivated students preparing for success.",
+      title: copy.extraServiceTitles?.[3] ?? "Active Community",
+      description: copy.serviceDescriptions?.[7] ?? "Learn beside other motivated students preparing for success.",
     },
   ];
 
   const subscriptionFeatures = [
     {
       icon: <ClipboardCheck size={22} />,
-      label: "Full tests in real conditions with correction",
+      label: copy.subscriptionFeatures?.[0] ?? "Full tests in real conditions with correction",
     },
     {
       icon: <FilePenLine size={22} />,
-      label: "Online written expression tests",
+      label: copy.subscriptionFeatures?.[1] ?? "Online written expression tests",
     },
     {
       icon: <Activity size={22} />,
-      label: "Effective tracking throughout preparation",
+      label: copy.subscriptionFeatures?.[2] ?? "Effective tracking throughout preparation",
     },
     {
       icon: <Mic2 size={22} />,
-      label: "Online oral expression practice",
+      label: copy.subscriptionFeatures?.[3] ?? "Online oral expression practice",
     },
   ];
 
@@ -241,10 +241,10 @@ export default function LandingPage() {
       <section className="subscription-section">
         <div className="container subscription-container">
           <div className="subscription-copy">
-            <p className="section-kicker">Full access</p>
-            <h2>Subscribe and Enjoy Full Access to All Tests and Series</h2>
+            <p className="section-kicker">{copy.fullAccess}</p>
+            <h2>{copy.subscriptionTitle}</h2>
             <p className="subscription-intro">
-              Unlock every premium series, complete exam modules, and structured correction in one clear preparation space.
+              {copy.subscriptionIntro}
             </p>
           </div>
           <div className="subscription-panel">
@@ -257,7 +257,7 @@ export default function LandingPage() {
               ))}
             </div>
             <Link className="btn btn-primary btn-large" to="/offers">
-              View offers
+              {copy.viewOffers}
             </Link>
           </div>
         </div>
@@ -265,7 +265,7 @@ export default function LandingPage() {
 
       <section className="testimonials-section">
         <div className="container">
-          <p className="reviews-kicker">Thousands of students satisfied</p>
+          <p className="reviews-kicker">{copy.thousandsSatisfied}</p>
           <h2 className="section-title">{copy.testimonials}</h2>
           <div className="testimonials-slider">
             <button className="slider-arrow" type="button">&lt;</button>
@@ -275,7 +275,7 @@ export default function LandingPage() {
             </div>
             <button className="slider-arrow" type="button">&gt;</button>
           </div>
-          <p className="reviews-followup">Join over 1000 successful candidates who succeeded with us</p>
+          <p className="reviews-followup">{copy.reviewsFollowup}</p>
           <div className="text-center">
             <button className="btn btn-primary mt-4" type="button" onClick={onLeaveComment}>
               {copy.leaveComment}
@@ -286,7 +286,8 @@ export default function LandingPage() {
 
       <section className="trust-section">
         <div className="container">
-          <h2 className="section-title">they trust us</h2>
+          <h2 className="section-title">{copy.trustTitle}</h2>
+          <p className="trust-subtitle">{copy.trustSubtitle}</p>
         </div>
         <div className="flag-marquee" aria-label="Countries represented by our learners">
           <div className="flag-track">
@@ -318,19 +319,17 @@ export default function LandingPage() {
       <section className="launch-section">
         <div className="container launch-container">
           <div>
-            <p className="section-kicker">Special launch</p>
-            <h2>ready to test and increase your level?</h2>
-            <p>
-              join thousands of students who have passed their exams thanks to our platform
-            </p>
+            <p className="section-kicker">{copy.specialLaunch}</p>
+            <h2>{copy.launchTitle}</h2>
+            <p>{copy.launchText}</p>
           </div>
           <div className="launch-actions">
             <Link className="btn btn-primary btn-large" to="/offers">
-              View offers
+              {copy.viewOffers}
             </Link>
             <Link className="btn btn-secondary btn-large" to="/start-preparation">
               <ShieldCheck size={18} />
-              Try for free
+              {copy.tryFree}
             </Link>
           </div>
         </div>

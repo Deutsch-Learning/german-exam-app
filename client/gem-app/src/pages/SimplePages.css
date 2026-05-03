@@ -247,6 +247,22 @@
   align-items: stretch;
 }
 
+.free-series-groups {
+  display: grid;
+  gap: 24px;
+}
+
+.free-series-group {
+  display: grid;
+  gap: 12px;
+}
+
+.free-series-group h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  color: #111827;
+}
+
 .series-box {
   position: relative;
   min-height: 74px;

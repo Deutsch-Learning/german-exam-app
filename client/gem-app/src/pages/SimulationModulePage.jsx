@@ -1,6 +1,6 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   AlertCircle,
   BookOpen,
@@ -38,9 +38,12 @@ import styles from "./SimulationModulePage.module.css";
 import logo from "../assets/images/logo.png";
 import speakingImage from "../assets/images/active_people.png";
 import BackButton from "../components/BackButton";
-import { useLanguage } from "../context/LanguageContext";
+import { getTranslations } from "../context/LanguageContext";
 import { getSeriesById, getSeriesModuleContent } from "../data/testSeries";
 import { getProgressKey, upsertSimulationHistoryEntry } from "../utils/simulationHistory";
+import { canOpenSeries, getAuthUser, isVisitorSeriesAttempt } from "../utils/access";
+import { useTestProtection } from "../utils/testProtection";
+import NotFoundPage from "./NotFoundPage";
 
 const LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"];
 const PASS_SCORE = 70;
@@ -1030,8 +1033,10 @@ function FeedbackBox({ task, answer }) {
 }
 
 export default function SimulationModulePage({ moduleIdOverride }) {
-  const { t } = useLanguage();
+  useTestProtection();
+  const t = getTranslations("fr");
   const navigate = useNavigate();
+  const location = useLocation();
   const params = useParams();
   const routeModuleId = moduleIdOverride ?? params.moduleId ?? "read";
   const baseModule = MODULES[routeModuleId] ?? MODULES.read;
@@ -1043,6 +1048,13 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     () => getSeriesModuleContent(params.examId, params.seriesId, baseModule.id),
     [baseModule.id, params.examId, params.seriesId]
   );
+  const auth = useMemo(() => getAuthUser(), []);
+  const loggedIn = Boolean(auth?.id);
+  const visitorSeriesAttempt = isVisitorSeriesAttempt(selectedSeries);
+  const visitorAccessAllowed = Boolean(location.state?.visitorFreeAccess);
+  const blockedSeriesAccess = Boolean(selectedSeries && !canOpenSeries(selectedSeries));
+  const blockedVisitorRefresh = visitorSeriesAttempt && !visitorAccessAllowed;
+  const shouldPersistProgress = Boolean(auth?.id) && !blockedSeriesAccess && !blockedVisitorRefresh;
   const module = useMemo(
     () => buildSeriesModule(baseModule, selectedSeriesContent, selectedSeries),
     [baseModule, selectedSeriesContent, selectedSeries]
@@ -1115,15 +1127,23 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const audioAtSessionEnd = module.id === "listen" && audioTimestamp >= currentAudioDuration;
   const audioReplayBlocked = module.id === "listen" && replaysUsed >= AUDIO_REPLAY_LIMIT && (!audioSessionActive || audioAtSessionEnd);
 
-  const auth = useMemo(() => {
-    try {
-      return JSON.parse(localStorage.getItem("auth") ?? "null");
-    } catch {
-      return null;
-    }
-  }, []);
-
   useEffect(() => {
+    if (!shouldPersistProgress) {
+      setCurrentIndex(0);
+      setAnswers({});
+      setSkipped({});
+      setFlagged({});
+      setNotes({});
+      setElapsedSeconds(0);
+      setTimerSeconds(firstTaskDuration);
+      setSimulationMode(false);
+      setCompleted(false);
+      setWritingVersions([]);
+      setSaveStatus("Mode visiteur : la progression n'est pas sauvegardée.");
+      setRestoredKey(progressKey);
+      return;
+    }
+
     const stored = getStoredProgress(progressKey);
     const restoredIndex = Math.min(Math.max(0, Number(stored?.currentIndex) || 0), totalTasks - 1);
 
@@ -1149,7 +1169,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setResultStatus("");
     setSaveStatus(stored?.savedAt ? `Dernière sauvegarde ${formatClock(new Date(stored.savedAt))}` : "Sauvegarde locale prête");
     setRestoredKey(progressKey);
-  }, [module, progressKey, totalTasks]);
+  }, [firstTaskDuration, module, progressKey, shouldPersistProgress, totalTasks]);
 
   useEffect(() => {
     if (completed) return undefined;
@@ -1257,6 +1277,11 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
   const persistProgress = useCallback(
     (message) => {
+      if (!shouldPersistProgress) {
+        setSaveStatus("Mode visiteur : la progression n'est pas sauvegardée.");
+        return;
+      }
+
       try {
         const snapshot = buildProgressSnapshot();
         localStorage.setItem(progressKey, JSON.stringify(snapshot));
@@ -1274,16 +1299,17 @@ export default function SimulationModulePage({ moduleIdOverride }) {
         setSaveStatus("Sauvegarde locale impossible : espace navigateur insuffisant.");
       }
     },
-    [buildProgressSnapshot, progressKey]
+    [buildProgressSnapshot, progressKey, shouldPersistProgress]
   );
 
   useEffect(() => {
+    if (!shouldPersistProgress) return;
     if (restoredKey !== progressKey) return;
     persistProgress(`Auto-sauvegardé à ${formatClock()}`);
-  }, [persistProgress, progressKey, restoredKey]);
+  }, [persistProgress, progressKey, restoredKey, shouldPersistProgress]);
 
   useEffect(() => {
-    if (module.id !== "write" || completed) return undefined;
+    if (module.id !== "write" || completed || !shouldPersistProgress) return undefined;
 
     const interval = window.setInterval(() => {
       const text = String(answers[currentIndex] ?? "");
@@ -1306,7 +1332,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     }, 6000);
 
     return () => window.clearInterval(interval);
-  }, [answers, completed, currentIndex, currentTask.title, module.id]);
+  }, [answers, completed, currentIndex, currentTask.title, module.id, shouldPersistProgress]);
 
   useEffect(() => {
     audioTimestampRef.current = audioTimestamp;
@@ -1902,7 +1928,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const renderListening = () => {
     const replayLimit = AUDIO_REPLAY_LIMIT;
     const replaysLeft = Math.max(0, replayLimit - replaysUsed);
-    const transcriptAvailable = !simulationMode || completed;
     const audioProgressPercent = currentAudioDuration
       ? Math.min(100, (audioTimestamp / currentAudioDuration) * 100)
       : 0;
@@ -1952,17 +1977,10 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             </button>
           </div>
 
-          {transcriptAvailable ? (
-            <details className={styles.transcriptBox}>
-              <summary>Transcript</summary>
-              <p>{module.audio.transcript}</p>
-            </details>
-          ) : (
-            <div className={styles.lockedNote}>
-              <Lock size={18} />
-              Transcript disponible seulement à la fin de la simulation.
-            </div>
-          )}
+          <div className={styles.lockedNote}>
+            <Lock size={18} />
+            Transcript hidden for test protection.
+          </div>
         </section>
 
         <section className={styles.questionPane}>
@@ -2204,17 +2222,28 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     return renderSpeaking();
   };
 
+  if (blockedSeriesAccess || blockedVisitorRefresh) {
+    return (
+      <NotFoundPage
+        title="404 error"
+        message="This test session is not available. Open a free series from the series listing to start a visitor test."
+      />
+    );
+  }
+
   return (
-    <div className={styles.page} style={{ "--module-accent": module.accent, "--module-soft": module.soft }}>
+    <div className={`${styles.page} notranslate`} translate="no" style={{ "--module-accent": module.accent, "--module-soft": module.soft }}>
       <nav className={styles.nav}>
-        <button type="button" className={styles.logoButton} onClick={() => navigate("/dashboard")} aria-label="Retour dashboard">
+        <button type="button" className={styles.logoButton} onClick={() => navigate(loggedIn ? "/dashboard" : "/")} aria-label="Retour">
           <img src={logo} alt="Deutsch Lernen" />
         </button>
         <div className={styles.navActions}>
-          <button type="button" onClick={() => navigate("/dashboard")}>
-            <Home size={16} />
-            {t.common.home}
-          </button>
+          {loggedIn ? (
+            <button type="button" onClick={() => navigate("/dashboard")}>
+              <Home size={16} />
+              {t.common.home}
+            </button>
+          ) : null}
           <button type="button" onClick={() => navigate(seriesRoute)}>
             <ClipboardCheck size={16} />
             {t.common.modules}

@@ -27,38 +27,41 @@ import SessionExpiredPage from "./pages/SessionExpiredPage";
 import CheckoutPage from "./pages/CheckoutPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import { LanguageProvider } from "./context/LanguageContext";
+import GlobalBackButton from "./components/GlobalBackButton";
+import { ProtectedRoute } from "./components/RouteGuards";
 
 function App() {
   return (
     <LanguageProvider>
       <BrowserRouter>
+        <GlobalBackButton />
         <Routes>
           <Route path="/" element={<Landing />} />
           <Route path="/landing" element={<Landing />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
-          <Route path="/dashboard" element={<DashboardMainPage />} />
-          <Route path="/simulations" element={<SimulationSelectionPage />} />
+          <Route path="/dashboard" element={<ProtectedRoute><DashboardMainPage /></ProtectedRoute>} />
+          <Route path="/simulations" element={<ProtectedRoute><SimulationSelectionPage /></ProtectedRoute>} />
           <Route path="/simulations/:examId/:seriesId" element={<SeriesSimulationPage />} />
           <Route path="/simulations/:examId" element={<SeriesSelectionPage />} />
           <Route path="/simulation/:examId/:seriesId/:moduleId" element={<SimulationModulePage />} />
-          <Route path="/simulation/:moduleId" element={<SimulationModulePage />} />
+          <Route path="/simulation/:moduleId" element={<ProtectedRoute><SimulationModulePage /></ProtectedRoute>} />
           <Route path="/topics/:topicId" element={<TopicPage />} />
           <Route path="/faq" element={<InfoPage type="faq" />} />
           <Route path="/privacy-policy" element={<InfoPage type="privacy" />} />
           <Route path="/refund-condition" element={<InfoPage type="refund" />} />
           <Route path="/offers" element={<OffersPage />} />
-          <Route path="/checkout/:offerId" element={<CheckoutPage />} />
+          <Route path="/checkout/:offerId" element={<ProtectedRoute><CheckoutPage /></ProtectedRoute>} />
           <Route path="/start-preparation" element={<StartPreparationPage />} />
           <Route path="/free-test/:seriesId" element={<FreeTestPage />} />
           <Route path="/session-expired" element={<SessionExpiredPage />} />
-          <Route path="/reading" element={<ReadingPage />} />
-          <Route path="/listening" element={<ListeningPage />} />
-          <Route path="/writing" element={<WritingPage />} />
-          <Route path="/speaking" element={<SpeakingPage />} />
-          <Route path="/profile" element={<ProfilePage />} />
-          <Route path="/progress" element={<ProgressPage />} />
-          <Route path="/recent-simulations" element={<AllRecentSimulationsPage />} />
+          <Route path="/reading" element={<ProtectedRoute><ReadingPage /></ProtectedRoute>} />
+          <Route path="/listening" element={<ProtectedRoute><ListeningPage /></ProtectedRoute>} />
+          <Route path="/writing" element={<ProtectedRoute><WritingPage /></ProtectedRoute>} />
+          <Route path="/speaking" element={<ProtectedRoute><SpeakingPage /></ProtectedRoute>} />
+          <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+          <Route path="/progress" element={<ProtectedRoute><ProgressPage /></ProtectedRoute>} />
+          <Route path="/recent-simulations" element={<ProtectedRoute><AllRecentSimulationsPage /></ProtectedRoute>} />
           <Route path="/lessons" element={<LessonsPage />} />
           <Route path="/about" element={<AboutPage />} />
           <Route path="/actualites" element={<ActualitesPage />} />

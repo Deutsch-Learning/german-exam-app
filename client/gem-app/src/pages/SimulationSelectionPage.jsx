@@ -11,6 +11,7 @@ import iconSpeak from "../assets/images/icon-speak.png";
 import BackButton from "../components/BackButton";
 import { languageOptions } from "../utils/language";
 import { useLanguage } from "../context/LanguageContext";
+import { isLoggedIn } from "../utils/access";
 
 const ChevronIcon = () => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -49,18 +50,21 @@ export const SimulationTopNav = ({ onGoAbout, onGoProfile, onGoDashboard, onGoAc
   const [openFormation, setOpenFormation] = useState(false);
   const { language, setLanguage, t } = useLanguage();
   const selectedLanguage = languageOptions.find((opt) => opt.id === language) ?? languageOptions[0];
+  const loggedIn = isLoggedIn();
 
   return (
     <nav className={styles.topNav}>
     <div className={styles.navContainer}>
       <div className={styles.navLeft}>
-        <img src={logo} alt="Deutsch Lernen Logo" className={styles.logo} onClick={onGoDashboard} style={{ cursor: "pointer" }} />
+        <img src={logo} alt="Deutsch Lernen Logo" className={styles.logo} onClick={loggedIn ? onGoDashboard : () => window.location.assign("/")} style={{ cursor: "pointer" }} />
       </div>
 
       <div className={styles.navCenter}>
-        <button type="button" className={styles.navLink} onClick={onGoDashboard}>
-          {t.common.home}
-        </button>
+        {loggedIn ? (
+          <button type="button" className={styles.navLink} onClick={onGoDashboard}>
+            {t.common.home}
+          </button>
+        ) : null}
         <button type="button" className={styles.navLink} onClick={onGoActualites}>
           {t.common.news} <ChevronIcon />
         </button>
@@ -122,11 +126,13 @@ export const SimulationTopNav = ({ onGoAbout, onGoProfile, onGoDashboard, onGoAc
             </div>
           ) : null}
         </div>
-        <button className={styles.profileButton} aria-label="Profil utilisateur" type="button" onClick={onGoProfile}>
-          <div className={styles.userAvatar}>
-            <img src={userIcon} alt="" />
-          </div>
-        </button>
+        {loggedIn ? (
+          <button className={styles.profileButton} aria-label="Profil utilisateur" type="button" onClick={onGoProfile}>
+            <div className={styles.userAvatar}>
+              <img src={userIcon} alt="" />
+            </div>
+          </button>
+        ) : null}
       </div>
     </div>
   </nav>
@@ -152,9 +158,37 @@ export const SimulationDisciplineCard = ({ iconPath, iconNode, title, time, ques
   </button>
 );
 
+export const StartConfirmationModal = ({ examName, moduleTitle, onCancel, onStart }) => (
+  <div className={styles.modalOverlay} role="presentation" onMouseDown={onCancel}>
+    <section
+      className={styles.confirmModal}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="start-confirm-title"
+      onMouseDown={(event) => event.stopPropagation()}
+    >
+      <p className={styles.modalEyebrow}>Simulation</p>
+      <h2 id="start-confirm-title">You are about to start the {examName} test</h2>
+      <p>
+        {moduleTitle ? `${moduleTitle} will begin now. ` : ""}
+        Are you ready to start?
+      </p>
+      <div className={styles.modalActions}>
+        <button type="button" className={styles.modalCancelButton} onClick={onCancel}>
+          Cancel
+        </button>
+        <button type="button" className={styles.modalStartButton} onClick={onStart}>
+          Start
+        </button>
+      </div>
+    </section>
+  </div>
+);
+
 export default function SimulationSelectionPage() {
   const navigate = useNavigate();
   const { t } = useLanguage();
+  const [pendingDiscipline, setPendingDiscipline] = useState(null);
 
   const disciplines = [
     { id: "read", iconNode: <OpenBookIcon />, title: t.modules.read, time: 60, questions: 39 },
@@ -193,12 +227,20 @@ export default function SimulationSelectionPage() {
                 questions={discipline.questions}
                 minuteLabel={t.simulations.minutes}
                 questionLabel={t.simulations.questions}
-                onClick={() => navigate(`/simulation/${discipline.id}`)}
+                onClick={() => setPendingDiscipline(discipline)}
               />
             ))}
           </div>
         </section>
       </main>
+      {pendingDiscipline ? (
+        <StartConfirmationModal
+          examName="Goethe-Zertifikat B2"
+          moduleTitle={pendingDiscipline.title}
+          onCancel={() => setPendingDiscipline(null)}
+          onStart={() => navigate(`/simulation/${pendingDiscipline.id}`)}
+        />
+      ) : null}
     </div>
   );
 }

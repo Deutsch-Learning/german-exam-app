@@ -3,6 +3,7 @@ import { Link, useLocation, useParams } from "react-router-dom";
 import "./SimplePages.css";
 import logo from "../assets/images/logo.png";
 import NotFoundPage from "./NotFoundPage";
+import { useTestProtection } from "../utils/testProtection";
 
 const questions = [
   {
@@ -26,6 +27,7 @@ const questions = [
 ];
 
 export default function FreeTestPage() {
+  useTestProtection();
   const { state } = useLocation();
   const { seriesId } = useParams();
   const [answers, setAnswers] = useState({});
@@ -52,7 +54,7 @@ export default function FreeTestPage() {
   }
 
   return (
-    <div className="simple-page">
+    <div className="simple-page notranslate" translate="no">
       <main className="simple-shell">
         <div className="simple-topbar">
           <Link className="simple-logo" to="/">

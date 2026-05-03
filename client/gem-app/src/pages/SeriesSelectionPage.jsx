@@ -4,7 +4,7 @@ import "./SimplePages.css";
 import logo from "../assets/images/logo.png";
 import NotFoundPage from "./NotFoundPage";
 import { getExamSimulation, getSeriesForExam } from "../data/testSeries";
-import { canOpenSeries } from "../utils/access";
+import { canOpenSeries, isVisitorSeriesAttempt } from "../utils/access";
 
 export default function SeriesSelectionPage() {
   const { examId } = useParams();
@@ -43,6 +43,7 @@ export default function SeriesSelectionPage() {
                 className={`series-box ${canOpen ? "" : "locked"}`}
                 key={item.id}
                 to={canOpen ? `/simulations/${examId}/${item.id}` : "/offers"}
+                state={isVisitorSeriesAttempt(item) ? { visitorFreeAccess: true } : undefined}
                 aria-label={
                   canOpen
                     ? `Open ${item.code}`

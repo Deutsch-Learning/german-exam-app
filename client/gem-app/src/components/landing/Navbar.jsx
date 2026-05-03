@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Menu, X } from "lucide-react";
+import { AlertTriangle, Info, Menu, X } from "lucide-react";
 import { aboutTestSections, currentTopics, pageLinks } from "../../data/siteContent";
 import { languageOptions } from "../../utils/language";
 
@@ -15,9 +15,9 @@ export default function Navbar({ logo, language = "fr", onChangeLanguage, labels
   );
 
   const dropdowns = [
-    { id: "topics", label: "Current topics", items: currentTopics },
-    { id: "about", label: "About TestDaF/DSH", items: aboutTestSections },
-    { id: "pages", label: "Pages", items: pageLinks },
+    { id: "topics", label: labels.currentTopics ?? "Current topics", items: currentTopics },
+    { id: "about", label: labels.aboutTests ?? "About TestDaF/DSH", items: aboutTestSections },
+    { id: "pages", label: labels.pages ?? "Pages", items: pageLinks },
   ];
 
   const closeMenus = () => {
@@ -26,7 +26,65 @@ export default function Navbar({ logo, language = "fr", onChangeLanguage, labels
     setMobileOpen(false);
   };
 
-  const renderDropdown = ({ id, label, items }) => (
+  const renderTopicDropdown = ({ id, label, items }) => {
+    const topicOpen = openDropdown === id || items.some((item) => item.id === openDropdown);
+
+    return (
+    <div
+      className={`nav-dropdown ${topicOpen ? "is-open" : ""}`}
+      onMouseEnter={() => setOpenDropdown((value) => value || id)}
+      onMouseLeave={() => setOpenDropdown("")}
+    >
+      <button
+        type="button"
+        className="nav-link nav-dropdown-trigger"
+        aria-expanded={topicOpen}
+        onClick={() => setOpenDropdown((value) => (value === id ? "" : id))}
+      >
+        {label}
+        <span className="nav-chevron">v</span>
+      </button>
+      <div className="nav-dropdown-menu">
+        {items.map((item) => (
+          <div className="nav-topic-accordion" key={item.id}>
+            <button
+              type="button"
+              className="nav-topic-trigger"
+              onClick={() => setOpenDropdown((value) => (value === item.id ? id : item.id))}
+            >
+              <span>
+                <strong>{item.label}</strong>
+                <small>{item.seriesTitle}</small>
+              </span>
+              <span className="nav-chevron">{openDropdown === item.id ? "-" : "+"}</span>
+            </button>
+            {openDropdown === item.id ? (
+              <div className="nav-topic-panel">
+                <h3>{item.seriesTitle}</h3>
+                <p className="nav-topic-meta">{item.expressionType}</p>
+                <div className="nav-topic-notice">
+                  <Info size={15} />
+                  {item.notice}
+                </div>
+                <ul>
+                  {item.tasks.map((task) => (
+                    <li key={task}>{task}</li>
+                  ))}
+                </ul>
+                <div className="nav-topic-warning">
+                  <AlertTriangle size={15} />
+                  {item.warning}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </div>
+    );
+  };
+
+  const renderLinkDropdown = ({ id, label, items }) => (
     <div
       className={`nav-dropdown ${openDropdown === id ? "is-open" : ""}`}
       onMouseEnter={() => setOpenDropdown(id)}
@@ -60,6 +118,9 @@ export default function Navbar({ logo, language = "fr", onChangeLanguage, labels
     </div>
   );
 
+  const renderDropdown = (dropdown) =>
+    dropdown.id === "topics" ? renderTopicDropdown(dropdown) : renderLinkDropdown(dropdown);
+
   return (
     <header className="top-nav">
       <div className="container nav-container">
@@ -76,7 +137,7 @@ export default function Navbar({ logo, language = "fr", onChangeLanguage, labels
           {mobileOpen ? <X size={22} /> : <Menu size={22} />}
         </button>
         <nav className={`desktop-nav ${mobileOpen ? "mobile-open" : ""}`}>
-          <Link className="nav-link" to="/" onClick={closeMenus}>Home</Link>
+          <Link className="nav-link" to="/" onClick={closeMenus}>{labels.home ?? "Home"}</Link>
           {dropdowns.map(renderDropdown)}
           {labels.lessons ? <Link className="nav-link" to="/lessons" onClick={closeMenus}>{labels.lessons}</Link> : null}
           <Link className="nav-link" to="/contact" onClick={closeMenus}>{labels.contact}</Link>
@@ -118,7 +179,7 @@ export default function Navbar({ logo, language = "fr", onChangeLanguage, labels
               {labels.login}
             </Link>
             <Link className="btn-register-nav" to="/register" onClick={closeMenus}>
-              Create an account
+              {labels.createAccount ?? "Create an account"}
             </Link>
           </div>
         </nav>

@@ -243,6 +243,7 @@ h4 {
 .hero-section {
   position: relative;
   isolation: isolate;
+  min-height: clamp(520px, 72vw, 720px);
   padding: 56px 0;
   background: transparent;
   overflow: hidden;
@@ -253,11 +254,11 @@ h4 {
   position: absolute;
   inset: 0;
   background-image: url("../assets/images/german_face.png");
-  background-size: cover;
+  background-size: contain;
   background-position: center top;
   background-repeat: no-repeat;
   filter: contrast(1.35) saturate(1.25) brightness(1.08);
-  opacity: 0.92;
+  opacity: 1;
   z-index: 1;
   pointer-events: none;
 }
@@ -313,6 +314,7 @@ h4 {
   }
 
   .hero-section {
+    min-height: 440px;
     padding: 40px 0 28px;
   }
 
@@ -841,6 +843,93 @@ h4 {
   color: var(--text-dark);
 }
 
+.nav-topic-accordion {
+  display: grid;
+}
+
+.nav-topic-trigger {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border-radius: var(--border-radius-md);
+  color: var(--text-dark);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.nav-topic-trigger:hover {
+  background: #f3f4f6;
+}
+
+.nav-topic-trigger strong,
+.nav-topic-trigger small {
+  display: block;
+}
+
+.nav-topic-trigger strong {
+  font-size: 0.92rem;
+}
+
+.nav-topic-trigger small {
+  margin-top: 2px;
+  color: #6b7280;
+  font-size: 0.78rem;
+}
+
+.nav-topic-panel {
+  margin: 6px 4px 10px;
+  padding: 14px;
+  border-radius: 10px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  box-shadow: var(--shadow-sm);
+}
+
+.nav-topic-panel h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.nav-topic-meta {
+  margin: 6px 0 12px;
+  color: #4b5563;
+  font-weight: 700;
+}
+
+.nav-topic-panel ul {
+  margin: 12px 0;
+  padding-left: 18px;
+  color: #374151;
+  line-height: 1.5;
+}
+
+.nav-topic-notice,
+.nav-topic-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.nav-topic-notice {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.nav-topic-warning {
+  background: #fff7ed;
+  color: #9a3412;
+}
+
 .nav-dropdown-logo {
   width: 30px;
   height: 30px;
@@ -1068,8 +1157,24 @@ h4 {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-height: 76px;
+  padding: 16px;
+  border-radius: 12px;
+  background: #fffaf0;
   color: #111827;
   font-weight: 700;
+  transition: transform 0.25s ease, box-shadow 0.25s ease, background-color 0.25s ease;
+}
+
+.subscription-feature:hover {
+  transform: translateY(-3px);
+  background: #fff7db;
+  box-shadow: 0 12px 24px rgba(17, 24, 39, 0.08);
+}
+
+.subscription-feature:hover .subscription-icon {
+  color: #111827;
+  background: rgba(249, 196, 21, 0.28);
 }
 
 .subscription-icon {
@@ -1088,6 +1193,14 @@ h4 {
   padding: 72px 0;
   background: #ffffff;
   overflow: hidden;
+}
+
+.trust-subtitle {
+  margin: -34px auto 34px;
+  max-width: 680px;
+  text-align: center;
+  color: #4b5563;
+  font-weight: 700;
 }
 
 .flag-marquee {
