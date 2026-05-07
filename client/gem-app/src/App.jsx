@@ -26,21 +26,28 @@ import FreeTestPage from "./pages/FreeTestPage";
 import SessionExpiredPage from "./pages/SessionExpiredPage";
 import CheckoutPage from "./pages/CheckoutPage";
 import NotFoundPage from "./pages/NotFoundPage";
+import VerifyEmailPage from "./pages/VerifyEmailPage";
+import ForgotPasswordPage from "./pages/ForgotPasswordPage";
+import ResetPasswordPage from "./pages/ResetPasswordPage";
+import AdminPanel from "./pages/AdminPanel";
 import { LanguageProvider } from "./context/LanguageContext";
-import GlobalBackButton from "./components/GlobalBackButton";
-import { ProtectedRoute } from "./components/RouteGuards";
+import { AdminRoute, ProtectedRoute } from "./components/RouteGuards";
 
 function App() {
   return (
     <LanguageProvider>
       <BrowserRouter>
-        <GlobalBackButton />
         <Routes>
           <Route path="/" element={<Landing />} />
           <Route path="/landing" element={<Landing />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          <Route path="/verify-email" element={<VerifyEmailPage />} />
+          <Route path="/verify-email/:token" element={<VerifyEmailPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
           <Route path="/dashboard" element={<ProtectedRoute><DashboardMainPage /></ProtectedRoute>} />
+          <Route path="/admin/*" element={<AdminRoute><AdminPanel /></AdminRoute>} />
           <Route path="/simulations" element={<ProtectedRoute><SimulationSelectionPage /></ProtectedRoute>} />
           <Route path="/simulations/:examId/:seriesId" element={<SeriesSimulationPage />} />
           <Route path="/simulations/:examId" element={<SeriesSelectionPage />} />

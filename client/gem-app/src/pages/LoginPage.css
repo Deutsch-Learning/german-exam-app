@@ -175,6 +175,30 @@
   border: 1px solid rgba(193, 0, 22, 0.2);
 }
 
+.success-banner {
+  padding: 12px 14px;
+  border-radius: var(--border-radius-md);
+  background: rgba(16, 185, 129, 0.1);
+  color: #047857;
+  font-size: 0.9rem;
+  border: 1px solid rgba(16, 185, 129, 0.22);
+  margin-bottom: 18px;
+}
+
+.dev-link-note {
+  margin: 12px 0 18px;
+  padding: 10px 12px;
+  border-radius: var(--border-radius-md);
+  background: #f8fafc;
+  color: #475569;
+  font-size: 0.82rem;
+  word-break: break-all;
+}
+
+.dev-link-note a {
+  color: var(--theme-red);
+}
+
 .form-group {
   display: flex;
   flex-direction: column;

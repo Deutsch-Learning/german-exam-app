@@ -257,8 +257,19 @@ h4 {
   background-size: contain;
   background-position: center top;
   background-repeat: no-repeat;
-  filter: contrast(1.35) saturate(1.25) brightness(1.08);
+  filter: contrast(1.48) saturate(1.28) brightness(1.08);
   opacity: 1;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.hero-section::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.82) 0%, rgba(255, 255, 255, 0.42) 42%, rgba(255, 255, 255, 0.16) 100%),
+    rgba(249, 196, 21, 0.08);
   z-index: 1;
   pointer-events: none;
 }
@@ -1134,6 +1145,10 @@ h4 {
   font-size: 1.05rem;
 }
 
+.subscription-offer-action {
+  margin-top: 22px;
+}
+
 .subscription-panel {
   display: grid;
   gap: 26px;
@@ -1389,8 +1404,7 @@ h4 {
   }
 
   .subscription-panel {
-    grid-template-columns: 1fr auto;
-    align-items: center;
+    grid-template-columns: 1fr;
   }
 
   .launch-actions {

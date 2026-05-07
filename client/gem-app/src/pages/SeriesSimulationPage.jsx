@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Lock } from "lucide-react";
 import styles from "./SimulationSelectionPage.module.css";
@@ -16,7 +15,6 @@ import {
   OpenBookIcon,
   SimulationDisciplineCard,
   SimulationTopNav,
-  StartConfirmationModal,
 } from "./SimulationSelectionPage";
 
 const moduleAssets = {
@@ -31,7 +29,6 @@ export default function SeriesSimulationPage() {
   const location = useLocation();
   const { examId, seriesId } = useParams();
   const { t } = useLanguage();
-  const [pendingModule, setPendingModule] = useState(null);
   const series = getSeriesById(examId, seriesId);
 
   if (!series) {
@@ -74,7 +71,9 @@ export default function SeriesSimulationPage() {
     ? { visitorFreeAccess: true }
     : undefined;
   const startModule = (moduleId) => {
-    navigate(`/simulation/${examId}/${seriesId}/${moduleId}`, { state: visitorState });
+    navigate(`/simulation/${examId}/${seriesId}/${moduleId}`, {
+      state: { ...visitorState, autoStartSimulation: true },
+    });
   };
 
   return (
@@ -117,21 +116,13 @@ export default function SeriesSimulationPage() {
                   questions={39}
                   minuteLabel={t.simulations.minutes}
                   questionLabel={t.simulations.questions}
-                  onClick={() => setPendingModule({ ...module, title: content.label })}
+                  onClick={() => startModule(module.id)}
                 />
               );
             })}
           </div>
         </section>
       </main>
-      {pendingModule ? (
-        <StartConfirmationModal
-          examName={`${series.examName} ${series.code}`}
-          moduleTitle={pendingModule.title}
-          onCancel={() => setPendingModule(null)}
-          onStart={() => startModule(pendingModule.id)}
-        />
-      ) : null}
     </div>
   );
 }

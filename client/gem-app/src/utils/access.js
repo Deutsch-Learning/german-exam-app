@@ -1,14 +1,67 @@
-export const getAuthUser = () => {
-  if (typeof localStorage === "undefined") return null;
+const AUTH_KEY = "auth";
 
+const safeJsonParse = (value, fallback = null) => {
   try {
-    return JSON.parse(localStorage.getItem("auth") ?? "null");
+    return JSON.parse(value ?? "");
   } catch {
-    return null;
+    return fallback;
   }
 };
 
-export const isLoggedIn = () => Boolean(getAuthUser()?.id);
+const getStorage = (remember) => (remember ? localStorage : sessionStorage);
+
+export const clearAuthSession = () => {
+  if (typeof localStorage !== "undefined") localStorage.removeItem(AUTH_KEY);
+  if (typeof sessionStorage !== "undefined") sessionStorage.removeItem(AUTH_KEY);
+};
+
+export const storeAuthSession = ({ user, token, expiresIn }, remember = false) => {
+  if (!user || !token) return;
+  clearAuthSession();
+  getStorage(remember).setItem(
+    AUTH_KEY,
+    JSON.stringify({
+      user,
+      token,
+      expiresIn,
+      remember: Boolean(remember),
+      savedAt: new Date().toISOString(),
+    })
+  );
+};
+
+export const updateStoredUser = (user) => {
+  const session = getAuthSession();
+  if (!session?.token || !user) return;
+  storeAuthSession(
+    {
+      user,
+      token: session.token,
+      expiresIn: session.expiresIn,
+    },
+    Boolean(session.remember)
+  );
+};
+
+export const getAuthSession = () => {
+  if (typeof localStorage === "undefined" || typeof sessionStorage === "undefined") return null;
+
+  const persistent = safeJsonParse(localStorage.getItem(AUTH_KEY));
+  if (persistent?.token && persistent?.user) return persistent;
+
+  const session = safeJsonParse(sessionStorage.getItem(AUTH_KEY));
+  if (session?.token && session?.user) return session;
+
+  return null;
+};
+
+export const getAuthToken = () => getAuthSession()?.token ?? "";
+
+export const getAuthUser = () => getAuthSession()?.user ?? null;
+
+export const isLoggedIn = () => Boolean(getAuthToken() && getAuthUser()?.id);
+
+export const isAdmin = () => getAuthUser()?.role === "admin";
 
 export const hasPaidSeriesAccess = () => {
   const auth = getAuthUser();
@@ -18,7 +71,9 @@ export const hasPaidSeriesAccess = () => {
   const status = String(auth?.subscription?.status ?? auth?.subscriptionStatus ?? "").toLowerCase();
 
   return Boolean(
-    auth?.isPremium ||
+    auth?.has_full_access ||
+      auth?.hasFullAccess ||
+      auth?.isPremium ||
       auth?.paid ||
       auth?.hasActiveSubscription ||
       auth?.role === "admin" ||

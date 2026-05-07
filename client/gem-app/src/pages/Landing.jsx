@@ -246,6 +246,9 @@ export default function LandingPage() {
             <p className="subscription-intro">
               {copy.subscriptionIntro}
             </p>
+            <Link className="btn btn-primary btn-large subscription-offer-action" to="/offers">
+              {copy.viewOffers}
+            </Link>
           </div>
           <div className="subscription-panel">
             <div className="subscription-feature-grid">
@@ -256,9 +259,6 @@ export default function LandingPage() {
                 </div>
               ))}
             </div>
-            <Link className="btn btn-primary btn-large" to="/offers">
-              {copy.viewOffers}
-            </Link>
           </div>
         </div>
       </section>

@@ -5,13 +5,11 @@ import styles from "./SimulationSelectionPage.module.css";
 import logo from "../assets/images/logo.png";
 import userIcon from "../assets/images/icon-profile.png";
 
-import iconListen from "../assets/images/icon-audio.png";
-import iconWrite from "../assets/images/icon-write.png";
-import iconSpeak from "../assets/images/icon-speak.png";
 import BackButton from "../components/BackButton";
 import { languageOptions } from "../utils/language";
 import { useLanguage } from "../context/LanguageContext";
 import { isLoggedIn } from "../utils/access";
+import { examSimulations } from "../data/siteContent";
 
 const ChevronIcon = () => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -188,14 +186,6 @@ export const StartConfirmationModal = ({ examName, moduleTitle, onCancel, onStar
 export default function SimulationSelectionPage() {
   const navigate = useNavigate();
   const { t } = useLanguage();
-  const [pendingDiscipline, setPendingDiscipline] = useState(null);
-
-  const disciplines = [
-    { id: "read", iconNode: <OpenBookIcon />, title: t.modules.read, time: 60, questions: 39 },
-    { id: "listen", iconPath: iconListen, title: t.modules.listen, time: 60, questions: 39 },
-    { id: "write", iconPath: iconWrite, title: t.modules.write, time: 60, questions: 39 },
-    { id: "speak", iconPath: iconSpeak, title: t.modules.speak, time: 60, questions: 39 },
-  ];
 
   return (
     <div className={styles.pageContainer}>
@@ -211,36 +201,30 @@ export default function SimulationSelectionPage() {
       <main className={styles.mainContent}>
         <BackButton fallback="/dashboard" />
         <header className={styles.headerSection}>
-          <h1 className={styles.title}>{t.simulations.title}</h1>
-          <p className={styles.subtitle}>{t.simulations.subtitle}</p>
+          <h1 className={styles.title}>Choisissez votre test</h1>
+          <p className={styles.subtitle}>
+            Sélectionnez Goethe, TestDaF, DSH ou telc. Les séries gratuites restent ouvertes,
+            les séries premium sont verrouillées sans accès complet.
+          </p>
         </header>
 
         <section className={styles.gridSection}>
           <div className={styles.cardGrid}>
-            {disciplines.map((discipline) => (
+            {examSimulations.map((exam) => (
               <SimulationDisciplineCard
-                key={discipline.id}
-                iconPath={discipline.iconPath}
-                iconNode={discipline.iconNode}
-                title={discipline.title}
-                time={discipline.time}
-                questions={discipline.questions}
+                key={exam.id}
+                iconNode={<OpenBookIcon />}
+                title={exam.name}
+                time={240}
+                questions={156}
                 minuteLabel={t.simulations.minutes}
                 questionLabel={t.simulations.questions}
-                onClick={() => setPendingDiscipline(discipline)}
+                onClick={() => navigate(exam.path)}
               />
             ))}
           </div>
         </section>
       </main>
-      {pendingDiscipline ? (
-        <StartConfirmationModal
-          examName="Goethe-Zertifikat B2"
-          moduleTitle={pendingDiscipline.title}
-          onCancel={() => setPendingDiscipline(null)}
-          onStart={() => navigate(`/simulation/${pendingDiscipline.id}`)}
-        />
-      ) : null}
     </div>
   );
 }

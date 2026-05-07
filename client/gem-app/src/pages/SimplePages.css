@@ -335,6 +335,108 @@
   border-left: 5px solid #c10016;
 }
 
+.topic-detail-panel {
+  display: grid;
+  gap: 22px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: clamp(20px, 4vw, 32px);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+}
+
+.topic-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 18px;
+  border-bottom: 1px solid #e5e7eb;
+  padding-bottom: 18px;
+}
+
+.topic-detail-header h2 {
+  margin: 6px 0 0;
+  font-size: clamp(1.45rem, 3vw, 2.1rem);
+}
+
+.topic-expression-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: #111827;
+  color: #ffffff;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.topic-notice-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.topic-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border-radius: 8px;
+  padding: 14px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.topic-notice.info {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}
+
+.topic-notice.warning {
+  background: #fff7ed;
+  color: #9a3412;
+  border: 1px solid #fed7aa;
+}
+
+.topic-task-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.topic-task-panel h3 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.topic-task-list {
+  display: grid;
+  gap: 12px;
+}
+
+.topic-task-card {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  align-items: center;
+  min-height: 62px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 14px;
+  background: #f8fafc;
+}
+
+.topic-task-card span {
+  color: #c10016;
+  font-weight: 900;
+}
+
+.topic-task-card p {
+  margin: 0;
+  color: #334155;
+  font-weight: 700;
+}
+
 @media (min-width: 760px) {
   .simple-grid.two {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -342,5 +444,16 @@
 
   .simple-grid.three {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .topic-detail-header {
+    display: grid;
+  }
+
+  .topic-expression-badge {
+    white-space: normal;
+    justify-content: center;
   }
 }

@@ -9,6 +9,7 @@ import userIcon from "../assets/images/icon-profile.png";
 import { languageOptions } from "../utils/language";
 import { readSimulationHistory } from "../utils/simulationHistory";
 import { useLanguage } from "../context/LanguageContext";
+import { clearAuthSession, getAuthUser } from "../utils/access";
 
 const formatDateTimeFr = (iso) => {
   try {
@@ -294,16 +295,14 @@ export default function DashboardMainPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
-  const auth = useMemo(() => {
-    try { return JSON.parse(localStorage.getItem("auth") ?? "null"); } catch { return null; }
-  }, []);
+  const auth = useMemo(() => getAuthUser(), []);
 
   const fetchDashboard = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
       if (!auth?.id) { setError("Utilisateur non connecté."); setData(null); return; }
-      const res = await API.get("/dashboard", { headers: { "x-user-id": String(auth.id) } });
+      const res = await API.get("/dashboard");
       if (!res.data?.ok) { setError(res.data?.error ?? "Impossible de charger le dashboard."); setData(null); return; }
       setData(res.data);
     } catch {
@@ -332,8 +331,21 @@ export default function DashboardMainPage() {
     return full || data?.user?.username || "Utilisateur";
   }, [data]);
 
+  const dashboardSimulations = useMemo(() => {
+    if (localSimulations.length) return localSimulations;
+    return (data?.simulations ?? []).map((simulation) => ({
+      ...simulation,
+      id: `server-${simulation.id}`,
+      title: simulation.exam_name,
+      moduleType: "Résultat enregistré",
+      progressPercent: simulation.score_pct,
+      lastAccessedAt: simulation.taken_at,
+      route: "/simulations",
+    }));
+  }, [data?.simulations, localSimulations]);
+
   const onLogout = useCallback(() => {
-    localStorage.removeItem("auth");
+    clearAuthSession();
     navigate("/login");
   }, [navigate]);
 
@@ -392,7 +404,7 @@ export default function DashboardMainPage() {
             <div className={styles.colCenter}><SkillsCard scores={data?.skills} labels={t.dashboard} moduleLabels={t.modules} /></div>
             <div className={styles.colRight}>
               <RecentSimulationsCard
-                simulations={localSimulations}
+                simulations={dashboardSimulations}
                 labels={t.dashboard}
                 onResume={(simulation) => navigate(simulation.route)}
                 onMore={() => navigate("/recent-simulations")}

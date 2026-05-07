@@ -80,13 +80,17 @@ export default function RegisterPage() {
         lastName: formData.lastName,
       });
       if (res.data?.ok) {
-        localStorage.setItem("auth", JSON.stringify(res.data.user));
-        navigate("/dashboard");
+        navigate(`/verify-email?email=${encodeURIComponent(formData.email)}`, {
+          state: {
+            message: res.data.message,
+            devVerificationUrl: res.data.devVerificationUrl,
+          },
+        });
         return;
       }
       setErrors({ submit: res.data?.error ?? "Une erreur est survenue. Réessayez." });
-    } catch {
-      setErrors({ submit: "Une erreur est survenue. Réessayez." });
+    } catch (err) {
+      setErrors({ submit: err.response?.data?.error ?? "Une erreur est survenue. Réessayez." });
     } finally {
       setIsLoading(false);
     }

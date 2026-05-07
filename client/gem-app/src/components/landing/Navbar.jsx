@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { AlertTriangle, Info, Menu, X } from "lucide-react";
+import { Menu, X } from "lucide-react";
 import { aboutTestSections, currentTopics, pageLinks } from "../../data/siteContent";
 import { languageOptions } from "../../utils/language";
 
@@ -46,38 +46,18 @@ export default function Navbar({ logo, language = "fr", onChangeLanguage, labels
       </button>
       <div className="nav-dropdown-menu">
         {items.map((item) => (
-          <div className="nav-topic-accordion" key={item.id}>
-            <button
-              type="button"
-              className="nav-topic-trigger"
-              onClick={() => setOpenDropdown((value) => (value === item.id ? id : item.id))}
-            >
-              <span>
-                <strong>{item.label}</strong>
-                <small>{item.seriesTitle}</small>
-              </span>
-              <span className="nav-chevron">{openDropdown === item.id ? "-" : "+"}</span>
-            </button>
-            {openDropdown === item.id ? (
-              <div className="nav-topic-panel">
-                <h3>{item.seriesTitle}</h3>
-                <p className="nav-topic-meta">{item.expressionType}</p>
-                <div className="nav-topic-notice">
-                  <Info size={15} />
-                  {item.notice}
-                </div>
-                <ul>
-                  {item.tasks.map((task) => (
-                    <li key={task}>{task}</li>
-                  ))}
-                </ul>
-                <div className="nav-topic-warning">
-                  <AlertTriangle size={15} />
-                  {item.warning}
-                </div>
-              </div>
-            ) : null}
-          </div>
+          <Link
+            className="nav-dropdown-item nav-topic-link"
+            key={item.id}
+            to={item.path}
+            onClick={closeMenus}
+          >
+            <img src={logo} alt="" className="nav-dropdown-logo" />
+            <span>
+              <strong>{item.label}</strong>
+              <small>{item.seriesTitle}</small>
+            </span>
+          </Link>
         ))}
       </div>
     </div>
