@@ -87,8 +87,18 @@ const translations = {
       remember: "Se souvenir de moi",
       forgot: "Mot de passe oublié ?",
     },
-    landing: {
-      nav: { services: "Services", pricing: "Nos forfaits", contact: "Contact", login: "Connexion" },
+      landing: {
+      nav: {
+        services: "Services",
+        pricing: "Nos forfaits",
+        contact: "Contact",
+        login: "Connexion",
+        home: "Accueil",
+        currentTopics: "Sujets actuels",
+        aboutTests: "À propos TestDaF/DSH",
+        pages: "Pages",
+        createAccount: "Créer un compte",
+      },
       heroTitleA: "Dominez l'examen d'allemand.",
       heroTitleB: "Assurez votre certificat.",
       heroSubtitle:
@@ -99,6 +109,24 @@ const translations = {
       testimonials: "Avis de nos candidats",
       leaveComment: "Laissez un commentaire",
       partners: "Nos partenaires",
+      fullAccess: "Accès complet",
+      subscriptionTitle: "Abonnez-vous et profitez d'un accès complet à tous les tests et séries",
+      subscriptionIntro: "Débloquez toutes les séries premium, les modules complets et une correction structurée dans un seul espace de préparation.",
+      subscriptionFeatures: [
+        "Tests complets en conditions réelles avec correction",
+        "Tests d'expression écrite en ligne",
+        "Suivi efficace pendant toute la préparation",
+        "Entraînement d'expression orale en ligne",
+      ],
+      viewOffers: "Voir les offres",
+      tryFree: "Essayer gratuitement",
+      thousandsSatisfied: "Des milliers d'étudiants satisfaits",
+      reviewsFollowup: "Rejoignez plus de 1000 candidats qui ont réussi avec nous",
+      trustTitle: "Ils nous font confiance",
+      trustSubtitle: "Des étudiants du monde entier choisissent Deutsch Learning",
+      specialLaunch: "Lancement spécial",
+      launchTitle: "Prêt à vous tester et à augmenter votre niveau ?",
+      launchText: "Rejoignez des milliers d'étudiants qui ont réussi leurs examens grâce à notre plateforme.",
       contact: "Contactez-nous",
       lastName: "Nom",
       firstName: "Prénom",
@@ -115,6 +143,17 @@ const translations = {
         "Correction d'exercices écrits",
         "Pratique de la prononciation",
       ],
+      serviceDescriptions: [
+        "Entraînez-vous avec des parcours complets, chronométrés et proches de l'examen.",
+        "Gagnez en confiance avec des exercices d'écoute ciblés.",
+        "Améliorez vos réponses écrites avec un entraînement orienté correction.",
+        "Travaillez une expression orale claire et prête pour l'examen.",
+        "Visualisez votre progression par compétence.",
+        "Préparez-vous à votre rythme avec des séances flexibles.",
+        "Travaillez vers des examens reconnus par les institutions.",
+        "Progressez avec une communauté d'étudiants motivés.",
+      ],
+      extraServiceTitles: ["Suivi des progrès", "Horaire flexible", "Certifié et reconnu", "Communauté active"],
       pricing: {
         bronze: {
           subtitle: "Idéal pour se familiariser avec l'examen",
@@ -340,8 +379,18 @@ const translations = {
       remember: "Remember me",
       forgot: "Forgot password?",
     },
-    landing: {
-      nav: { services: "Services", pricing: "Plans", contact: "Contact", login: "Login" },
+      landing: {
+      nav: {
+        services: "Services",
+        pricing: "Plans",
+        contact: "Contact",
+        login: "Login",
+        home: "Home",
+        currentTopics: "Current topics",
+        aboutTests: "About TestDaF/DSH",
+        pages: "Pages",
+        createAccount: "Create an account",
+      },
       heroTitleA: "Master your German exam.",
       heroTitleB: "Secure your certificate.",
       heroSubtitle:
@@ -352,6 +401,24 @@ const translations = {
       testimonials: "Student reviews",
       leaveComment: "Leave a comment",
       partners: "Our partners",
+      fullAccess: "Full access",
+      subscriptionTitle: "Subscribe and Enjoy Full Access to All Tests and Series",
+      subscriptionIntro: "Unlock every premium series, complete exam modules, and structured correction in one clear preparation space.",
+      subscriptionFeatures: [
+        "Full tests in real conditions with correction",
+        "Online written expression tests",
+        "Effective tracking throughout preparation",
+        "Online oral expression practice",
+      ],
+      viewOffers: "View offers",
+      tryFree: "Try for free",
+      thousandsSatisfied: "Thousands of students satisfied",
+      reviewsFollowup: "Join over 1000 successful candidates who succeeded with us",
+      trustTitle: "They Trust Us",
+      trustSubtitle: "Students from all over the world choose Deutsch Learning",
+      specialLaunch: "Special launch",
+      launchTitle: "Ready to test and increase your level?",
+      launchText: "Join thousands of students who have passed their exams thanks to our platform.",
       contact: "Contact us",
       lastName: "Last name",
       firstName: "First name",
@@ -363,6 +430,17 @@ const translations = {
       commentPrompt: "Leave your comment:",
       stats: ["Active students", "Success rate", "Average rating"],
       services: ["Realistic exam simulations", "Audio and listening practice", "Written exercise correction", "Pronunciation practice"],
+      serviceDescriptions: [
+        "Practice complete exam flows with realistic timing and structure.",
+        "Build confidence with focused listening exercises and replay practice.",
+        "Improve written answers with correction-oriented training.",
+        "Train clear pronunciation and exam-ready speaking responses.",
+        "See your growth by skill and know what to revise next.",
+        "Prepare at your own pace with sessions that fit your week.",
+        "Work toward exams trusted by universities and institutions.",
+        "Learn beside other motivated students preparing for success.",
+      ],
+      extraServiceTitles: ["Progress Tracking", "Flexible Schedule", "Certified and Recognized", "Active Community"],
       pricing: {
         bronze: {
           subtitle: "Ideal for getting familiar with the exam",
@@ -586,8 +664,18 @@ const translations = {
       remember: "Angemeldet bleiben",
       forgot: "Passwort vergessen?",
     },
-    landing: {
-      nav: { services: "Leistungen", pricing: "Pakete", contact: "Kontakt", login: "Anmelden" },
+      landing: {
+      nav: {
+        services: "Leistungen",
+        pricing: "Pakete",
+        contact: "Kontakt",
+        login: "Anmelden",
+        home: "Start",
+        currentTopics: "Aktuelle Themen",
+        aboutTests: "Über TestDaF/DSH",
+        pages: "Seiten",
+        createAccount: "Konto erstellen",
+      },
       heroTitleA: "Meistern Sie die Deutschprüfung.",
       heroTitleB: "Sichern Sie Ihr Zertifikat.",
       heroSubtitle:
@@ -598,6 +686,24 @@ const translations = {
       testimonials: "Erfahrungen unserer Kandidaten",
       leaveComment: "Kommentar hinterlassen",
       partners: "Unsere Partner",
+      fullAccess: "Voller Zugriff",
+      subscriptionTitle: "Abonnieren Sie und erhalten Sie vollen Zugriff auf alle Tests und Serien",
+      subscriptionIntro: "Schalten Sie alle Premium-Serien, vollständige Prüfungsmodule und strukturierte Korrekturen in einem klaren Vorbereitungsbereich frei.",
+      subscriptionFeatures: [
+        "Vollständige Tests unter realen Bedingungen mit Korrektur",
+        "Online-Tests für schriftlichen Ausdruck",
+        "Effektive Begleitung während der Vorbereitung",
+        "Online-Training für mündlichen Ausdruck",
+      ],
+      viewOffers: "Angebote ansehen",
+      tryFree: "Kostenlos testen",
+      thousandsSatisfied: "Tausende zufriedene Lernende",
+      reviewsFollowup: "Schließen Sie sich über 1000 erfolgreichen Kandidaten an",
+      trustTitle: "Sie vertrauen uns",
+      trustSubtitle: "Lernende aus der ganzen Welt wählen Deutsch Learning",
+      specialLaunch: "Sonderstart",
+      launchTitle: "Bereit, sich zu testen und Ihr Niveau zu steigern?",
+      launchText: "Schließen Sie sich Tausenden von Lernenden an, die ihre Prüfungen dank unserer Plattform bestanden haben.",
       contact: "Kontaktieren Sie uns",
       lastName: "Nachname",
       firstName: "Vorname",
@@ -609,6 +715,17 @@ const translations = {
       commentPrompt: "Hinterlassen Sie Ihren Kommentar:",
       stats: ["Aktive Lernende", "Erfolgsquote", "Durchschnittsbewertung"],
       services: ["Realistische Prüfungssimulationen", "Audio- und Hörtraining", "Korrektur schriftlicher Übungen", "Aussprachetraining"],
+      serviceDescriptions: [
+        "Üben Sie vollständige Prüfungsabläufe mit realistischer Zeitstruktur.",
+        "Bauen Sie Sicherheit mit gezieltem Hörtraining auf.",
+        "Verbessern Sie schriftliche Antworten mit korrekturorientiertem Training.",
+        "Trainieren Sie klare Aussprache und prüfungsreife Antworten.",
+        "Sehen Sie Ihren Fortschritt nach Kompetenz und wissen Sie, was Sie wiederholen müssen.",
+        "Bereiten Sie sich flexibel in Ihrem eigenen Tempo vor.",
+        "Arbeiten Sie auf Prüfungen hin, die von Institutionen anerkannt werden.",
+        "Lernen Sie mit anderen motivierten Kandidaten.",
+      ],
+      extraServiceTitles: ["Fortschrittsverfolgung", "Flexibler Zeitplan", "Zertifiziert und anerkannt", "Aktive Gemeinschaft"],
       pricing: {
         bronze: {
           subtitle: "Ideal, um die Prüfung kennenzulernen",
@@ -783,12 +900,14 @@ const translations = {
   },
 };
 
+export const getTranslations = (language = "fr") => translations[language] ?? translations.fr;
+
 export function LanguageProvider({ children }) {
   const [language, setLangState] = useState(getStoredLanguage);
   const setLanguage = (next) => setLangState(setStoredLanguage(next));
 
   const value = useMemo(
-    () => ({ language, setLanguage, t: translations[language] ?? translations.fr }),
+    () => ({ language, setLanguage, t: getTranslations(language) }),
     [language]
   );
 

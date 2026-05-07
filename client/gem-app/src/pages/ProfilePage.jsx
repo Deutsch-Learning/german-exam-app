@@ -4,6 +4,7 @@ import API from "../services/api";
 import styles from "./ProfilePage.module.css";
 import BackButton from "../components/BackButton";
 import { useLanguage } from "../context/LanguageContext";
+import { getAuthUser, updateStoredUser } from "../utils/access";
 
 export default function ProfilePage() {
   const { t } = useLanguage();
@@ -20,13 +21,7 @@ export default function ProfilePage() {
     dateOfBirth: "",
   });
 
-  const auth = useMemo(() => {
-    try {
-      return JSON.parse(localStorage.getItem("auth") ?? "null");
-    } catch {
-      return null;
-    }
-  }, []);
+  const auth = useMemo(() => getAuthUser(), []);
 
   const fullName = useMemo(() => {
     const first = user?.first_name ?? "";
@@ -44,7 +39,7 @@ export default function ProfilePage() {
         setUser(null);
         return;
       }
-      const res = await API.get("/me", { headers: { "x-user-id": String(auth.id) } });
+      const res = await API.get("/me");
       if (!res.data?.ok) {
         setError(res.data?.error ?? "Impossible de charger le profil.");
         setUser(null);
@@ -85,24 +80,24 @@ export default function ProfilePage() {
         setError("Utilisateur non connecté.");
         return;
       }
-      const res = await API.put(
-        "/me",
-        {
-          username: formData.username,
-          firstName: formData.firstName,
-          lastName: formData.lastName,
-          email: formData.email,
-          dateOfBirth: formData.dateOfBirth,
-        },
-        { headers: { "x-user-id": String(auth.id) } }
-      );
+      const res = await API.put("/me", {
+        username: formData.username,
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        email: formData.email,
+        dateOfBirth: formData.dateOfBirth,
+      });
       if (!res.data?.ok) {
         setError(res.data?.error ?? "Impossible de sauvegarder.");
         return;
       }
       setUser(res.data.user);
-      localStorage.setItem("auth", JSON.stringify(res.data.user));
-      setSuccess(t.profilePage.saved);
+      updateStoredUser(res.data.user);
+      setSuccess(
+        res.data.requiresEmailVerification
+          ? "Profil mis à jour. Confirmez votre nouvelle adresse email avant votre prochaine connexion."
+          : t.profilePage.saved
+      );
     } catch {
       setError("Impossible de sauvegarder le profil.");
     } finally {

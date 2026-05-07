@@ -3,14 +3,7 @@ import "./SimplePages.css";
 import logo from "../assets/images/logo.png";
 import { offerPlans } from "../data/siteContent";
 import NotFoundPage from "./NotFoundPage";
-
-const getAuthUser = () => {
-  try {
-    return JSON.parse(localStorage.getItem("auth") ?? "null");
-  } catch {
-    return null;
-  }
-};
+import { getAuthUser } from "../utils/access";
 
 export default function CheckoutPage() {
   const { offerId } = useParams();

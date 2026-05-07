@@ -1,10 +1,10 @@
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Lock } from "lucide-react";
 import styles from "./SimulationSelectionPage.module.css";
 import "./SimplePages.css";
 import NotFoundPage from "./NotFoundPage";
 import { getSeriesById, simulationModules } from "../data/testSeries";
-import { canOpenSeries } from "../utils/access";
+import { canOpenSeries, isVisitorSeriesAttempt } from "../utils/access";
 import BackButton from "../components/BackButton";
 import { useLanguage } from "../context/LanguageContext";
 import iconListen from "../assets/images/icon-audio.png";
@@ -26,6 +26,7 @@ const moduleAssets = {
 
 export default function SeriesSimulationPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { examId, seriesId } = useParams();
   const { t } = useLanguage();
   const series = getSeriesById(examId, seriesId);
@@ -66,6 +67,14 @@ export default function SeriesSimulationPage() {
   const orderedModules = ["read", "listen", "write", "speak"]
     .map((moduleId) => simulationModules.find((module) => module.id === moduleId))
     .filter(Boolean);
+  const visitorState = isVisitorSeriesAttempt(series) || Boolean(location.state?.visitorFreeAccess)
+    ? { visitorFreeAccess: true }
+    : undefined;
+  const startModule = (moduleId) => {
+    navigate(`/simulation/${examId}/${seriesId}/${moduleId}`, {
+      state: { ...visitorState, autoStartSimulation: true },
+    });
+  };
 
   return (
     <div className={styles.pageContainer}>
@@ -78,7 +87,7 @@ export default function SeriesSimulationPage() {
         onGoModule={(moduleId) =>
           moduleId === "lessons"
             ? navigate("/lessons")
-            : navigate(`/simulation/${examId}/${seriesId}/${moduleId}`)
+            : startModule(moduleId)
         }
       />
 
@@ -107,7 +116,7 @@ export default function SeriesSimulationPage() {
                   questions={39}
                   minuteLabel={t.simulations.minutes}
                   questionLabel={t.simulations.questions}
-                  onClick={() => navigate(`/simulation/${examId}/${seriesId}/${module.id}`)}
+                  onClick={() => startModule(module.id)}
                 />
               );
             })}

@@ -1,52 +1,35 @@
 import { Link, useParams } from "react-router-dom";
+import { AlertTriangle, Info } from "lucide-react";
 import "./SimplePages.css";
 import logo from "../assets/images/logo.png";
 import NotFoundPage from "./NotFoundPage";
+import { currentTopics } from "../data/siteContent";
 
-const topics = {
+const topicCopy = {
   testdaf: {
     title: "TestDaF (Test Deutsch als Fremdsprache)",
-    subtitle: "A standardized German exam for international students applying to German-speaking universities.",
-    highlights: [
-      "Assesses reading, listening, writing, and speaking.",
-      "Results are reported by skill area.",
-      "Useful for university admission and academic preparation.",
-    ],
+    subtitle: "Sujets actuels pour les candidats visant une admission universitaire.",
   },
   dsh: {
-    title: "DSH (Deutsche Sprachpr\u00fcfung f\u00fcr den Hochschulzugang)",
-    subtitle: "A university-based German language exam used for admission to German higher education.",
-    highlights: [
-      "Organized by individual universities or approved centers.",
-      "Usually focused on academic German.",
-      "Accepted requirements vary by university and program.",
-    ],
+    title: "DSH (Deutsche Sprachprüfung für den Hochschulzugang)",
+    subtitle: "Sujets orientés université, synthèse écrite et réponse orale.",
   },
   "goethe-certificate": {
     title: "Goethe Certificate",
-    subtitle: "Internationally recognized Goethe-Institut certificates for German language levels.",
-    highlights: [
-      "Available from beginner to advanced levels.",
-      "Widely recognized by schools, employers, and institutions.",
-      "Covers practical communication and formal language skills.",
-    ],
+    subtitle: "Sujets actuels pour une communication écrite et orale claire.",
   },
   "telc-deutsch": {
     title: "telc Deutsch",
-    subtitle: "A recognized German certificate series for study, work, and migration goals.",
-    highlights: [
-      "Covers several CEFR levels and exam formats.",
-      "Often used for professional and academic pathways.",
-      "Includes realistic language tasks for everyday and formal contexts.",
-    ],
+    subtitle: "Sujets pratiques pour le travail, l'intégration et les services publics.",
   },
 };
 
 export default function TopicPage() {
   const { topicId } = useParams();
-  const topic = topics[topicId];
+  const topic = currentTopics.find((item) => item.id === topicId);
+  const copy = topicCopy[topicId];
 
-  if (!topic) {
+  if (!topic || !copy) {
     return <NotFoundPage message="The topic you opened is not available." />;
   }
 
@@ -64,35 +47,51 @@ export default function TopicPage() {
         </div>
 
         <header className="simple-hero">
-          <p className="simple-eyebrow">Current topic</p>
-          <h1>{topic.title}</h1>
-          <p>{topic.subtitle}</p>
+          <p className="simple-eyebrow">Sujet actuel</p>
+          <h1>{copy.title}</h1>
+          <p>{copy.subtitle}</p>
         </header>
 
-        <section className="simple-grid two">
-          <article className="simple-card">
-            <h2>What to know</h2>
-            <ul>
-              {topic.highlights.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-          </article>
-          <article className="simple-card">
-            <h2>Start practicing</h2>
-            <p>
-              Choose the simulation path for this exam and train with realistic tasks before
-              moving into full test conditions.
-            </p>
-            <div className="simple-actions">
-              <Link className="simple-button" to="/start-preparation">
-                Start preparation
-              </Link>
-              <Link className="simple-secondary-button" to="/offers">
-                View offers
-              </Link>
+        <section className="topic-detail-panel">
+          <div className="topic-detail-header">
+            <div>
+              <span className="simple-eyebrow">Series title</span>
+              <h2>{topic.seriesTitle}</h2>
             </div>
-          </article>
+            <span className="topic-expression-badge">{topic.expressionType}</span>
+          </div>
+
+          <div className="topic-notice-grid">
+            <div className="topic-notice info">
+              <Info size={18} />
+              <span>{topic.notice}</span>
+            </div>
+            <div className="topic-notice warning">
+              <AlertTriangle size={18} />
+              <span>{topic.warning}</span>
+            </div>
+          </div>
+
+          <div className="topic-task-panel">
+            <h3>Tasks</h3>
+            <div className="topic-task-list">
+              {topic.tasks.map((task, index) => (
+                <article className="topic-task-card" key={task}>
+                  <span>{String(index + 1).padStart(2, "0")}</span>
+                  <p>{task}</p>
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <div className="simple-actions">
+            <Link className="simple-button" to="/simulations">
+              Choisir un test
+            </Link>
+            <Link className="simple-secondary-button" to="/offers">
+              View offers
+            </Link>
+          </div>
         </section>
       </main>
     </div>

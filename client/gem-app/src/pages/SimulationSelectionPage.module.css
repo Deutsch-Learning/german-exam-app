@@ -294,6 +294,85 @@
   color: var(--color-text-main);
 }
 
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(17, 24, 39, 0.48);
+  backdrop-filter: blur(4px);
+}
+
+.confirmModal {
+  width: min(100%, 460px);
+  border-radius: 12px;
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  box-shadow: 0 24px 70px rgba(17, 24, 39, 0.26);
+  padding: 28px;
+  text-align: left;
+}
+
+.modalEyebrow {
+  margin: 0 0 10px;
+  color: var(--color-primary-red);
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.confirmModal h2 {
+  margin: 0;
+  color: var(--color-text-main);
+  font-size: clamp(1.45rem, 4vw, 2rem);
+  line-height: 1.15;
+}
+
+.confirmModal p:not(.modalEyebrow) {
+  margin: 14px 0 0;
+  color: var(--color-text-muted);
+  line-height: 1.65;
+}
+
+.modalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.modalCancelButton,
+.modalStartButton {
+  min-height: 42px;
+  border-radius: 8px;
+  padding: 0 18px;
+  font: inherit;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.modalCancelButton {
+  border: 1px solid var(--color-border);
+  background: #ffffff;
+  color: var(--color-text-main);
+}
+
+.modalStartButton {
+  border: 0;
+  background: var(--color-primary-red);
+  color: #ffffff;
+}
+
+.modalCancelButton:hover {
+  background: var(--color-bg-hover);
+}
+
+.modalStartButton:hover {
+  background: #b91c1c;
+}
+
 /* --- RESPONSIVE MEDIA QUERIES --- */
 
 /* Tablet */
@@ -309,6 +388,17 @@
   .cardGrid {
     grid-template-columns: repeat(2, 1fr);
     gap: 30px;
+  }
+}
+
+@media (max-width: 520px) {
+  .modalActions {
+    flex-direction: column-reverse;
+  }
+
+  .modalCancelButton,
+  .modalStartButton {
+    width: 100%;
   }
 }
 

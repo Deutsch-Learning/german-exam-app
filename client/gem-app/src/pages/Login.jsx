@@ -4,6 +4,7 @@ import "./LoginPage.css";
 import logo from "../assets/images/logo.png";
 import API from "../services/api";
 import { useLanguage } from "../context/LanguageContext";
+import { storeAuthSession } from "../utils/access";
 
 export default function LoginPage() {
   const { t } = useLanguage();
@@ -51,15 +52,23 @@ export default function LoginPage() {
       const res = await API.post("/login", {
         email: formData.email,
         password: formData.password,
+        rememberMe: formData.rememberMe,
       });
       if (res.data?.ok) {
-        localStorage.setItem("auth", JSON.stringify(res.data.user));
+        storeAuthSession(
+          {
+            user: res.data.user,
+            token: res.data.token,
+            expiresIn: res.data.expiresIn,
+          },
+          formData.rememberMe
+        );
         navigate("/dashboard");
         return;
       }
       setErrors({ submit: res.data?.error ?? "Identifiants incorrects. Réessayez." });
-    } catch {
-      setErrors({ submit: "Identifiants incorrects. Réessayez." });
+    } catch (err) {
+      setErrors({ submit: err.response?.data?.error ?? "Identifiants incorrects. Réessayez." });
     } finally {
       setIsLoading(false);
     }
@@ -215,9 +224,9 @@ export default function LoginPage() {
                 <span className="checkbox-custom" />
                 {t.auth.remember}
               </label>
-              <a href="#forgot" className="link-forgot">
+              <Link to="/forgot-password" className="link-forgot">
                 {t.auth.forgot}
-              </a>
+              </Link>
             </div>
 
             <button type="submit" className="btn-submit" disabled={isLoading}>

@@ -5,12 +5,11 @@ import styles from "./SimulationSelectionPage.module.css";
 import logo from "../assets/images/logo.png";
 import userIcon from "../assets/images/icon-profile.png";
 
-import iconListen from "../assets/images/icon-audio.png";
-import iconWrite from "../assets/images/icon-write.png";
-import iconSpeak from "../assets/images/icon-speak.png";
 import BackButton from "../components/BackButton";
 import { languageOptions } from "../utils/language";
 import { useLanguage } from "../context/LanguageContext";
+import { isLoggedIn } from "../utils/access";
+import { examSimulations } from "../data/siteContent";
 
 const ChevronIcon = () => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -49,18 +48,21 @@ export const SimulationTopNav = ({ onGoAbout, onGoProfile, onGoDashboard, onGoAc
   const [openFormation, setOpenFormation] = useState(false);
   const { language, setLanguage, t } = useLanguage();
   const selectedLanguage = languageOptions.find((opt) => opt.id === language) ?? languageOptions[0];
+  const loggedIn = isLoggedIn();
 
   return (
     <nav className={styles.topNav}>
     <div className={styles.navContainer}>
       <div className={styles.navLeft}>
-        <img src={logo} alt="Deutsch Lernen Logo" className={styles.logo} onClick={onGoDashboard} style={{ cursor: "pointer" }} />
+        <img src={logo} alt="Deutsch Lernen Logo" className={styles.logo} onClick={loggedIn ? onGoDashboard : () => window.location.assign("/")} style={{ cursor: "pointer" }} />
       </div>
 
       <div className={styles.navCenter}>
-        <button type="button" className={styles.navLink} onClick={onGoDashboard}>
-          {t.common.home}
-        </button>
+        {loggedIn ? (
+          <button type="button" className={styles.navLink} onClick={onGoDashboard}>
+            {t.common.home}
+          </button>
+        ) : null}
         <button type="button" className={styles.navLink} onClick={onGoActualites}>
           {t.common.news} <ChevronIcon />
         </button>
@@ -122,11 +124,13 @@ export const SimulationTopNav = ({ onGoAbout, onGoProfile, onGoDashboard, onGoAc
             </div>
           ) : null}
         </div>
-        <button className={styles.profileButton} aria-label="Profil utilisateur" type="button" onClick={onGoProfile}>
-          <div className={styles.userAvatar}>
-            <img src={userIcon} alt="" />
-          </div>
-        </button>
+        {loggedIn ? (
+          <button className={styles.profileButton} aria-label="Profil utilisateur" type="button" onClick={onGoProfile}>
+            <div className={styles.userAvatar}>
+              <img src={userIcon} alt="" />
+            </div>
+          </button>
+        ) : null}
       </div>
     </div>
   </nav>
@@ -152,16 +156,36 @@ export const SimulationDisciplineCard = ({ iconPath, iconNode, title, time, ques
   </button>
 );
 
+export const StartConfirmationModal = ({ examName, moduleTitle, onCancel, onStart }) => (
+  <div className={styles.modalOverlay} role="presentation" onMouseDown={onCancel}>
+    <section
+      className={styles.confirmModal}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="start-confirm-title"
+      onMouseDown={(event) => event.stopPropagation()}
+    >
+      <p className={styles.modalEyebrow}>Simulation</p>
+      <h2 id="start-confirm-title">You are about to start the {examName} test</h2>
+      <p>
+        {moduleTitle ? `${moduleTitle} will begin now. ` : ""}
+        Are you ready to start?
+      </p>
+      <div className={styles.modalActions}>
+        <button type="button" className={styles.modalCancelButton} onClick={onCancel}>
+          Cancel
+        </button>
+        <button type="button" className={styles.modalStartButton} onClick={onStart}>
+          Start
+        </button>
+      </div>
+    </section>
+  </div>
+);
+
 export default function SimulationSelectionPage() {
   const navigate = useNavigate();
   const { t } = useLanguage();
-
-  const disciplines = [
-    { id: "read", iconNode: <OpenBookIcon />, title: t.modules.read, time: 60, questions: 39 },
-    { id: "listen", iconPath: iconListen, title: t.modules.listen, time: 60, questions: 39 },
-    { id: "write", iconPath: iconWrite, title: t.modules.write, time: 60, questions: 39 },
-    { id: "speak", iconPath: iconSpeak, title: t.modules.speak, time: 60, questions: 39 },
-  ];
 
   return (
     <div className={styles.pageContainer}>
@@ -177,23 +201,25 @@ export default function SimulationSelectionPage() {
       <main className={styles.mainContent}>
         <BackButton fallback="/dashboard" />
         <header className={styles.headerSection}>
-          <h1 className={styles.title}>{t.simulations.title}</h1>
-          <p className={styles.subtitle}>{t.simulations.subtitle}</p>
+          <h1 className={styles.title}>Choisissez votre test</h1>
+          <p className={styles.subtitle}>
+            Sélectionnez Goethe, TestDaF, DSH ou telc. Les séries gratuites restent ouvertes,
+            les séries premium sont verrouillées sans accès complet.
+          </p>
         </header>
 
         <section className={styles.gridSection}>
           <div className={styles.cardGrid}>
-            {disciplines.map((discipline) => (
+            {examSimulations.map((exam) => (
               <SimulationDisciplineCard
-                key={discipline.id}
-                iconPath={discipline.iconPath}
-                iconNode={discipline.iconNode}
-                title={discipline.title}
-                time={discipline.time}
-                questions={discipline.questions}
+                key={exam.id}
+                iconNode={<OpenBookIcon />}
+                title={exam.name}
+                time={240}
+                questions={156}
                 minuteLabel={t.simulations.minutes}
                 questionLabel={t.simulations.questions}
-                onClick={() => navigate(`/simulation/${discipline.id}`)}
+                onClick={() => navigate(exam.path)}
               />
             ))}
           </div>
