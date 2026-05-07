@@ -35,7 +35,7 @@ const ClipboardIcon = () => (
   </svg>
 );
 
-const OpenBookIcon = () => (
+export const OpenBookIcon = () => (
   <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#d32f2f" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
     <path d="M3 6.5A2.5 2.5 0 0 1 5.5 4H11v15H5.5A2.5 2.5 0 0 0 3 21.5z" />
     <path d="M21 6.5A2.5 2.5 0 0 0 18.5 4H13v15h5.5a2.5 2.5 0 0 1 2.5 2.5z" />
@@ -44,7 +44,7 @@ const OpenBookIcon = () => (
   </svg>
 );
 
-const TopNav = ({ onGoAbout, onGoProfile, onGoDashboard, onGoActualites, onGoContact, onGoModule }) => {
+export const SimulationTopNav = ({ onGoAbout, onGoProfile, onGoDashboard, onGoActualites, onGoContact, onGoModule }) => {
   const [openLang, setOpenLang] = useState(false);
   const [openFormation, setOpenFormation] = useState(false);
   const { language, setLanguage, t } = useLanguage();
@@ -133,7 +133,7 @@ const TopNav = ({ onGoAbout, onGoProfile, onGoDashboard, onGoActualites, onGoCon
   );
 };
 
-const DisciplineCard = ({ iconPath, iconNode, title, time, questions, minuteLabel, questionLabel, onClick }) => (
+export const SimulationDisciplineCard = ({ iconPath, iconNode, title, time, questions, minuteLabel, questionLabel, onClick }) => (
   <button type="button" className={styles.card} onClick={onClick}>
     <div className={styles.cardIconWrapper}>
       {iconNode ? iconNode : <img src={iconPath} alt={`Icone ${title}`} className={styles.cardIcon} />}
@@ -165,7 +165,7 @@ export default function SimulationSelectionPage() {
 
   return (
     <div className={styles.pageContainer}>
-      <TopNav
+      <SimulationTopNav
         onGoAbout={() => navigate("/about")}
         onGoProfile={() => navigate("/profile")}
         onGoDashboard={() => navigate("/dashboard")}
@@ -184,7 +184,7 @@ export default function SimulationSelectionPage() {
         <section className={styles.gridSection}>
           <div className={styles.cardGrid}>
             {disciplines.map((discipline) => (
-              <DisciplineCard
+              <SimulationDisciplineCard
                 key={discipline.id}
                 iconPath={discipline.iconPath}
                 iconNode={discipline.iconNode}

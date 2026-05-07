@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import styles from "./AboutPage.module.css";
 import logo from "../assets/images/logo.png";
 import userIcon from "../assets/images/icon-profile.png";
@@ -9,6 +9,7 @@ import graphIcon from "../assets/images/graph.png";
 import handshakeIcon from "../assets/images/handshake.jpg";
 import certificateIcon from "../assets/images/certificate.png";
 import BackButton from "../components/BackButton";
+import { aboutTestSections } from "../data/siteContent";
 import { languageOptions } from "../utils/language";
 import { useLanguage } from "../context/LanguageContext";
 
@@ -105,13 +106,55 @@ const ValueCard = ({ title }) => (
   </div>
 );
 
+const examInfoContent = [
+  {
+    id: "whats-testdaf-dsh",
+    text:
+      "TestDaF and DSH are German university entrance language exams. They assess reading, listening, writing, and speaking skills for academic study in German.",
+  },
+  {
+    id: "testdaf-dsh-registration",
+    text:
+      "Registration is usually completed online through the official test provider or the university language center. Dates, fees, and deadlines vary by country and institution.",
+  },
+  {
+    id: "useful-links",
+    text:
+      "Keep the official TestDaF portal, university DSH pages, sample-test pages, and exam-center announcements close while planning your preparation.",
+  },
+  {
+    id: "different-test-testdaf-dsh",
+    text:
+      "TestDaF is standardized internationally, while DSH is organized by universities. Both can meet admission requirements, but accepted scores depend on the university program.",
+  },
+  {
+    id: "testdaf-dsh-results",
+    text:
+      "Results report your performance by skill area. Use them to identify whether you already meet the required level or need targeted preparation before retaking the exam.",
+  },
+  {
+    id: "others",
+    text:
+      "If you are unsure which exam fits your goal, compare the certificate accepted by your university, the next available date, and the format that best matches your strengths.",
+  },
+];
+
 export default function AboutPage() {
   const { t } = useLanguage();
+  const { hash } = useLocation();
   const pillars = [
     { iconPath: calendarIcon, title: t.about.pillars[0] },
     { iconPath: brainIcon, title: t.about.pillars[1] },
     { iconPath: graphIcon, title: t.about.pillars[2] },
   ];
+  const sectionLabels = new Map(aboutTestSections.map((section) => [section.id, section.label]));
+
+  useEffect(() => {
+    if (!hash) return;
+    window.setTimeout(() => {
+      document.getElementById(hash.slice(1))?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+  }, [hash]);
 
   return (
     <div className={styles.pageContainer}>
@@ -153,6 +196,18 @@ export default function AboutPage() {
           <div className={styles.valuesGrid}>
             {t.about.values.map((value) => (
               <ValueCard key={value} title={value} />
+            ))}
+          </div>
+        </section>
+
+        <section className={styles.examInfoSection} aria-label="About TestDaF and DSH">
+          <h3 className={styles.sectionTitle}>About TestDaF/DSH</h3>
+          <div className={styles.examInfoGrid}>
+            {examInfoContent.map((section) => (
+              <article id={section.id} className={styles.examInfoCard} key={section.id}>
+                <h4>{sectionLabels.get(section.id)}</h4>
+                <p>{section.text}</p>
+              </article>
             ))}
           </div>
         </section>
