@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { BookOpenCheck } from "lucide-react";
 import styles from "./SimulationSelectionPage.module.css";
 
 import logo from "../assets/images/logo.png";
@@ -35,15 +36,10 @@ const ClipboardIcon = () => (
 );
 
 export const OpenBookIcon = () => (
-  <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#d32f2f" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M3 6.5A2.5 2.5 0 0 1 5.5 4H11v15H5.5A2.5 2.5 0 0 0 3 21.5z" />
-    <path d="M21 6.5A2.5 2.5 0 0 0 18.5 4H13v15h5.5a2.5 2.5 0 0 1 2.5 2.5z" />
-    <path d="M11 7c-1.2-0.5-2.5-0.8-4-0.8" />
-    <path d="M13 7c1.2-0.5 2.5-0.8 4-0.8" />
-  </svg>
+  <BookOpenCheck size={52} strokeWidth={1.8} />
 );
 
-export const SimulationTopNav = ({ onGoAbout, onGoProfile, onGoDashboard, onGoActualites, onGoContact, onGoModule }) => {
+export const SimulationTopNav = ({ onGoHome, onGoAbout, onGoProfile, onGoDashboard, onGoActualites, onGoContact, onGoModule }) => {
   const [openLang, setOpenLang] = useState(false);
   const [openFormation, setOpenFormation] = useState(false);
   const { language, setLanguage, t } = useLanguage();
@@ -54,13 +50,16 @@ export const SimulationTopNav = ({ onGoAbout, onGoProfile, onGoDashboard, onGoAc
     <nav className={styles.topNav}>
     <div className={styles.navContainer}>
       <div className={styles.navLeft}>
-        <img src={logo} alt="Deutsch Lernen Logo" className={styles.logo} onClick={loggedIn ? onGoDashboard : () => window.location.assign("/")} style={{ cursor: "pointer" }} />
+        <img src={logo} alt="Deutsch Lernen Logo" className={styles.logo} onClick={onGoHome} style={{ cursor: "pointer" }} />
       </div>
 
       <div className={styles.navCenter}>
+        <button type="button" className={styles.navLink} onClick={onGoHome}>
+          {t.common.home}
+        </button>
         {loggedIn ? (
           <button type="button" className={styles.navLink} onClick={onGoDashboard}>
-            {t.common.home}
+            {t.common.dashboard}
           </button>
         ) : null}
         <button type="button" className={styles.navLink} onClick={onGoActualites}>
@@ -137,8 +136,8 @@ export const SimulationTopNav = ({ onGoAbout, onGoProfile, onGoDashboard, onGoAc
   );
 };
 
-export const SimulationDisciplineCard = ({ iconPath, iconNode, title, time, questions, minuteLabel, questionLabel, onClick }) => (
-  <button type="button" className={styles.card} onClick={onClick}>
+export const SimulationDisciplineCard = ({ iconPath, iconNode, title, time, questions, minuteLabel, questionLabel, accent = "#d32f2f", onClick }) => (
+  <button type="button" className={styles.card} style={{ "--card-accent": accent }} onClick={onClick}>
     <div className={styles.cardIconWrapper}>
       {iconNode ? iconNode : <img src={iconPath} alt={`Icone ${title}`} className={styles.cardIcon} />}
     </div>
@@ -190,6 +189,7 @@ export default function SimulationSelectionPage() {
   return (
     <div className={styles.pageContainer}>
       <SimulationTopNav
+        onGoHome={() => navigate("/")}
         onGoAbout={() => navigate("/about")}
         onGoProfile={() => navigate("/profile")}
         onGoDashboard={() => navigate("/dashboard")}
@@ -217,6 +217,7 @@ export default function SimulationSelectionPage() {
                 title={exam.name}
                 time={240}
                 questions={156}
+                accent={exam.accent}
                 minuteLabel={t.simulations.minutes}
                 questionLabel={t.simulations.questions}
                 onClick={() => navigate(exam.path)}

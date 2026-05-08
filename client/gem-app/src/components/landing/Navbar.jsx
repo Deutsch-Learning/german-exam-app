@@ -3,11 +3,13 @@ import { Link } from "react-router-dom";
 import { Menu, X } from "lucide-react";
 import { aboutTestSections, currentTopics, pageLinks } from "../../data/siteContent";
 import { languageOptions } from "../../utils/language";
+import { isLoggedIn } from "../../utils/access";
 
 export default function Navbar({ logo, language = "fr", onChangeLanguage, labels }) {
   const [openLang, setOpenLang] = useState(false);
   const [openDropdown, setOpenDropdown] = useState("");
   const [mobileOpen, setMobileOpen] = useState(false);
+  const loggedIn = isLoggedIn();
 
   const selected = useMemo(
     () => languageOptions.find((item) => item.id === language) ?? languageOptions[0],
@@ -155,12 +157,20 @@ export default function Navbar({ logo, language = "fr", onChangeLanguage, labels
             ) : null}
           </div>
           <div className="auth-nav-actions">
-            <Link className="btn-login" to="/login" onClick={closeMenus}>
-              {labels.login}
-            </Link>
-            <Link className="btn-register-nav" to="/register" onClick={closeMenus}>
-              {labels.createAccount ?? "Create an account"}
-            </Link>
+            {loggedIn ? (
+              <Link className="btn-register-nav" to="/dashboard" onClick={closeMenus}>
+                {labels.dashboard ?? "Dashboard"}
+              </Link>
+            ) : (
+              <>
+                <Link className="btn-login" to="/login" onClick={closeMenus}>
+                  {labels.login}
+                </Link>
+                <Link className="btn-register-nav" to="/register" onClick={closeMenus}>
+                  {labels.createAccount ?? "Create an account"}
+                </Link>
+              </>
+            )}
           </div>
         </nav>
       </div>

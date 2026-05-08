@@ -33,6 +33,21 @@
   object-fit: contain;
 }
 
+.switchButton {
+  min-height: 40px;
+  border: 1px solid rgba(249, 196, 21, 0.45);
+  border-radius: 8px;
+  background: rgba(249, 196, 21, 0.12);
+  color: #ffffff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 800;
+}
+
+.switchButton:hover {
+  background: rgba(249, 196, 21, 0.22);
+}
+
 .nav {
   display: grid;
   gap: 8px;

@@ -1,6 +1,6 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import {
   Activity,
   BarChart3,
@@ -49,6 +49,7 @@ const useAdminData = (loader) => {
 
 function AdminShell({ children }) {
   const location = useLocation();
+  const navigate = useNavigate();
   const links = [
     { to: "/admin/dashboard", label: "Dashboard", icon: BarChart3 },
     { to: "/admin/users", label: "Users", icon: Users },
@@ -65,6 +66,13 @@ function AdminShell({ children }) {
             <img src={logo} alt="" />
             <span>Admin</span>
           </div>
+          <button
+            type="button"
+            className={styles.switchButton}
+            onClick={() => navigate("/dashboard?view=user")}
+          >
+            Switch to User
+          </button>
           <nav className={styles.nav} aria-label="Admin navigation">
             {links.map((item) => {
               const Icon = item.icon;
@@ -246,6 +254,24 @@ function AdminApiUsage() {
       <Header title="API Usage Monitoring" subtitle="Track API calls per user, including AI-labelled consumption units." />
       {error ? <p className={styles.error}>{error}</p> : null}
       {loading ? <p>Loading...</p> : null}
+      <section className={styles.statGrid}>
+        <article className={styles.statCard}>
+          <span>AI requests</span>
+          <strong>{data?.summary?.ai_requests ?? 0}</strong>
+        </article>
+        <article className={styles.statCard}>
+          <span>Token usage</span>
+          <strong>{data?.summary?.token_usage ?? 0}</strong>
+        </article>
+        <article className={styles.statCard}>
+          <span>Calls 24h</span>
+          <strong>{data?.summary?.calls_24h ?? 0}</strong>
+        </article>
+        <article className={styles.statCard}>
+          <span>Estimated cost</span>
+          <strong>${data?.summary?.estimated_cost ?? 0}</strong>
+        </article>
+      </section>
       <section className={styles.panel}>
         <h2>Consumption by user</h2>
         <div className={styles.tableWrap}>
@@ -301,6 +327,7 @@ function AdminExams() {
   }, []);
   const { data, loading, error, reload } = useAdminData(loader);
   const [form, setForm] = useState({ code: "", name: "", examType: "custom", level: "B2" });
+  const [generateForm, setGenerateForm] = useState({ type: "testdaf", serie: "serie-1", level: "B2", moduleCategory: "reading", quantity: 4 });
   const [jsonPayload, setJsonPayload] = useState("");
   const [questionEdit, setQuestionEdit] = useState({ examId: "", questionId: "", prompt: "" });
   const [status, setStatus] = useState("");
@@ -318,6 +345,13 @@ function AdminExams() {
     await API.post("/api/admin/exams/upload-json", { payload });
     setJsonPayload("");
     setStatus("JSON exam upload complete.");
+    await reload();
+  };
+
+  const generateExams = async (event) => {
+    event.preventDefault();
+    await API.post("/api/admin/exams/generate", generateForm);
+    setStatus("Generated exam content saved.");
     await reload();
   };
 
@@ -377,6 +411,44 @@ function AdminExams() {
           </button>
         </section>
       </div>
+      <section className={styles.panel}>
+        <h2>Bulk exam generation</h2>
+        <form className={styles.formGrid} onSubmit={generateExams}>
+          <label className={styles.field}>Test type
+            <select value={generateForm.type} onChange={(e) => setGenerateForm((prev) => ({ ...prev, type: e.target.value }))}>
+              <option value="testdaf">TestDaF</option>
+              <option value="dsh">DSH</option>
+              <option value="goethe">Goethe</option>
+              <option value="telc">telc</option>
+            </select>
+          </label>
+          <label className={styles.field}>Serie
+            <input value={generateForm.serie} onChange={(e) => setGenerateForm((prev) => ({ ...prev, serie: e.target.value }))} />
+          </label>
+          <label className={styles.field}>Level
+            <select value={generateForm.level} onChange={(e) => setGenerateForm((prev) => ({ ...prev, level: e.target.value }))}>
+              <option value="A1">A1</option>
+              <option value="A2">A2</option>
+              <option value="B1">B1</option>
+              <option value="B2">B2</option>
+              <option value="C1">C1</option>
+              <option value="C2">C2</option>
+            </select>
+          </label>
+          <label className={styles.field}>Module
+            <select value={generateForm.moduleCategory} onChange={(e) => setGenerateForm((prev) => ({ ...prev, moduleCategory: e.target.value }))}>
+              <option value="reading">Reading</option>
+              <option value="listening">Listening</option>
+              <option value="writing">Writing</option>
+              <option value="speaking">Speaking</option>
+            </select>
+          </label>
+          <label className={styles.field}>Quantity
+            <input type="number" min="1" max="50" value={generateForm.quantity} onChange={(e) => setGenerateForm((prev) => ({ ...prev, quantity: Number(e.target.value) }))} />
+          </label>
+          <button className={styles.button} type="submit">Generate</button>
+        </form>
+      </section>
       <section className={styles.panel}>
         <div className={styles.panelHeader}>
           <h2>Existing exams</h2>
@@ -461,9 +533,15 @@ function AdminExports() {
       <section className={styles.panel}>
         <div className={styles.actions}>
           <button className={styles.button} type="button" onClick={() => download("users", "csv")}>Users CSV</button>
+          <button className={styles.secondaryButton} type="button" onClick={() => download("users", "excel")}>Users Excel</button>
+          <button className={styles.secondaryButton} type="button" onClick={() => download("users", "pdf")}>Users PDF</button>
           <button className={styles.secondaryButton} type="button" onClick={() => download("users", "json")}>Users JSON</button>
           <button className={styles.button} type="button" onClick={() => download("results", "csv")}>Results CSV</button>
+          <button className={styles.secondaryButton} type="button" onClick={() => download("results", "excel")}>Results Excel</button>
+          <button className={styles.secondaryButton} type="button" onClick={() => download("results", "pdf")}>Results PDF</button>
           <button className={styles.secondaryButton} type="button" onClick={() => download("results", "json")}>Results JSON</button>
+          <button className={styles.button} type="button" onClick={() => download("statistics", "csv")}>Statistics CSV</button>
+          <button className={styles.button} type="button" onClick={() => download("written-copies", "csv")}>Written copies CSV</button>
         </div>
       </section>
     </>

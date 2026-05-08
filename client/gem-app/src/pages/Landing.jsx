@@ -153,7 +153,7 @@ export default function LandingPage() {
         logo={logo}
         language={language}
         onChangeLanguage={setLanguage}
-        labels={{ ...copy.nav, lessons: t.common.lessons }}
+        labels={{ ...copy.nav, lessons: t.common.lessons, dashboard: t.common.dashboard }}
       />
 
       <section className="hero-section">

@@ -79,6 +79,38 @@ const readingPassage = {
   ],
 };
 
+const germanReadingPassage = {
+  title: "Die Universitaetsbibliothek wird flexibler",
+  intro:
+    "Der folgende Text beschreibt eine neue Organisation der Bibliothek einer deutschen Universitaet. Lesen Sie ihn aufmerksam und beantworten Sie danach die Fragen.",
+  paragraphs: [
+    {
+      id: "A",
+      heading: "Laengere Oeffnungszeiten",
+      text:
+        "Ab Mai bleibt die Zentralbibliothek der Universitaet Leipzig von Montag bis Donnerstag bis 22 Uhr geoeffnet. Die Entscheidung reagiert auf eine haeufige Bitte von Studierenden, die tagsueber arbeiten oder sich intensiv auf Pruefungen vorbereiten.",
+    },
+    {
+      id: "B",
+      heading: "Angepasste Arbeitsbereiche",
+      text:
+        "Der erste Stock ist fuer ruhiges Arbeiten reserviert, waehrend das Erdgeschoss Gruppen aufnimmt. Arbeitsraeume koennen online fuer zwei Stunden gebucht werden; Semesterprojekte haben dabei Vorrang.",
+    },
+    {
+      id: "C",
+      heading: "Ein Unterstuetzungsprogramm",
+      text:
+        "Die Bibliothek bietet auch kurze Workshops zur Literaturrecherche, zum Zitieren von Quellen und zur Nutzung deutscher Datenbanken an. Die Anmeldung erfolgt ueber die Plattform Bibliothek Plus.",
+    },
+    {
+      id: "D",
+      heading: "Einige Einschraenkungen",
+      text:
+        "Die Ausleihe ist nach 19 Uhr nicht mehr verfuegbar. Studierende koennen Buecher jedoch in eine automatische Rueckgabebox in der Naehe des Haupteingangs legen.",
+    },
+  ],
+};
+
 const readingTasks = [
   {
     id: "read-1",
@@ -598,6 +630,38 @@ const speakingTasks = [
   },
 ];
 
+const germanWritingPrompts = {
+  "write-1": "Schreiben Sie eine E-Mail an eine Sprachschule in Berlin. Fragen Sie nach den Uhrzeiten des A2-Kurses, dem Preis und dem Anmeldedatum.",
+  "write-2": "Schreiben Sie einem deutschen Freund und laden Sie ihn ein, Ihre Stadt am Wochenende zu besuchen. Schlagen Sie zwei Aktivitaeten vor.",
+  "write-3": "Sie koennen zu einem Behoerdentermin nicht kommen. Schreiben Sie eine E-Mail, entschuldigen Sie sich und schlagen Sie zwei neue Termine vor.",
+  "write-4": "Aeussern Sie Ihre Meinung zu Online-Sprachkursen. Nennen Sie einen Vorteil, einen Nachteil und Ihre persoenliche Praeferenz.",
+  "write-5": "Sie haben ein Zimmer reserviert, aber die Heizung funktioniert nicht. Schreiben Sie an das Wohnheim, beschreiben Sie das Problem und bitten Sie um eine Loesung.",
+  "write-6": "Sollten oeffentliche Verkehrsmittel fuer Studierende kostenlos sein? Entwickeln Sie Ihren Standpunkt mit zwei Argumenten und einer Einschraenkung.",
+  "write-7": "Sollte man waehrend des Studiums arbeiten? Stellen Sie Vorteile, Risiken und eine Empfehlung fuer internationale Studierende dar.",
+  "write-8": "Diskutieren Sie den Einsatz kuenstlicher Intelligenz beim Sprachenlernen. Analysieren Sie Autonomie, Korrektur und ethische Grenzen.",
+  "write-9": "Verfassen Sie eine Synthese ueber das Gleichgewicht zwischen akademischem Erfolg und psychischer Gesundheit bei Studierenden. Schlagen Sie zwei konkrete Massnahmen vor.",
+  "write-10": "Analysieren Sie, inwiefern internationale Mobilitaet die berufliche Identitaet junger Absolventinnen und Absolventen veraendert. Stuetzen Sie Ihre Antwort auf Beispiele.",
+};
+
+const germanSpeakingPrompts = {
+  "speak-1": "Beschreiben Sie das Bild: Wen sehen Sie, wo sind die Personen und was machen sie?",
+  "speak-2": "Stellen Sie sich auf Deutsch vor: Name, Land, aktuelle Taetigkeit und Grund, Deutsch zu lernen.",
+  "speak-3": "Sie kommen in einer Sprachschule an. Fragen Sie, wo Ihr Raum ist, wann der Kurs beginnt und wo Sie das Buch kaufen koennen.",
+  "speak-4": "Antworten Sie auf die Frage: Lernen Sie lieber morgens oder abends? Nennen Sie zwei Gruende.",
+  "speak-5": "Erzaehlen Sie von einer wichtigen Reise: Wohin sind Sie gefahren, mit wem, und was haben Sie gelernt?",
+  "speak-6": "Vergleichen Sie das Leben in der Stadt und auf dem Land fuer internationale Studierende. Beenden Sie Ihre Antwort mit Ihrer Praeferenz.",
+  "speak-7": "Ihre Mitbewohnerin oder Ihr Mitbewohner moechte waehrend Ihrer Pruefungszeit eine Feier organisieren. Erklaeren Sie das Problem und schlagen Sie einen Kompromiss vor.",
+  "speak-8": "Erklaeren Sie, warum Weiterbildung im modernen Berufsleben wichtig wird. Geben Sie ein konkretes Beispiel.",
+  "speak-9": "Reagieren Sie auf diese Aussage: Homeoffice macht Teams weniger kreativ. Nuancieren Sie Ihre Antwort.",
+  "speak-10": "Inwiefern veraendert eine neue Sprache die Art zu denken und zu handeln? Entwickeln Sie eine strukturierte Antwort.",
+};
+
+const withGermanPrompts = (tasks, promptMap) =>
+  tasks.map((task) => ({
+    ...task,
+    prompt: promptMap[task.id] ?? task.prompt,
+  }));
+
 const MODULES = {
   read: {
     id: "read",
@@ -609,7 +673,7 @@ const MODULES = {
     Icon: BookOpen,
     simulationSeconds: 60 * 60,
     tasks: readingTasks,
-    passage: readingPassage,
+    passage: germanReadingPassage ?? readingPassage,
     focus: ["Repérage d'informations", "Vrai/Faux", "Titres à associer", "Vocabulaire en contexte"],
     advancement: [
       "Textes plus longs",
@@ -655,7 +719,7 @@ const MODULES = {
     soft: "#f5f3ff",
     Icon: PencilLine,
     simulationSeconds: 60 * 60,
-    tasks: writingTasks,
+    tasks: withGermanPrompts(writingTasks, germanWritingPrompts),
     focus: ["Plan clair", "Registre adapté", "Connecteurs", "Correction grammaticale"],
     advancement: [
       "Sujets plus abstraits",
@@ -673,7 +737,7 @@ const MODULES = {
     soft: "#ecfdf5",
     Icon: Mic,
     simulationSeconds: 60 * 60,
-    tasks: speakingTasks,
+    tasks: withGermanPrompts(speakingTasks, germanSpeakingPrompts),
     focus: ["Prononciation", "Fluidité", "Interaction", "Organisation des idées"],
     advancement: [
       "Réponses plus longues",
@@ -685,9 +749,73 @@ const MODULES = {
 };
 
 const TRUE_FALSE_OPTIONS = [
-  { value: "true", label: "Vrai" },
-  { value: "false", label: "Faux" },
+  { value: "true", label: "Richtig" },
+  { value: "false", label: "Falsch" },
 ];
+
+const GERMAN_CHOICE_LABELS = {
+  "read-1": {
+    a: "Die Bibliothek schliesst waehrend der Pruefungen.",
+    b: "Die Bibliothek bleibt an einigen Tagen laenger geoeffnet.",
+    c: "Die Bibliothek wird kostenpflichtig.",
+  },
+  "read-5": {
+    a: "Um auf die Beduerfnisse der Studierenden zu reagieren.",
+    b: "Um Personalkosten zu senken.",
+    c: "Um Abendkurse zu ersetzen.",
+  },
+  "read-8": {
+    a: "Die Ausleihe laeuft die ganze Nacht weiter.",
+    b: "Die Ausleihe ist nach 19 Uhr geschlossen, aber Rueckgaben bleiben moeglich.",
+    c: "Rueckgaben sind nach 19 Uhr verboten.",
+  },
+  "read-10": {
+    a: "Informativ mit einigen praktischen Bedingungen.",
+    b: "Kritisch und ironisch.",
+    c: "Werblich ohne konkrete Details.",
+  },
+  "listen-1": {
+    a: "In einem Bahnhof.",
+    b: "In einer Bibliothek.",
+    c: "In einem Restaurant.",
+  },
+  "listen-4": {
+    change: "Gleiswechsel",
+    delay: "Ansage der Verspaetung",
+    coffee: "Hinweis fuer Reisende",
+  },
+  "listen-5": {
+    a: "Das Gleis koennte sich erneut aendern.",
+    b: "Die Fahrkarten sind nicht mehr gueltig.",
+    c: "Der Zug faellt aus.",
+  },
+  "listen-7": {
+    a: "Das neue Gleis.",
+    b: "Die genaue Ursache der Verspaetung.",
+    c: "Das Ziel des Zuges.",
+  },
+  "listen-9": {
+    platform: "Neues Gleis",
+    delay: "Voraussichtliche Verspaetung",
+    screens: "Anzeigen beobachten",
+  },
+  "listen-10": {
+    a: "Formal, kurz und funktional.",
+    b: "Umgangssprachlich und humorvoll.",
+    c: "Erzaehlend und persoenlich.",
+  },
+};
+
+const GERMAN_HEADING_LABELS = {
+  "read-4": ["Angepasste Arbeitsbereiche", "Laengerer Zugang", "Ein Unterstuetzungsprogramm"],
+  "read-9": ["Organisation der Raeume", "Paedagogische Angebote", "Praktische Einschraenkungen"],
+};
+
+const getProtectedChoiceLabel = (task, option, index = 0) =>
+  GERMAN_CHOICE_LABELS[task.id]?.[option.value] ??
+  GERMAN_HEADING_LABELS[task.id]?.[index] ??
+  option.label ??
+  option;
 
 const AUDIO_REPLAY_LIMIT = 5;
 const SPEECH_WORDS_PER_MINUTE = 132;
@@ -894,9 +1022,7 @@ const buildSeriesTask = (moduleId, task, index, content, series) => {
     return {
       ...base,
       title: override.title ?? `${series.code}: ${task.title}`,
-      prompt:
-        override.prompt ??
-        `${task.prompt}\n\nSeries context: ${series.theme}. Connect your answer to ${series.setting}.`,
+      prompt: `${task.prompt}\n\nBeziehen Sie Ihre Antwort auf die Serie ${series.code} und nennen Sie ein konkretes Beispiel aus dem Pruefungskontext.`,
       criteria: override.criteria ?? [...(task.criteria ?? []), series.code],
     };
   }
@@ -905,9 +1031,7 @@ const buildSeriesTask = (moduleId, task, index, content, series) => {
     return {
       ...base,
       title: override.title ?? `${series.code}: ${task.title}`,
-      prompt:
-        override.prompt ??
-        `${task.prompt} Include one detail from ${series.theme} and one example from ${series.setting}.`,
+      prompt: `${task.prompt} Nennen Sie ein Detail aus der Serie ${series.code} und ein konkretes Beispiel.`,
       checklist: override.checklist ?? [...(task.checklist ?? []), series.code],
     };
   }
@@ -918,13 +1042,11 @@ const buildSeriesTask = (moduleId, task, index, content, series) => {
       question:
         override.question ??
         `In ${series.code}, what is the main topic for this ${content.shortLabel.toLowerCase()} task?`,
-      options:
-        override.options ??
-        [
-          { value: "a", label: content.theme },
-          { value: "b", label: "a holiday recipe" },
-          { value: "c", label: "a sports ranking" },
-        ],
+      options: [
+        { value: "a", label: "Das zentrale Thema dieser Aufgabe." },
+        { value: "b", label: "Ein Rezept fuer den Urlaub." },
+        { value: "c", label: "Eine Rangliste aus dem Sport." },
+      ],
       correct: override.correct ?? "a",
     };
   }
@@ -953,10 +1075,10 @@ const buildSeriesTask = (moduleId, task, index, content, series) => {
   if (task.type === "match") {
     const paragraphs = task.paragraphs ?? ["A", "B", "C"];
     const headings = [
-      `${series.code} context`,
-      `Topic: ${content.theme}`,
-      `Exam: ${series.examName}`,
-      `Level: ${series.level}`,
+      `${series.code} Kontext`,
+      "Zentrales Thema",
+      `${series.examName} Pruefung`,
+      `Niveau ${series.level}`,
     ].slice(0, paragraphs.length);
     return {
       ...base,
@@ -964,28 +1086,24 @@ const buildSeriesTask = (moduleId, task, index, content, series) => {
         override.question ??
         `Match each item to the correct ${series.code} series heading.`,
       paragraphs,
-      headings: override.headings ?? headings,
-      correct:
-        override.correct ??
-        Object.fromEntries(paragraphs.map((paragraph, paragraphIndex) => [paragraph, headings[paragraphIndex]])),
+      headings,
+      correct: Object.fromEntries(paragraphs.map((paragraph, paragraphIndex) => [paragraph, headings[paragraphIndex]])),
     };
   }
 
   if (task.type === "order") {
-    const events =
-      override.events ??
-      [
-        { value: "topic", label: `Identify ${content.theme}` },
-        { value: "details", label: "Note dates and key details" },
-        { value: "answer", label: "Choose the answer for the task" },
-      ];
+    const events = [
+      { value: "topic", label: "Thema erkennen" },
+      { value: "details", label: "Daten und wichtige Details notieren" },
+      { value: "answer", label: "Passende Antwort auswaehlen" },
+    ];
     return {
       ...base,
       question:
         override.question ??
         `Put the ${series.code} listening steps in the best order.`,
       events,
-      correct: override.correct ?? events.map((event) => event.value),
+      correct: events.map((event) => event.value),
     };
   }
 
@@ -1029,7 +1147,8 @@ const stringifyAnswer = (value) => {
 const getAnswerLabel = (task, answer) => {
   if (task.type === "multiple" || task.type === "trueFalse") {
     const options = task.type === "trueFalse" ? TRUE_FALSE_OPTIONS : task.options;
-    return options.find((option) => option.value === answer)?.label ?? stringifyAnswer(answer);
+    const option = options.find((item) => item.value === answer);
+    return option ? getProtectedChoiceLabel(task, option) : stringifyAnswer(answer);
   }
   if (task.type === "blank") return stringifyAnswer(answer);
   if (task.type === "match" || task.type === "order") return stringifyAnswer(answer);
@@ -1039,7 +1158,8 @@ const getAnswerLabel = (task, answer) => {
 const getCorrectLabel = (task) => {
   if (task.type === "multiple" || task.type === "trueFalse") {
     const options = task.type === "trueFalse" ? TRUE_FALSE_OPTIONS : task.options;
-    return options.find((option) => option.value === task.correct)?.label ?? stringifyAnswer(task.correct);
+    const option = options.find((item) => item.value === task.correct);
+    return option ? getProtectedChoiceLabel(task, option) : stringifyAnswer(task.correct);
   }
   return stringifyAnswer(task.correct);
 };
@@ -1866,7 +1986,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
                 ].join(" ")}
                 onClick={() => setAnswerForCurrent(option.value)}
               >
-                <span>{option.label}</span>
+                <span translate="no">{getProtectedChoiceLabel(task, option)}</span>
                 {showCorrectness && isCorrect ? <CheckCircle2 size={18} /> : null}
               </button>
             );
@@ -1901,9 +2021,9 @@ export default function SimulationModulePage({ moduleIdOverride }) {
                 onChange={(event) => setAnswerForCurrent({ ...answerObject, [paragraphId]: event.target.value })}
               >
                 <option value="">Choisir un titre</option>
-                {task.headings.map((heading) => (
-                  <option key={heading} value={heading}>
-                    {heading}
+                {task.headings.map((heading, index) => (
+                  <option key={heading} value={heading} translate="no">
+                    {getProtectedChoiceLabel(task, heading, index)}
                   </option>
                 ))}
               </select>
@@ -1930,8 +2050,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               >
                 <option value="">Choisir un événement</option>
                 {task.events.map((event) => (
-                  <option key={event.value} value={event.value}>
-                    {event.label}
+                  <option key={event.value} value={event.value} translate="no">
+                    {getProtectedChoiceLabel(task, event)}
                   </option>
                 ))}
               </select>
@@ -1951,13 +2071,13 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           <BookOpen size={18} />
           Texte niveau {level}
         </div>
-        <h2>{module.passage.title}</h2>
-        <p className={styles.introText}>{module.passage.intro}</p>
+        <h2 translate="no">{module.passage.title}</h2>
+        <p className={styles.introText} translate="no">{module.passage.intro}</p>
         <div className={styles.paragraphList}>
           {module.passage.paragraphs.map((paragraph) => (
             <article key={paragraph.id} className={styles.readingParagraph}>
               <span>{paragraph.id}</span>
-              <p>{paragraph.text}</p>
+              <p translate="no">{paragraph.text}</p>
             </article>
           ))}
         </div>
@@ -2069,7 +2189,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             <span>{level}</span>
           </div>
           <h2>{currentTask.title}</h2>
-          <p>{currentTask.prompt}</p>
+          <p translate="no">{currentTask.prompt}</p>
           <div className={styles.promptMeta}>
             <span><FileText size={16} /> {currentTask.minWords}-{currentTask.maxWords} mots</span>
             <span><ShieldCheck size={16} /> Registre {currentTask.register}</span>
@@ -2150,7 +2270,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             <span>{level}</span>
           </div>
           <h2>{currentTask.title}</h2>
-          <p>{currentTask.prompt}</p>
+          <p translate="no">{currentTask.prompt}</p>
           {currentTask.visual ? (
             <img className={styles.speakingImage} src={speakingImage} alt="Personnes actives dans un contexte quotidien" />
           ) : null}
@@ -2268,7 +2388,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
                 </div>
                 <h3>{row.title}</h3>
                 <p><b>Votre réponse:</b> {row.userAnswer}</p>
-                <p><b>Réponse attendue:</b> {row.correctAnswer}</p>
+                <p><b>Réponse attendue:</b> <span translate="no">{row.correctAnswer}</span></p>
                 {row.explanation ? <p className={styles.finalExplanation}>{row.explanation}</p> : null}
               </article>
             ))}
@@ -2308,16 +2428,22 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   }
 
   return (
-    <div className={`${styles.page} notranslate`} translate="no" style={{ "--module-accent": module.accent, "--module-soft": module.soft }}>
+    <div className={styles.page} style={{ "--module-accent": module.accent, "--module-soft": module.soft }}>
       <nav className={styles.nav}>
-        <button type="button" className={styles.logoButton} onClick={() => navigate(loggedIn ? "/dashboard" : "/")} aria-label="Retour">
+        <button type="button" className={styles.logoButton} onClick={() => navigate("/")} aria-label="Retour">
           <img src={logo} alt="Deutsch Lernen" />
         </button>
         <div className={styles.navActions}>
           {loggedIn ? (
-            <button type="button" onClick={() => navigate("/dashboard")}>
+            <button type="button" onClick={() => navigate("/")}>
               <Home size={16} />
               {t.common.home}
+            </button>
+          ) : null}
+          {loggedIn ? (
+            <button type="button" onClick={() => navigate("/dashboard")}>
+              <ClipboardCheck size={16} />
+              {t.common.dashboard}
             </button>
           ) : null}
           <button type="button" onClick={() => navigate(seriesRoute)}>

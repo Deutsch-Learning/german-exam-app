@@ -7,9 +7,8 @@ import API from "../services/api";
 import logo from "../assets/images/logo.png";
 import userIcon from "../assets/images/icon-profile.png";
 import { languageOptions } from "../utils/language";
-import { readSimulationHistory } from "../utils/simulationHistory";
 import { useLanguage } from "../context/LanguageContext";
-import { clearAuthSession, getAuthUser } from "../utils/access";
+import { clearAuthSession, getAuthUser, isAdmin } from "../utils/access";
 
 const formatDateTimeFr = (iso) => {
   try {
@@ -95,7 +94,7 @@ const LanguageDropdown = ({ language, setLanguage }) => {
   );
 };
 
-const TopNav = ({ onToggleMenu, onGoProfile, onGoActualites, onGoAbout, onGoContact, onGoModule, onGoLessons, language, setLanguage, labels }) => {
+const TopNav = ({ onToggleMenu, onGoHome, onGoDashboard, onGoProfile, onGoActualites, onGoAbout, onGoContact, onGoModule, onGoLessons, onSwitchAdmin, isAdminUser, language, setLanguage, labels }) => {
   const [openFormation, setOpenFormation] = useState(false);
 
   return (
@@ -105,7 +104,8 @@ const TopNav = ({ onToggleMenu, onGoProfile, onGoActualites, onGoAbout, onGoCont
         <img src={logo} alt="Deutsch Lernen" className={styles.logo} />
       </div>
       <div className={styles.navLinks}>
-        <a href="/dashboard">{labels.home}</a>
+        <button type="button" className={styles.linkBtn} onClick={onGoHome}>{labels.home}</button>
+        <button type="button" className={styles.linkBtn} onClick={onGoDashboard}>{labels.dashboard}</button>
         <button type="button" className={styles.linkBtn} onClick={onGoActualites}>{labels.news} <ChevronDownIcon /></button>
         <button type="button" className={styles.linkBtn} onClick={onGoAbout}>{labels.about} <ChevronDownIcon /></button>
         <div className={styles.dropdown}>
@@ -123,6 +123,11 @@ const TopNav = ({ onToggleMenu, onGoProfile, onGoActualites, onGoAbout, onGoCont
         <button type="button" className={styles.linkBtn} onClick={onGoContact}>{labels.contact}</button>
       </div>
       <div className={styles.navRight}>
+        {isAdminUser ? (
+          <button type="button" className={styles.switchButton} onClick={onSwitchAdmin}>
+            Switch to Admin
+          </button>
+        ) : null}
         <LanguageDropdown language={language} setLanguage={setLanguage} />
         <button className={styles.profileBtn} onClick={onGoProfile} type="button"><img src={userIcon} alt="Profile" /></button>
       </div>
@@ -291,7 +296,6 @@ export default function DashboardMainPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { language, setLanguage, t } = useLanguage();
   const [data, setData] = useState(null);
-  const [localSimulations, setLocalSimulations] = useState(() => readSimulationHistory());
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
@@ -315,15 +319,6 @@ export default function DashboardMainPage() {
 
   useEffect(() => { fetchDashboard(); }, [fetchDashboard]);
 
-  const refreshLocalSimulations = useCallback(() => {
-    setLocalSimulations(readSimulationHistory());
-  }, []);
-
-  useEffect(() => {
-    window.addEventListener("focus", refreshLocalSimulations);
-    return () => window.removeEventListener("focus", refreshLocalSimulations);
-  }, [refreshLocalSimulations]);
-
   const displayName = useMemo(() => {
     const first = data?.user?.first_name ?? "";
     const last = data?.user?.last_name ?? "";
@@ -332,19 +327,23 @@ export default function DashboardMainPage() {
   }, [data]);
 
   const dashboardSimulations = useMemo(() => {
-    if (localSimulations.length) return localSimulations;
     return (data?.simulations ?? []).map((simulation) => ({
       ...simulation,
       id: `server-${simulation.id}`,
       title: simulation.exam_name,
       moduleType: "Résultat enregistré",
       progressPercent: simulation.score_pct,
-      lastAccessedAt: simulation.taken_at,
+      lastAccessedAt: simulation.created_at ?? simulation.taken_at,
       route: "/simulations",
     }));
-  }, [data?.simulations, localSimulations]);
+  }, [data?.simulations]);
 
-  const onLogout = useCallback(() => {
+  const onLogout = useCallback(async () => {
+    try {
+      await API.post("/api/auth/logout");
+    } catch {
+      // Local cleanup still needs to happen if the token is already expired.
+    }
     clearAuthSession();
     navigate("/login");
   }, [navigate]);
@@ -360,6 +359,7 @@ export default function DashboardMainPage() {
       contact: common.contact,
       profile: common.profile,
       progress: common.progress,
+      dashboard: common.dashboard,
       logout: common.logout,
       modules: t.modules,
     };
@@ -369,12 +369,16 @@ export default function DashboardMainPage() {
     <div className={styles.appWrapper}>
       <TopNav
         onToggleMenu={() => setSidebarOpen(true)}
+        onGoHome={() => navigate("/")}
+        onGoDashboard={() => navigate("/dashboard?view=user")}
         onGoProfile={() => navigate("/profile")}
         onGoActualites={() => navigate("/actualites")}
         onGoAbout={() => navigate("/about")}
         onGoContact={() => navigate("/contact")}
         onGoModule={(moduleId) => navigate(`/simulation/${moduleId}`)}
         onGoLessons={() => navigate("/lessons")}
+        onSwitchAdmin={() => navigate("/admin/dashboard")}
+        isAdminUser={isAdmin()}
         language={language}
         setLanguage={setLanguage}
         labels={labels}
