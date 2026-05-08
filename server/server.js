@@ -15,6 +15,44 @@ const adminMiddleware = require("./middleware/admin");
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
+
+const normalizeOrigin = (value) =>
+  String(value ?? "")
+    .trim()
+    .replace(/\/$/, "");
+
+const collectAllowedOrigins = () => {
+  const set = new Set([
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    normalizeOrigin(FRONTEND_URL),
+  ]);
+  const extras = String(process.env.CORS_ORIGINS ?? "")
+    .split(",")
+    .map((s) => normalizeOrigin(s))
+    .filter(Boolean);
+  extras.forEach((o) => set.add(o));
+  return set;
+};
+
+const allowedOrigins = collectAllowedOrigins();
+
+const isVercelPreviewOrigin = (origin) => {
+  if (process.env.CORS_ALLOW_VERCEL_PREVIEWS !== "true") return false;
+  try {
+    const u = new URL(origin);
+    return u.protocol === "https:" && u.hostname.endsWith(".vercel.app");
+  } catch {
+    return false;
+  }
+};
+
+const originAllowed = (origin) => {
+  if (!origin) return true;
+  const normalized = normalizeOrigin(origin);
+  if (allowedOrigins.has(normalized)) return true;
+  return isVercelPreviewOrigin(origin);
+};
 const JWT_SECRET =
   process.env.JWT_SECRET ||
   "dev-only-change-me-german-exam-app-secret";
@@ -37,13 +75,11 @@ app.use(cookieParser());
 app.use(
   cors({
     origin: (origin, callback) => {
-      const allowed = new Set([
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        FRONTEND_URL,
-      ]);
-      if (!origin || allowed.has(origin)) return callback(null, true);
-      return callback(new Error("Not allowed by CORS"));
+      if (originAllowed(origin)) return callback(null, true);
+      if (origin && process.env.NODE_ENV !== "production") {
+        console.warn(`[cors] blocked origin: ${origin}`);
+      }
+      return callback(null, false);
     },
     allowedHeaders: ["Content-Type", "Authorization", "Accept-Language"],
     credentials: true,
