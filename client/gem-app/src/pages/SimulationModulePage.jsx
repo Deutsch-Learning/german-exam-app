@@ -858,6 +858,17 @@ const getEstimatedAudioDuration = (audio) => {
   return Math.max(18, Math.ceil(spokenSeconds + punctuationPauses + 6));
 };
 
+const pickGermanVoice = () => {
+  if (!("speechSynthesis" in window)) return null;
+  const voices = window.speechSynthesis.getVoices();
+  if (!voices.length) return null;
+  return (
+    voices.find((voice) => /de[-_]/i.test(voice.lang)) ??
+    voices.find((voice) => /german/i.test(voice.name)) ??
+    null
+  );
+};
+
 const getTaskDuration = (module, task) => {
   if (!task) return 60;
 
@@ -1294,6 +1305,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const [audioTimestamp, setAudioTimestamp] = useState(0);
   const [audioPlaying, setAudioPlaying] = useState(false);
   const [audioSessionActive, setAudioSessionActive] = useState(false);
+  const [audioError, setAudioError] = useState("");
   const [replaysUsed, setReplaysUsed] = useState(0);
   const [prepRemaining, setPrepRemaining] = useState(speakingTasks[0].prepSeconds);
   const [prepActive, setPrepActive] = useState(false);
@@ -1688,12 +1700,20 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       audioStartOffsetRef.current = 0;
       audioSessionRef.current = true;
       setAudioSessionActive(true);
+      setAudioError("");
 
       if ("speechSynthesis" in window) {
         window.speechSynthesis.cancel();
         const utterance = new window.SpeechSynthesisUtterance(module.audio.transcript);
+        const selectedVoice = pickGermanVoice();
+        if (selectedVoice) utterance.voice = selectedVoice;
         utterance.lang = "de-DE";
         utterance.rate = module.audio.rate;
+        utterance.volume = 1;
+        utterance.pitch = 1;
+        utterance.onstart = () => {
+          setAudioError("");
+        };
         utterance.onend = () => {
           setAudioTimestamp(currentAudioDuration);
           audioTimestampRef.current = currentAudioDuration;
@@ -1701,7 +1721,21 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           audioSessionRef.current = false;
           setAudioSessionActive(false);
         };
+        utterance.onerror = () => {
+          setAudioPlaying(false);
+          audioSessionRef.current = false;
+          setAudioSessionActive(false);
+          setAudioError(
+            "La lecture audio a échoué sur cet appareil. Vérifiez le volume système et autorisez la synthèse vocale dans le navigateur."
+          );
+        };
         window.speechSynthesis.speak(utterance);
+      } else {
+        setAudioPlaying(false);
+        audioSessionRef.current = false;
+        setAudioSessionActive(false);
+        setAudioError("La synthèse vocale n'est pas prise en charge sur ce navigateur.");
+        return;
       }
     } else if ("speechSynthesis" in window) {
       window.speechSynthesis.resume();
@@ -2156,6 +2190,11 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             <Lock size={18} />
             Transcript hidden for test protection.
           </div>
+          {audioError ? (
+            <p className={styles.warningText}>
+              <AlertCircle size={16} /> {audioError}
+            </p>
+          ) : null}
         </section>
 
         <section className={styles.questionPane}>
