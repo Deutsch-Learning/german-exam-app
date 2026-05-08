@@ -1195,12 +1195,11 @@ const updateProfileHandler = async (req, res) => {
       typeof username !== "string" ||
       typeof firstName !== "string" ||
       typeof lastName !== "string" ||
-      typeof email !== "string" ||
-      typeof dateOfBirth !== "string"
+      typeof email !== "string"
     ) {
       return res.status(400).json({
         ok: false,
-        error: "username, firstName, lastName, email and dateOfBirth are required",
+        error: "username, firstName, lastName and email are required",
       });
     }
 
@@ -1208,7 +1207,7 @@ const updateProfileHandler = async (req, res) => {
     const safeFirst = firstName.trim().slice(0, 80);
     const safeLast = lastName.trim().slice(0, 80);
     const safeEmail = normalizeEmail(email);
-    const safeDob = dateOfBirth.trim();
+    const safeDob = typeof dateOfBirth === "string" ? dateOfBirth.trim() : "";
 
     if (!/^[a-z0-9._-]{3,30}$/.test(safeUsername)) {
       return res.status(400).json({ ok: false, error: "Username must be 3-30 chars (a-z, 0-9, . _ -)" });
@@ -1219,7 +1218,7 @@ const updateProfileHandler = async (req, res) => {
     if (!isEmail(safeEmail)) {
       return res.status(400).json({ ok: false, error: "A valid email is required" });
     }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(safeDob)) {
+    if (safeDob && !/^\d{4}-\d{2}-\d{2}$/.test(safeDob)) {
       return res.status(400).json({ ok: false, error: "dateOfBirth must be in YYYY-MM-DD format" });
     }
 
@@ -1232,7 +1231,7 @@ const updateProfileHandler = async (req, res) => {
            first_name = $2,
            last_name = $3,
            email = $4,
-           date_of_birth = $5::date,
+           date_of_birth = COALESCE($5::date, date_of_birth),
            email_verified = CASE WHEN $6 THEN FALSE ELSE email_verified END,
            email_verified_at = CASE WHEN $6 THEN NULL ELSE email_verified_at END,
            verification_token_hash = CASE WHEN $6 THEN $7 ELSE verification_token_hash END,
@@ -1245,7 +1244,7 @@ const updateProfileHandler = async (req, res) => {
         safeFirst,
         safeLast,
         safeEmail,
-        safeDob,
+        safeDob || null,
         emailChanged,
         verificationToken ? tokenHash(verificationToken) : null,
         verificationToken ? expiresFromNow(VERIFICATION_HOURS, "hours") : null,

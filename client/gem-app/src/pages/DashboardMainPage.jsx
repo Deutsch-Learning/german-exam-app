@@ -8,7 +8,7 @@ import logo from "../assets/images/logo.png";
 import userIcon from "../assets/images/icon-profile.png";
 import { languageOptions } from "../utils/language";
 import { useLanguage } from "../context/LanguageContext";
-import { clearAuthSession, getAuthUser, isAdmin } from "../utils/access";
+import { clearAuthSession, getAuthUser, isAdmin, updateStoredUser } from "../utils/access";
 
 const formatDateTimeFr = (iso) => {
   try {
@@ -308,6 +308,9 @@ export default function DashboardMainPage() {
       if (!auth?.id) { setError("Utilisateur non connecté."); setData(null); return; }
       const res = await API.get("/dashboard");
       if (!res.data?.ok) { setError(res.data?.error ?? "Impossible de charger le dashboard."); setData(null); return; }
+      if (res.data?.user) {
+        updateStoredUser(res.data.user);
+      }
       setData(res.data);
     } catch {
       setError("Impossible de joindre le backend.");
