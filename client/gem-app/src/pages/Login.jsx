@@ -68,18 +68,7 @@ export default function LoginPage() {
       }
       setErrors({ submit: res.data?.error ?? "Identifiants incorrects. Réessayez." });
     } catch (err) {
-      const apiError = err.response?.data;
-      if (apiError?.requiresEmailVerification) {
-        navigate(`/verify-email?email=${encodeURIComponent(formData.email)}`, {
-          state: {
-            message:
-              apiError?.error ??
-              "Votre email n'est pas encore vérifié. Vérifiez votre boîte mail ou renvoyez un lien.",
-          },
-        });
-        return;
-      }
-      setErrors({ submit: apiError?.error ?? "Identifiants incorrects. Réessayez." });
+      setErrors({ submit: err.response?.data?.error ?? "Identifiants incorrects. Réessayez." });
     } finally {
       setIsLoading(false);
     }

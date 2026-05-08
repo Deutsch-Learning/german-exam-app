@@ -97,9 +97,6 @@ const authRateLimiter = rateLimit({
 const TOKEN_BYTES = 32;
 const VERIFICATION_HOURS = 24;
 const RESET_MINUTES = 60;
-const REQUIRE_EMAIL_TRANSPORT =
-  process.env.REQUIRE_EMAIL_TRANSPORT === "true" ||
-  process.env.NODE_ENV === "production";
 
 const isEmail = (value) =>
   typeof value === "string" && /^\S+@\S+\.\S+$/.test(value.trim());
@@ -256,16 +253,6 @@ const getMailer = () => {
   return null;
 };
 
-const assertEmailTransportReady = () => {
-  if (!REQUIRE_EMAIL_TRANSPORT) return;
-  const transport = getMailer();
-  if (!transport) {
-    throw new Error(
-      "Email transport is not configured. Set EMAIL_SMTP_HOST/PORT/USER/PASS (or SMTP_* / CONTACT_SMTP_*)."
-    );
-  }
-};
-
 const sendTransactionalEmail = async ({ to, subject, text, html }) => {
   const transporter = getMailer();
   const from =
@@ -273,12 +260,9 @@ const sendTransactionalEmail = async ({ to, subject, text, html }) => {
     process.env.CONTACT_SMTP_USER ||
     "no-reply@german-exam-app.local";
 
-  if (!transporter && !REQUIRE_EMAIL_TRANSPORT) {
+  if (!transporter) {
     console.log(`[email disabled] ${subject} -> ${to}\n${text}`);
     return { sent: false };
-  }
-  if (!transporter && REQUIRE_EMAIL_TRANSPORT) {
-    throw new Error("Email transport is required but not configured");
   }
 
   await transporter.sendMail({
@@ -725,13 +709,7 @@ const registerHandler = async (req, res) => {
         expiresFromNow(VERIFICATION_HOURS, "hours"),
       ]
     );
-    let verificationUrl;
-    try {
-      verificationUrl = await sendVerificationEmail(insert.rows[0], verificationToken);
-    } catch (emailErr) {
-      await pool.query(`DELETE FROM users WHERE id = $1`, [insert.rows[0].id]);
-      throw emailErr;
-    }
+    const verificationUrl = await sendVerificationEmail(insert.rows[0], verificationToken);
     return res.status(201).json({
       ok: true,
       message: "Account created. Please confirm your email before logging in.",
@@ -853,14 +831,6 @@ const loginHandler = async (req, res) => {
     if (user.status !== "active") {
       return res.status(403).json({ ok: false, error: "Account is suspended" });
     }
-    if (!user.email_verified) {
-      return res.status(403).json({
-        ok: false,
-        error: "Please verify your email before logging in.",
-        requiresEmailVerification: true,
-      });
-    }
-
     await pool.query(`UPDATE users SET last_login_at = NOW() WHERE id = $1`, [user.id]);
     await pool.query(
       `UPDATE refresh_tokens SET revoked_at = NOW()
@@ -914,11 +884,6 @@ const refreshHandler = async (req, res) => {
       clearRefreshCookie(res);
       return res.status(403).json({ ok: false, error: "Account is suspended" });
     }
-    if (!row.email_verified) {
-      clearRefreshCookie(res);
-      return res.status(403).json({ ok: false, error: "Email verification required", requiresEmailVerification: true });
-    }
-
     const nextRefreshToken = makeToken();
     const client = await pool.connect();
     try {
@@ -1952,7 +1917,6 @@ app.get("/", (req, res) => {
 
 ensureSchema()
   .then(() => {
-    assertEmailTransportReady();
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
     });
