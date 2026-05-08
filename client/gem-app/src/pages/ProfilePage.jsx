@@ -12,6 +12,8 @@ export default function ProfilePage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [verificationNotice, setVerificationNotice] = useState("");
+  const [resendingVerification, setResendingVerification] = useState(false);
   const [user, setUser] = useState(null);
   const [formData, setFormData] = useState({
     username: "",
@@ -105,6 +107,26 @@ export default function ProfilePage() {
     }
   };
 
+  const resendVerificationEmail = async () => {
+    if (!user?.email || user?.email_verified) return;
+    setVerificationNotice("");
+    setError("");
+    setResendingVerification(true);
+    try {
+      const res = await API.post("/resend-verification", { email: user.email });
+      setVerificationNotice(
+        res.data?.message ?? "Un nouvel email de verification a ete envoye."
+      );
+    } catch (err) {
+      setError(
+        err.response?.data?.error ??
+          "Impossible d'envoyer un nouvel email de verification."
+      );
+    } finally {
+      setResendingVerification(false);
+    }
+  };
+
   return (
     <div className={styles.page}>
       <BackButton fallback="/dashboard" label={t.common.back} />
@@ -123,6 +145,34 @@ export default function ProfilePage() {
             <p>
               <strong>Email</strong>: {user.email}
             </p>
+            {!user.email_verified ? (
+              <div className={styles.verificationWarning}>
+                <p className={styles.verificationTitle}>
+                  Email not verified
+                </p>
+                <p className={styles.verificationText}>
+                  Verifiez votre adresse email pour securiser votre compte et
+                  recuperer l'acces plus facilement.
+                </p>
+                <button
+                  type="button"
+                  onClick={resendVerificationEmail}
+                  disabled={resendingVerification}
+                  className={styles.verifyBtn}
+                >
+                  {resendingVerification
+                    ? "Envoi..."
+                    : "Renvoyer l'email de verification"}
+                </button>
+                {verificationNotice ? (
+                  <p className={styles.verificationNotice}>
+                    {verificationNotice}
+                  </p>
+                ) : null}
+              </div>
+            ) : (
+              <p className={styles.verifiedBadge}>Email verified</p>
+            )}
             <p>
               <strong>{t.profilePage.birthDate}</strong>:{" "}
               {user.date_of_birth ? new Date(user.date_of_birth).toLocaleDateString("fr-FR") : "-"}
