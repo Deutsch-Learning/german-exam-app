@@ -43,7 +43,7 @@ const Navbar = () => {
         </div>
 
         <div className={styles.navCenter}>
-          <button type="button" className={styles.navLink} onClick={() => navigate("/dashboard")}>{t.common.home}</button>
+          <button type="button" className={styles.navLink} onClick={() => navigate("/")}>{t.common.home}</button>
           <button type="button" className={styles.navLink} onClick={() => navigate("/actualites")}>{t.common.news} <ChevronDownIcon /></button>
           <button type="button" className={`${styles.navLink} ${styles.active}`} onClick={() => navigate("/about")}>{t.common.about} <ChevronDownIcon /></button>
           <div className={styles.dropdown}>

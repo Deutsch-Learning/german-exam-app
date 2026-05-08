@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import BackButton from "../components/BackButton";
 import logo from "../assets/images/logo.png";
-import { readSimulationHistory } from "../utils/simulationHistory";
+import API from "../services/api";
 import styles from "./DashboardPage.module.css";
 
 const formatDateTimeFr = (iso) => {
@@ -21,16 +21,37 @@ const formatDateTimeFr = (iso) => {
 
 export default function AllRecentSimulationsPage() {
   const navigate = useNavigate();
-  const [simulations, setSimulations] = useState(() => readSimulationHistory());
-
-  const refreshSimulations = useCallback(() => {
-    setSimulations(readSimulationHistory());
-  }, []);
+  const [simulations, setSimulations] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    window.addEventListener("focus", refreshSimulations);
-    return () => window.removeEventListener("focus", refreshSimulations);
-  }, [refreshSimulations]);
+    let active = true;
+
+    API.get("/api/user/simulations")
+      .then((res) => {
+        if (!active) return;
+        setSimulations(
+          (res.data?.simulations ?? []).map((simulation) => ({
+            ...simulation,
+            id: `server-${simulation.id}`,
+            title: simulation.exam_name,
+            moduleType: "Resultat enregistre",
+            progressPercent: simulation.score_pct,
+            lastAccessedAt: simulation.created_at ?? simulation.taken_at,
+            answeredCount: simulation.result_details?.answeredCount ?? 0,
+            totalTasks: simulation.result_details?.totalTasks ?? "",
+            route: "/simulations",
+          }))
+        );
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   return (
     <div className={styles.historyPage}>
@@ -51,7 +72,11 @@ export default function AllRecentSimulationsPage() {
           <span>Resume any saved module exactly where you left it.</span>
         </header>
 
-        {simulations.length ? (
+        {loading ? (
+          <section className={styles.card}>
+            <h2 className={styles.cardTitle}>Loading...</h2>
+          </section>
+        ) : simulations.length ? (
           <div className={styles.historyGrid}>
             {simulations.map((simulation) => (
               <article key={simulation.id} className={styles.historyCard}>
@@ -79,8 +104,8 @@ export default function AllRecentSimulationsPage() {
           </div>
         ) : (
           <section className={styles.card}>
-            <h2 className={styles.cardTitle}>No saved simulations yet</h2>
-            <p className={styles.simDate}>Start a module and your progress will appear here automatically.</p>
+            <h2 className={styles.cardTitle}>Aucune simulation recente.</h2>
+            <p className={styles.simDate}>Commencez votre premiere simulation.</p>
           </section>
         )}
       </main>

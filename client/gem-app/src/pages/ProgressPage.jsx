@@ -1,16 +1,40 @@
+import { useEffect, useMemo, useState } from "react";
 import styles from "./ProgressPage.module.css";
 import BackButton from "../components/BackButton";
 import { useLanguage } from "../context/LanguageContext";
-
-const progressValues = [
-  { key: "read", value: 72 },
-  { key: "listen", value: 64 },
-  { key: "write", value: 58 },
-  { key: "speak", value: 70 },
-];
+import API from "../services/api";
 
 export default function ProgressPage() {
   const { t } = useLanguage();
+  const [progress, setProgress] = useState({ completed: 0, total: 0, percentage: 0 });
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+
+    API.get("/api/progress")
+      .then((res) => {
+        if (!active) return;
+        setProgress({
+          completed: Number(res.data?.completed ?? 0),
+          total: Number(res.data?.total ?? 0),
+          percentage: Number(res.data?.percentage ?? 0),
+        });
+      })
+      .catch(() => {
+        if (active) setError("Impossible de charger votre progression.");
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const progressState = useMemo(() => {
+    if (progress.percentage >= 70) return "high";
+    if (progress.percentage >= 35) return "medium";
+    return "low";
+  }, [progress.percentage]);
 
   return (
     <div className={styles.page}>
@@ -19,19 +43,20 @@ export default function ProgressPage() {
         <h1>{t.progressPage.title}</h1>
         <p>{t.progressPage.subtitle}</p>
 
-        <div className={styles.list}>
-          {progressValues.map((item) => (
-            <article key={item.key} className={styles.card}>
-              <div className={styles.header}>
-                <h3>{t.modules[item.key]}</h3>
-                <span>{item.value}%</span>
-              </div>
-              <div className={styles.barWrap}>
-                <div className={styles.barFill} style={{ width: `${item.value}%` }} />
-              </div>
-            </article>
-          ))}
-        </div>
+        {error ? <p className={styles.error}>{error}</p> : null}
+
+        <article className={styles.card} data-state={progressState}>
+          <div className={styles.header}>
+            <h3>{t.dashboard.certificationProgress}</h3>
+            <span>{progress.percentage}%</span>
+          </div>
+          <div className={styles.barWrap}>
+            <div className={styles.barFill} style={{ width: `${progress.percentage}%` }} />
+          </div>
+          <p className={styles.meta}>
+            {progress.completed}/{progress.total} exams completed
+          </p>
+        </article>
       </div>
     </div>
   );

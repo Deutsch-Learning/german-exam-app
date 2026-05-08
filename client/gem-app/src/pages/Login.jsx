@@ -58,12 +58,12 @@ export default function LoginPage() {
         storeAuthSession(
           {
             user: res.data.user,
-            token: res.data.token,
+            token: res.data.accessToken ?? res.data.token,
             expiresIn: res.data.expiresIn,
           },
           formData.rememberMe
         );
-        navigate("/dashboard");
+        navigate(res.data.redirectTo ?? (res.data.user?.role === "admin" ? "/admin/dashboard" : "/dashboard"), { replace: true });
         return;
       }
       setErrors({ submit: res.data?.error ?? "Identifiants incorrects. Réessayez." });

@@ -8,6 +8,11 @@ export function ProtectedRoute({ children }) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   }
 
+  const adminUserView = new URLSearchParams(location.search).get("view") === "user";
+  if (isAdmin() && location.pathname === "/dashboard" && !adminUserView) {
+    return <Navigate to="/admin/dashboard" replace />;
+  }
+
   return children;
 }
 

@@ -79,6 +79,7 @@ export default function SeriesSimulationPage() {
   return (
     <div className={styles.pageContainer}>
       <SimulationTopNav
+        onGoHome={() => navigate("/")}
         onGoAbout={() => navigate("/about")}
         onGoProfile={() => navigate("/profile")}
         onGoDashboard={() => navigate("/dashboard")}
@@ -114,6 +115,7 @@ export default function SeriesSimulationPage() {
                   title={content.label}
                   time={60}
                   questions={39}
+                  accent={module.accent}
                   minuteLabel={t.simulations.minutes}
                   questionLabel={t.simulations.questions}
                   onClick={() => startModule(module.id)}

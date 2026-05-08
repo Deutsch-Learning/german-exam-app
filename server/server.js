@@ -1,10 +1,16 @@
+require("dotenv").config();
 const crypto = require("crypto");
 const express = require("express");
 const pool = require("./db");
 const cors = require("cors");
+const cookieParser = require("cookie-parser");
+const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const nodemailer = require("nodemailer");
+const { createAuthMiddleware } = require("./middleware/auth");
+const adminMiddleware = require("./middleware/admin");
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -13,11 +19,21 @@ const JWT_SECRET =
   process.env.JWT_SECRET ||
   "dev-only-change-me-german-exam-app-secret";
 const JWT_ISSUER = "german-exam-app";
+const JWT_AUDIENCE = "german-exam-app-client";
+const ACCESS_TOKEN_EXPIRES_IN = "15m";
+const REFRESH_COOKIE_NAME = "refresh_token";
+const REFRESH_DAYS = 7;
+const REFRESH_MAX_AGE_MS = REFRESH_DAYS * 24 * 60 * 60 * 1000;
+const COOKIE_SECURE = process.env.NODE_ENV === "production";
+const DEFAULT_TOTAL_AVAILABLE_EXAMS = Number(process.env.TOTAL_AVAILABLE_EXAMS || 20);
 
 if (!process.env.JWT_SECRET && process.env.NODE_ENV === "production") {
   throw new Error("JWT_SECRET is required in production");
 }
 
+app.set("trust proxy", 1);
+app.use(helmet());
+app.use(cookieParser());
 app.use(
   cors({
     origin: (origin, callback) => {
@@ -29,10 +45,18 @@ app.use(
       if (!origin || allowed.has(origin)) return callback(null, true);
       return callback(new Error("Not allowed by CORS"));
     },
-    allowedHeaders: ["Content-Type", "Authorization"],
+    allowedHeaders: ["Content-Type", "Authorization", "Accept-Language"],
+    credentials: true,
   })
 );
 app.use(express.json({ limit: "1mb" }));
+
+const authRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 const TOKEN_BYTES = 32;
 const VERIFICATION_HOURS = 24;
@@ -67,23 +91,99 @@ const sanitizeUser = (user) => ({
   last_login_at: user.last_login_at,
 });
 
-const signAuthToken = (user, rememberMe = false) => {
-  const expiresIn = rememberMe ? "30d" : "8h";
+const getClientIp = (req) =>
+  String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "")
+    .split(",")[0]
+    .trim()
+    .slice(0, 80);
+
+const signAccessToken = (user) => {
+  const jti = crypto.randomUUID();
   const token = jwt.sign(
     {
+      id: user.id,
       sub: String(user.id),
       email: user.email,
       role: user.role,
     },
     JWT_SECRET,
     {
-      expiresIn,
+      expiresIn: ACCESS_TOKEN_EXPIRES_IN,
       issuer: JWT_ISSUER,
-      audience: "german-exam-app-client",
+      audience: JWT_AUDIENCE,
+      jwtid: jti,
     }
   );
 
-  return { token, expiresIn };
+  return { token, expiresIn: ACCESS_TOKEN_EXPIRES_IN, jti };
+};
+
+const setRefreshCookie = (res, refreshToken) => {
+  res.cookie(REFRESH_COOKIE_NAME, refreshToken, {
+    httpOnly: true,
+    secure: COOKIE_SECURE,
+    sameSite: COOKIE_SECURE ? "none" : "lax",
+    maxAge: REFRESH_MAX_AGE_MS,
+    path: "/",
+  });
+};
+
+const clearRefreshCookie = (res) => {
+  res.clearCookie(REFRESH_COOKIE_NAME, {
+    httpOnly: true,
+    secure: COOKIE_SECURE,
+    sameSite: COOKIE_SECURE ? "none" : "lax",
+    path: "/",
+  });
+};
+
+const createRefreshSession = async (userId, req) => {
+  const refreshToken = makeToken();
+  const expiresAt = new Date(Date.now() + REFRESH_MAX_AGE_MS);
+  await pool.query(
+    `INSERT INTO refresh_tokens (user_id, token_hash, expires_at, user_agent, ip_address)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [
+      userId,
+      tokenHash(refreshToken),
+      expiresAt,
+      String(req.get("user-agent") || "").slice(0, 500),
+      getClientIp(req),
+    ]
+  );
+  return refreshToken;
+};
+
+const issueAuthTokens = async (user, req, res) => {
+  const access = signAccessToken(user);
+  const refreshToken = await createRefreshSession(user.id, req);
+  setRefreshCookie(res, refreshToken);
+  return access;
+};
+
+const revokeAccessToken = async (token) => {
+  if (!token) return;
+  const payload = jwt.decode(token);
+  if (!payload?.jti) return;
+
+  const expiresAt = payload.exp ? new Date(payload.exp * 1000) : new Date(Date.now() + 15 * 60 * 1000);
+  await pool.query(
+    `INSERT INTO revoked_tokens (jti, user_id, expires_at)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (jti) DO NOTHING`,
+    [payload.jti, Number(payload.sub ?? payload.id) || null, expiresAt]
+  );
+};
+
+const logUserAction = async (userId, action, req) => {
+  try {
+    await pool.query(
+      `INSERT INTO logs (user_id, action, ip_address) VALUES ($1, $2, $3)`,
+      [userId ?? null, action, getClientIp(req)]
+    );
+  } catch (err) {
+    console.error("System log failed", err);
+  }
 };
 
 const getMailer = () => {
@@ -177,6 +277,21 @@ const sendResetEmail = async (user, token) => {
 
 async function ensureSchema() {
   await pool.query(`
+    DO $$
+    BEGIN
+      CREATE TYPE user_role AS ENUM ('user', 'admin');
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$;
+  `);
+  await pool.query(`
+    DO $$
+    BEGIN
+      CREATE TYPE account_status AS ENUM ('active', 'suspended');
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$;
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
       email TEXT UNIQUE NOT NULL,
@@ -204,6 +319,14 @@ async function ensureSchema() {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS has_full_access BOOLEAN NOT NULL DEFAULT FALSE;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS suspended_at TIMESTAMPTZ;`);
+  await pool.query(`UPDATE users SET role = 'user' WHERE role IS NULL OR role::text NOT IN ('user', 'admin');`);
+  await pool.query(`UPDATE users SET status = 'active' WHERE status IS NULL OR status::text NOT IN ('active', 'suspended');`);
+  await pool.query(`ALTER TABLE users ALTER COLUMN role DROP DEFAULT;`);
+  await pool.query(`ALTER TABLE users ALTER COLUMN role TYPE user_role USING role::text::user_role;`);
+  await pool.query(`ALTER TABLE users ALTER COLUMN role SET DEFAULT 'user';`);
+  await pool.query(`ALTER TABLE users ALTER COLUMN status DROP DEFAULT;`);
+  await pool.query(`ALTER TABLE users ALTER COLUMN status TYPE account_status USING status::text::account_status;`);
+  await pool.query(`ALTER TABLE users ALTER COLUMN status SET DEFAULT 'active';`);
   await pool.query(`
     CREATE UNIQUE INDEX IF NOT EXISTS users_username_unique_idx
       ON users(username)
@@ -245,9 +368,47 @@ async function ensureSchema() {
   `);
   await pool.query(`ALTER TABLE simulations ADD COLUMN IF NOT EXISTS result_details JSONB NOT NULL DEFAULT '{}'::jsonb;`);
   await pool.query(`ALTER TABLE simulations ADD COLUMN IF NOT EXISTS duration_seconds INTEGER;`);
+  await pool.query(`ALTER TABLE simulations ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();`);
+  await pool.query(`UPDATE simulations SET created_at = taken_at WHERE created_at IS NULL;`);
   await pool.query(`
     CREATE INDEX IF NOT EXISTS simulations_user_taken_at_idx
       ON simulations(user_id, taken_at DESC);
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS simulations_user_created_at_idx
+      ON simulations(user_id, created_at DESC);
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS refresh_tokens (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at TIMESTAMPTZ NOT NULL,
+      revoked_at TIMESTAMPTZ,
+      replaced_by_token_hash TEXT,
+      user_agent TEXT,
+      ip_address TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS refresh_tokens_user_active_idx
+      ON refresh_tokens(user_id, expires_at DESC)
+      WHERE revoked_at IS NULL;
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS revoked_tokens (
+      jti TEXT PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      expires_at TIMESTAMPTZ NOT NULL,
+      revoked_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS revoked_tokens_expires_idx
+      ON revoked_tokens(expires_at);
   `);
 
   await pool.query(`
@@ -316,6 +477,78 @@ async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS exam_questions_exam_position_idx
       ON exam_questions(exam_id, position, id);
   `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS results (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      exam_type VARCHAR(50),
+      score INTEGER,
+      completed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS results_user_completed_idx
+      ON results(user_id, completed_at DESC);
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS copies_ecrites (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      prompt TEXT,
+      response TEXT,
+      ai_feedback TEXT,
+      score INTEGER,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS copies_ecrites_user_created_idx
+      ON copies_ecrites(user_id, created_at DESC);
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS statistiques (
+      id SERIAL PRIMARY KEY,
+      total_users INTEGER,
+      total_exams INTEGER,
+      api_usage INTEGER,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS logs (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER,
+      action TEXT,
+      ip_address TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS logs_user_created_idx
+      ON logs(user_id, created_at DESC);
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS exam_content (
+      id SERIAL PRIMARY KEY,
+      type VARCHAR(50),
+      level VARCHAR(10),
+      language VARCHAR(10),
+      question TEXT,
+      answers JSONB NOT NULL DEFAULT '[]'::jsonb,
+      correct_answer TEXT,
+      created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS exam_content_type_level_idx
+      ON exam_content(type, level, created_at DESC);
+  `);
 }
 
 const getFeature = (req) => {
@@ -358,54 +591,14 @@ app.use((req, res, next) => {
   next();
 });
 
-async function requireAuth(req, res, next) {
-  try {
-    const header = req.header("authorization") || "";
-    const [type, token] = header.split(" ");
-    if (type !== "Bearer" || !token) {
-      return res.status(401).json({ ok: false, error: "Missing authorization token" });
-    }
-
-    const payload = jwt.verify(token, JWT_SECRET, {
-      issuer: JWT_ISSUER,
-      audience: "german-exam-app-client",
-    });
-    const userId = Number(payload.sub);
-    if (!Number.isInteger(userId) || userId <= 0) {
-      return res.status(401).json({ ok: false, error: "Invalid token" });
-    }
-
-    const r = await pool.query(
-      `SELECT id, email, username, first_name, last_name, date_of_birth, role, status,
-              email_verified, has_full_access, created_at, last_login_at
-       FROM users
-       WHERE id = $1`,
-      [userId]
-    );
-    const user = r.rows[0];
-    if (!user) return res.status(401).json({ ok: false, error: "User not found" });
-    if (user.status !== "active") {
-      return res.status(403).json({ ok: false, error: "Account is suspended" });
-    }
-    if (!user.email_verified) {
-      return res.status(403).json({ ok: false, error: "Email verification required", requiresEmailVerification: true });
-    }
-
-    req.user = user;
-    return next();
-  } catch (err) {
-    return res.status(401).json({ ok: false, error: "Invalid or expired token" });
-  }
-}
-
-function requireAdmin(req, res, next) {
-  return requireAuth(req, res, () => {
-    if (req.user.role !== "admin") {
-      return res.status(403).json({ ok: false, error: "Admin access required" });
-    }
-    return next();
-  });
-}
+const requireAuth = createAuthMiddleware({
+  pool,
+  jwt,
+  jwtSecret: JWT_SECRET,
+  issuer: JWT_ISSUER,
+  audience: JWT_AUDIENCE,
+});
+const requireAdmin = [requireAuth, adminMiddleware];
 
 const auditAdminAction = async (req, action, targetType, targetId, metadata = {}) => {
   try {
@@ -419,6 +612,18 @@ const auditAdminAction = async (req, action, targetType, targetId, metadata = {}
   }
 };
 
+app.use(
+  [
+    "/login",
+    "/register",
+    "/forgot-password",
+    "/reset-password",
+    "/resend-verification",
+    "/api/auth",
+  ],
+  authRateLimiter
+);
+
 app.get("/test-db", async (req, res) => {
   try {
     const result = await pool.query("SELECT NOW()");
@@ -429,7 +634,7 @@ app.get("/test-db", async (req, res) => {
   }
 });
 
-app.post("/register", async (req, res) => {
+const registerHandler = async (req, res) => {
   try {
     const { email, password, username, firstName, lastName } = req.body ?? {};
 
@@ -485,7 +690,10 @@ app.post("/register", async (req, res) => {
     console.error(err);
     return res.status(500).json({ ok: false, error: "Server error" });
   }
-});
+};
+
+app.post("/register", registerHandler);
+app.post("/api/auth/register", registerHandler);
 
 app.post("/resend-verification", async (req, res) => {
   try {
@@ -561,7 +769,7 @@ app.post("/verify-email", async (req, res) => {
   }
 });
 
-app.post("/login", async (req, res) => {
+const loginHandler = async (req, res) => {
   try {
     const { email, password, rememberMe } = req.body ?? {};
 
@@ -597,18 +805,147 @@ app.post("/login", async (req, res) => {
     }
 
     await pool.query(`UPDATE users SET last_login_at = NOW() WHERE id = $1`, [user.id]);
-    const auth = signAuthToken(user, Boolean(rememberMe));
+    await pool.query(
+      `UPDATE refresh_tokens SET revoked_at = NOW()
+       WHERE user_id = $1 AND expires_at <= NOW() AND revoked_at IS NULL`,
+      [user.id]
+    );
+    const auth = await issueAuthTokens(user, req, res);
+    await logUserAction(user.id, "auth.login", req);
     return res.json({
       ok: true,
       token: auth.token,
+      accessToken: auth.token,
       expiresIn: auth.expiresIn,
+      redirectTo: user.role === "admin" ? "/admin/dashboard" : "/dashboard",
       user: sanitizeUser({ ...user, last_login_at: new Date().toISOString() }),
     });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ ok: false, error: "Server error" });
   }
-});
+};
+
+app.post("/login", loginHandler);
+app.post("/api/auth/login", loginHandler);
+
+const refreshHandler = async (req, res) => {
+  try {
+    const refreshToken = req.cookies?.[REFRESH_COOKIE_NAME];
+    if (!refreshToken) {
+      return res.status(401).json({ ok: false, error: "Missing refresh token" });
+    }
+
+    const hashed = tokenHash(refreshToken);
+    const tokenRes = await pool.query(
+      `SELECT rt.id AS refresh_token_id, rt.user_id, rt.expires_at, rt.revoked_at,
+              u.email, u.username, u.first_name, u.last_name, u.date_of_birth,
+              u.role, u.status, u.email_verified, u.has_full_access, u.created_at, u.last_login_at
+       FROM refresh_tokens rt
+       JOIN users u ON u.id = rt.user_id
+       WHERE rt.token_hash = $1
+       LIMIT 1`,
+      [hashed]
+    );
+    const row = tokenRes.rows[0];
+    if (!row || row.revoked_at || new Date(row.expires_at).getTime() <= Date.now()) {
+      clearRefreshCookie(res);
+      return res.status(401).json({ ok: false, error: "Invalid refresh token" });
+    }
+    if (row.status !== "active") {
+      await pool.query(`UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL`, [row.user_id]);
+      clearRefreshCookie(res);
+      return res.status(403).json({ ok: false, error: "Account is suspended" });
+    }
+    if (!row.email_verified) {
+      clearRefreshCookie(res);
+      return res.status(403).json({ ok: false, error: "Email verification required", requiresEmailVerification: true });
+    }
+
+    const nextRefreshToken = makeToken();
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `UPDATE refresh_tokens
+         SET revoked_at = NOW(), replaced_by_token_hash = $1
+         WHERE id = $2`,
+        [tokenHash(nextRefreshToken), row.refresh_token_id]
+      );
+      await client.query(
+        `INSERT INTO refresh_tokens (user_id, token_hash, expires_at, user_agent, ip_address)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [
+          row.user_id,
+          tokenHash(nextRefreshToken),
+          new Date(Date.now() + REFRESH_MAX_AGE_MS),
+          String(req.get("user-agent") || "").slice(0, 500),
+          getClientIp(req),
+        ]
+      );
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    const user = {
+      id: row.user_id,
+      email: row.email,
+      username: row.username,
+      first_name: row.first_name,
+      last_name: row.last_name,
+      date_of_birth: row.date_of_birth,
+      role: row.role,
+      status: row.status,
+      email_verified: row.email_verified,
+      has_full_access: row.has_full_access,
+      created_at: row.created_at,
+      last_login_at: row.last_login_at,
+    };
+    const auth = signAccessToken(user);
+    setRefreshCookie(res, nextRefreshToken);
+    return res.json({
+      ok: true,
+      token: auth.token,
+      accessToken: auth.token,
+      expiresIn: auth.expiresIn,
+      user: sanitizeUser(user),
+    });
+  } catch (err) {
+    console.error(err);
+    clearRefreshCookie(res);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+};
+
+app.post("/api/auth/refresh", refreshHandler);
+
+const logoutHandler = async (req, res) => {
+  try {
+    const refreshToken = req.cookies?.[REFRESH_COOKIE_NAME];
+    if (refreshToken) {
+      await pool.query(
+        `UPDATE refresh_tokens SET revoked_at = NOW()
+         WHERE token_hash = $1 AND revoked_at IS NULL`,
+        [tokenHash(refreshToken)]
+      );
+    }
+    await revokeAccessToken(req.token);
+    await logUserAction(req.user?.id, "auth.logout", req);
+    clearRefreshCookie(res);
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    clearRefreshCookie(res);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+};
+
+app.post("/api/auth/logout", requireAuth, logoutHandler);
+app.post("/logout", requireAuth, logoutHandler);
 
 app.post("/forgot-password", async (req, res) => {
   try {
@@ -670,6 +1007,8 @@ app.post("/reset-password", async (req, res) => {
     if (!updated.rows[0]) {
       return res.status(400).json({ ok: false, error: "Invalid or expired reset link" });
     }
+    await pool.query(`UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL`, [updated.rows[0].id]);
+    await logUserAction(updated.rows[0].id, "auth.password_reset", req);
     return res.json({ ok: true, message: "Password updated. You can now log in." });
   } catch (err) {
     console.error(err);
@@ -677,20 +1016,96 @@ app.post("/reset-password", async (req, res) => {
   }
 });
 
-app.get("/me", requireAuth, async (req, res) => {
+const profileHandler = async (req, res) => {
   return res.json({ ok: true, user: sanitizeUser(req.user) });
-});
+};
+
+app.get("/me", requireAuth, profileHandler);
+app.get("/api/user/profile", requireAuth, profileHandler);
+
+const getTotalAvailableExams = async () => {
+  const configuredTotal = Number.isFinite(DEFAULT_TOTAL_AVAILABLE_EXAMS)
+    ? DEFAULT_TOTAL_AVAILABLE_EXAMS
+    : 0;
+  const exams = await pool.query(`SELECT COUNT(*)::int AS total FROM exams WHERE is_active = TRUE`);
+  const content = await pool.query(`SELECT COUNT(*)::int AS total FROM exam_content`);
+  return Math.max(Number(exams.rows[0]?.total ?? 0), Number(content.rows[0]?.total ?? 0), configuredTotal, 0);
+};
+
+const getUserProgressSnapshot = async (userId) => {
+  const [completedFromSimulations, completedFromResults, total] = await Promise.all([
+    pool.query(
+      `SELECT COUNT(DISTINCT COALESCE(NULLIF(result_details->>'examCode', ''), NULLIF(exam_name, ''), id::text))::int AS completed
+       FROM simulations
+       WHERE user_id = $1`,
+      [userId]
+    ),
+    pool.query(
+      `SELECT COUNT(DISTINCT COALESCE(NULLIF(exam_type, ''), id::text))::int AS completed
+       FROM results
+       WHERE user_id = $1`,
+      [userId]
+    ),
+    getTotalAvailableExams(),
+  ]);
+
+  const completed = Math.max(
+    Number(completedFromSimulations.rows[0]?.completed ?? 0),
+    Number(completedFromResults.rows[0]?.completed ?? 0),
+    0
+  );
+  const percentage = total > 0 ? Math.min(100, Math.round((completed / total) * 100)) : 0;
+
+  return {
+    completed,
+    total,
+    percentage,
+  };
+};
+
+const userProgressHandler = async (req, res) => {
+  try {
+    const progress = await getUserProgressSnapshot(req.user.id);
+    return res.json(progress);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+};
+
+app.get("/api/progress", requireAuth, userProgressHandler);
+app.get("/api/user/progress", requireAuth, userProgressHandler);
+
+const recentSimulationsHandler = async (req, res) => {
+  try {
+    const sims = await pool.query(
+      `SELECT id, exam_name, taken_at, created_at, score_pct, level_current, level_target,
+              ai_corrections, result_details, duration_seconds
+       FROM simulations
+       WHERE user_id = $1
+       ORDER BY created_at DESC
+       LIMIT 5`,
+      [req.user.id]
+    );
+    return res.json({ ok: true, simulations: sims.rows });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+};
+
+app.get("/api/user/simulations", requireAuth, recentSimulationsHandler);
 
 app.get("/dashboard", requireAuth, async (req, res) => {
   try {
     const userId = req.user.id;
 
     const simsRes = await pool.query(
-      `SELECT id, exam_name, taken_at, score_pct, level_current, level_target, ai_corrections, result_details, duration_seconds
+      `SELECT id, exam_name, taken_at, created_at, score_pct, level_current, level_target, ai_corrections, result_details, duration_seconds
        FROM simulations
        WHERE user_id = $1
-       ORDER BY taken_at DESC
-       LIMIT 10`,
+       ORDER BY created_at DESC
+       LIMIT 5`,
       [userId]
     );
     const simulations = simsRes.rows;
@@ -704,9 +1119,10 @@ app.get("/dashboard", requireAuth, async (req, res) => {
       [userId]
     );
     const stats = statsRes.rows[0] ?? { total_tests: 0, avg_score: 0 };
+    const progressSnapshot = await getUserProgressSnapshot(userId);
 
     const latest = simulations[0];
-    const progressPct = Math.max(0, Math.min(100, Number(stats.avg_score ?? 0)));
+    const progressPct = progressSnapshot.percentage;
 
     const recommendations =
       latest?.ai_corrections?.recommendations && Array.isArray(latest.ai_corrections.recommendations)
@@ -718,25 +1134,29 @@ app.get("/dashboard", requireAuth, async (req, res) => {
           ];
 
     const skills = {
-      read: Math.max(10, Math.min(100, progressPct + 4)),
-      listen: Math.max(10, Math.min(100, progressPct - 8)),
-      write: Math.max(10, Math.min(100, progressPct - 2)),
-      speak: Math.max(10, Math.min(100, progressPct + 6)),
-      grammar: Math.max(10, Math.min(100, progressPct - 12)),
-      vocabulary: Math.max(10, Math.min(100, progressPct + 2)),
+      read: Math.max(0, Math.min(100, progressPct + (stats.total_tests > 0 ? 4 : 0))),
+      listen: Math.max(0, Math.min(100, progressPct + (stats.total_tests > 0 ? -8 : 0))),
+      write: Math.max(0, Math.min(100, progressPct + (stats.total_tests > 0 ? -2 : 0))),
+      speak: Math.max(0, Math.min(100, progressPct + (stats.total_tests > 0 ? 6 : 0))),
+      grammar: Math.max(0, Math.min(100, progressPct + (stats.total_tests > 0 ? -12 : 0))),
+      vocabulary: Math.max(0, Math.min(100, progressPct + (stats.total_tests > 0 ? 2 : 0))),
     };
+    const visibleRecommendations = stats.total_tests > 0 ? recommendations : [];
 
     return res.json({
       ok: true,
       user: sanitizeUser(req.user),
       progress: {
         percent: progressPct,
+        completed: progressSnapshot.completed,
+        total: progressSnapshot.total,
+        percentage: progressSnapshot.percentage,
         currentLevel: latest?.level_current ?? "B2",
         targetLevel: latest?.level_target ?? "C1",
         totalTests: stats.total_tests,
         avgScore: stats.avg_score,
       },
-      recommendations,
+      recommendations: visibleRecommendations,
       skills,
       simulations,
     });
@@ -746,7 +1166,7 @@ app.get("/dashboard", requireAuth, async (req, res) => {
   }
 });
 
-app.put("/me", requireAuth, async (req, res) => {
+const updateProfileHandler = async (req, res) => {
   try {
     const { username, firstName, lastName, email, dateOfBirth } = req.body ?? {};
     if (
@@ -829,9 +1249,12 @@ app.put("/me", requireAuth, async (req, res) => {
     console.error(err);
     return res.status(500).json({ ok: false, error: "Server error" });
   }
-});
+};
 
-app.post("/simulations", requireAuth, async (req, res) => {
+app.put("/me", requireAuth, updateProfileHandler);
+app.put("/api/user/profile", requireAuth, updateProfileHandler);
+
+const createSimulationHandler = async (req, res) => {
   try {
     const { examName, scorePct, levelCurrent, levelTarget, aiCorrections, resultDetails, durationSeconds } = req.body ?? {};
     if (typeof examName !== "string" || !examName.trim()) {
@@ -848,7 +1271,7 @@ app.post("/simulations", requireAuth, async (req, res) => {
          result_details, duration_seconds
        )
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       RETURNING id, exam_name, taken_at, score_pct, level_current, level_target, ai_corrections, result_details, duration_seconds`,
+       RETURNING id, exam_name, taken_at, created_at, score_pct, level_current, level_target, ai_corrections, result_details, duration_seconds`,
       [
         req.user.id,
         examName.trim().slice(0, 140),
@@ -860,13 +1283,22 @@ app.post("/simulations", requireAuth, async (req, res) => {
         Number.isFinite(Number(durationSeconds)) ? Math.max(0, Math.round(Number(durationSeconds))) : null,
       ]
     );
+    await pool.query(
+      `INSERT INTO results (user_id, exam_type, score, completed_at)
+       VALUES ($1, $2, $3, $4)`,
+      [req.user.id, examName.trim().slice(0, 50), Math.round(score), insert.rows[0].created_at]
+    );
+    await logUserAction(req.user.id, "simulation.completed", req);
 
     return res.status(201).json({ ok: true, simulation: insert.rows[0] });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ ok: false, error: "Server error" });
   }
-});
+};
+
+app.post("/simulations", requireAuth, createSimulationHandler);
+app.post("/api/user/simulations", requireAuth, createSimulationHandler);
 
 app.post("/contact", async (req, res) => {
   try {
@@ -930,7 +1362,7 @@ app.get("/api/admin/users", requireAdmin, async (req, res) => {
   }
 });
 
-app.patch("/api/admin/users/:id/status", requireAdmin, async (req, res) => {
+const updateAdminUserStatusHandler = async (req, res) => {
   try {
     const targetId = Number(req.params.id);
     const { status, hasFullAccess, role } = req.body ?? {};
@@ -960,19 +1392,33 @@ app.patch("/api/admin/users/:id/status", requireAdmin, async (req, res) => {
       ]
     );
     if (!updated.rows[0]) return res.status(404).json({ ok: false, error: "User not found" });
+    if (nextStatus === "suspended" || nextRole) {
+      await pool.query(
+        `UPDATE refresh_tokens SET revoked_at = NOW()
+         WHERE user_id = $1 AND revoked_at IS NULL`,
+        [targetId]
+      );
+    }
     await auditAdminAction(req, "user.update_access", "user", targetId, {
       status: nextStatus,
       hasFullAccess,
       role: nextRole,
     });
+    await logUserAction(targetId, nextStatus === "suspended" ? "account.suspended" : "account.updated", req);
     return res.json({ ok: true, user: updated.rows[0] });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ ok: false, error: "Server error" });
   }
+};
+
+app.patch("/api/admin/users/:id/status", requireAdmin, updateAdminUserStatusHandler);
+app.patch("/api/admin/users/:id/suspend", requireAdmin, (req, res) => {
+  req.body = { ...(req.body ?? {}), status: req.body?.status === "active" ? "active" : "suspended" };
+  return updateAdminUserStatusHandler(req, res);
 });
 
-app.get("/api/admin/analytics", requireAdmin, async (req, res) => {
+const adminAnalyticsHandler = async (req, res) => {
   try {
     const [users, simulations, exams, audit] = await Promise.all([
       pool.query(`
@@ -1020,7 +1466,10 @@ app.get("/api/admin/analytics", requireAdmin, async (req, res) => {
     console.error(err);
     return res.status(500).json({ ok: false, error: "Server error" });
   }
-});
+};
+
+app.get("/api/admin/analytics", requireAdmin, adminAnalyticsHandler);
+app.get("/api/admin/stats", requireAdmin, adminAnalyticsHandler);
 
 app.get("/api/admin/api-usage", requireAdmin, async (req, res) => {
   try {
@@ -1044,7 +1493,25 @@ app.get("/api/admin/api-usage", requireAdmin, async (req, res) => {
       ORDER BY l.created_at DESC
       LIMIT 50
     `);
-    return res.json({ ok: true, usage: usage.rows, recent: recent.rows });
+    const summary = await pool.query(`
+      SELECT
+        COUNT(*)::int AS total_calls,
+        COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours')::int AS calls_24h,
+        COUNT(*) FILTER (WHERE is_ai_usage)::int AS ai_requests,
+        COALESCE(SUM(units) FILTER (WHERE is_ai_usage), 0)::int AS token_usage
+      FROM api_usage_logs
+    `);
+    const tokenUsage = Number(summary.rows[0]?.token_usage ?? 0);
+    const costPerThousand = Number(process.env.AI_COST_PER_1K_TOKENS || 0.002);
+    return res.json({
+      ok: true,
+      usage: usage.rows,
+      recent: recent.rows,
+      summary: {
+        ...summary.rows[0],
+        estimated_cost: Number(((tokenUsage / 1000) * costPerThousand).toFixed(4)),
+      },
+    });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ ok: false, error: "Server error" });
@@ -1112,6 +1579,66 @@ async function insertExamPayload(payload, adminId) {
 
   return exam.rows[0];
 }
+
+const buildGeneratedExamContent = ({ type, serie, level, moduleCategory }, index) => {
+  const safeType = String(type || "custom").slice(0, 50);
+  const safeSerie = String(serie || "serie-1").slice(0, 50);
+  const safeLevel = String(level || "B2").slice(0, 10);
+  const safeModule = String(moduleCategory || "reading").slice(0, 50);
+  const topic = `${safeType} ${safeSerie} ${safeModule}`;
+
+  return {
+    type: safeType,
+    level: safeLevel,
+    language: "de",
+    question: `Lesen Sie die Aufgabe ${index + 1} zum Thema ${topic} und waehlen Sie die passende Antwort.`,
+    answers: [
+      "Ich bereite mich regelmaessig auf die Deutschpruefung vor.",
+      "Der Termin wurde gestern ohne Begruendung abgesagt.",
+      "Viele Studierende nutzen die Bibliothek am Abend.",
+      "Die Anmeldung erfolgt ueber das Online-Portal.",
+    ],
+    correct_answer: "Ich bereite mich regelmaessig auf die Deutschpruefung vor.",
+  };
+};
+
+app.post("/api/admin/exams/generate", requireAdmin, async (req, res) => {
+  try {
+    const quantity = Math.max(1, Math.min(50, Number(req.body?.quantity) || 1));
+    const generated = [];
+
+    for (let index = 0; index < quantity; index += 1) {
+      const item = buildGeneratedExamContent(req.body ?? {}, index);
+      const inserted = await pool.query(
+        `INSERT INTO exam_content (type, level, language, question, answers, correct_answer, created_by)
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
+         RETURNING *`,
+        [
+          item.type,
+          item.level,
+          item.language,
+          item.question,
+          JSON.stringify(item.answers),
+          item.correct_answer,
+          req.user.id,
+        ]
+      );
+      generated.push(inserted.rows[0]);
+    }
+
+    await auditAdminAction(req, "exam.generate", "exam_content", "bulk", {
+      quantity,
+      type: req.body?.type,
+      serie: req.body?.serie,
+      level: req.body?.level,
+      moduleCategory: req.body?.moduleCategory,
+    });
+    return res.status(201).json({ ok: true, generated });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
 
 app.post("/api/admin/exams", requireAdmin, async (req, res) => {
   try {
@@ -1227,7 +1754,46 @@ const csvEscape = (value) => {
   return `"${text.replace(/"/g, '""')}"`;
 };
 
-app.get("/api/admin/exports", requireAdmin, async (req, res) => {
+const makeSimplePdf = (title, rows) => {
+  const lines = [
+    title,
+    "",
+    ...rows.slice(0, 40).map((row) =>
+      Object.entries(row)
+        .slice(0, 6)
+        .map(([key, value]) => `${key}: ${value == null ? "" : String(value)}`)
+        .join(" | ")
+    ),
+  ].join("\n");
+  const escaped = lines.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+  const objects = [
+    "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj",
+    "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
+    "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj",
+    `4 0 obj << /Length ${escaped.length + 64} >> stream\nBT /F1 10 Tf 40 752 Td 14 TL (${escaped}) Tj ET\nendstream endobj`,
+    "5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj",
+  ];
+  let offset = "%PDF-1.4\n".length;
+  const xref = ["0000000000 65535 f "];
+  const body = objects
+    .map((object) => {
+      xref.push(`${String(offset).padStart(10, "0")} 00000 n `);
+      offset += object.length + 1;
+      return object;
+    })
+    .join("\n");
+  const xrefStart = "%PDF-1.4\n".length + body.length + 1;
+  return [
+    "%PDF-1.4",
+    body,
+    `xref\n0 ${xref.length}\n${xref.join("\n")}`,
+    `trailer << /Size ${xref.length} /Root 1 0 R >>`,
+    `startxref\n${xrefStart}`,
+    "%%EOF",
+  ].join("\n");
+};
+
+const adminExportHandler = async (req, res) => {
   try {
     const type = String(req.query.type || "users");
     const format = String(req.query.format || "json");
@@ -1244,6 +1810,24 @@ app.get("/api/admin/exports", requireAdmin, async (req, res) => {
       `);
       rows = r.rows;
       filename = "results";
+    } else if (type === "statistics" || type === "statistiques") {
+      const r = await pool.query(`
+        SELECT id, total_users, total_exams, api_usage, created_at
+        FROM statistiques
+        ORDER BY created_at DESC
+      `);
+      rows = r.rows;
+      filename = "statistics";
+    } else if (type === "written-copies" || type === "copies_ecrites") {
+      const r = await pool.query(`
+        SELECT c.id, c.prompt, c.response, c.ai_feedback, c.score, c.created_at,
+               u.email, u.username
+        FROM copies_ecrites c
+        LEFT JOIN users u ON u.id = c.user_id
+        ORDER BY c.created_at DESC
+      `);
+      rows = r.rows;
+      filename = "written-copies";
     } else {
       const r = await pool.query(`
         SELECT id, email, username, first_name, last_name, role, status, email_verified,
@@ -1257,15 +1841,24 @@ app.get("/api/admin/exports", requireAdmin, async (req, res) => {
 
     await auditAdminAction(req, "export.download", type, format, { rows: rows.length });
 
-    if (format === "csv") {
+    if (format === "csv" || format === "excel" || format === "xlsx") {
       const headers = rows[0] ? Object.keys(rows[0]) : [];
       const csv = [
         headers.map(csvEscape).join(","),
         ...rows.map((row) => headers.map((header) => csvEscape(row[header])).join(",")),
       ].join("\n");
-      res.setHeader("Content-Type", "text/csv; charset=utf-8");
-      res.setHeader("Content-Disposition", `attachment; filename="${filename}.csv"`);
+      res.setHeader(
+        "Content-Type",
+        format === "csv" ? "text/csv; charset=utf-8" : "application/vnd.ms-excel; charset=utf-8"
+      );
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}.${format === "csv" ? "csv" : "xls"}"`);
       return res.send(csv);
+    }
+
+    if (format === "pdf") {
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}.pdf"`);
+      return res.send(Buffer.from(makeSimplePdf(filename, rows), "utf8"));
     }
 
     res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -1275,7 +1868,10 @@ app.get("/api/admin/exports", requireAdmin, async (req, res) => {
     console.error(err);
     return res.status(500).json({ ok: false, error: "Server error" });
   }
-});
+};
+
+app.get("/api/admin/exports", requireAdmin, adminExportHandler);
+app.get("/api/admin/export", requireAdmin, adminExportHandler);
 
 app.get("/api/admin/audit-logs", requireAdmin, async (req, res) => {
   try {
@@ -1294,7 +1890,7 @@ app.get("/api/admin/audit-logs", requireAdmin, async (req, res) => {
 });
 
 app.get("/", (req, res) => {
-  res.send("Server is running");
+  res.send("Server is running🚀");
 });
 
 ensureSchema()
