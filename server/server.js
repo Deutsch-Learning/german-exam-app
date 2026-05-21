@@ -16,10 +16,13 @@ const adminMiddleware = require("./middleware/admin");
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
-const CLIENT_DIST_DIR = process.env.CLIENT_DIST_DIR
-  ? path.resolve(process.env.CLIENT_DIST_DIR)
-  : path.join(__dirname, "..", "client", "gem-app", "dist");
-const CLIENT_INDEX_FILE = path.join(CLIENT_DIST_DIR, "index.html");
+const SERVE_CLIENT = process.env.SERVE_CLIENT === "true";
+const CLIENT_DIST_DIR = SERVE_CLIENT
+  ? process.env.CLIENT_DIST_DIR
+    ? path.resolve(process.env.CLIENT_DIST_DIR)
+    : path.join(__dirname, "..", "client", "gem-app", "dist")
+  : "";
+const CLIENT_INDEX_FILE = CLIENT_DIST_DIR ? path.join(CLIENT_DIST_DIR, "index.html") : "";
 const isProduction = process.env.NODE_ENV === "production";
 
 const normalizeOrigin = (value) =>
@@ -1931,7 +1934,7 @@ if (!isProduction) {
   });
 }
 
-if (isProduction) {
+if (isProduction && SERVE_CLIENT) {
   app.use(express.static(CLIENT_DIST_DIR, { index: "index.html" }));
   app.use((req, res, next) => {
     const acceptsHtml = req.accepts(["html", "json"]) === "html";
@@ -1940,6 +1943,12 @@ if (isProduction) {
       if (err) return next(err);
       return undefined;
     });
+  });
+}
+
+if (isProduction && !SERVE_CLIENT) {
+  app.get("/", (req, res) => {
+    res.json({ ok: true, service: "german-exam-app-api" });
   });
 }
 
