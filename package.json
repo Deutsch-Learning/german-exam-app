@@ -9,7 +9,7 @@
     "hostinger:start": "node server/server.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": "22.x"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"
