@@ -306,7 +306,7 @@ export default function DashboardMainPage() {
     setError("");
     try {
       if (!auth?.id) { setError("Utilisateur non connecté."); setData(null); return; }
-      const res = await API.get("/dashboard");
+      const res = await API.get("/api/dashboard");
       if (!res.data?.ok) { setError(res.data?.error ?? "Impossible de charger le dashboard."); setData(null); return; }
       if (res.data?.user) {
         updateStoredUser(res.data.user);

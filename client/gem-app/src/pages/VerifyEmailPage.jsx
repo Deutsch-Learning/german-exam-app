@@ -17,7 +17,7 @@ export default function VerifyEmailPage() {
     if (!token) return;
     let active = true;
 
-    API.get(`/verify-email/${token}`)
+    API.get(`/api/auth/verify-email/${token}`)
       .then((res) => {
         if (!active) return;
         setStatus(res.data?.ok ? "success" : "error");
