@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Lock } from "lucide-react";
 import styles from "./SimulationSelectionPage.module.css";
@@ -14,6 +15,7 @@ import logo from "../assets/images/logo.png";
 import {
   OpenBookIcon,
   SimulationDisciplineCard,
+  StartConfirmationModal,
   SimulationTopNav,
 } from "./SimulationSelectionPage";
 
@@ -29,6 +31,7 @@ export default function SeriesSimulationPage() {
   const location = useLocation();
   const { examId, seriesId } = useParams();
   const { t } = useLanguage();
+  const [pendingModuleId, setPendingModuleId] = useState(null);
   const series = getSeriesById(examId, seriesId);
 
   if (!series) {
@@ -75,6 +78,17 @@ export default function SeriesSimulationPage() {
       state: { ...visitorState, autoStartSimulation: true },
     });
   };
+  const requestStartModule = (moduleId) => {
+    setPendingModuleId(moduleId);
+  };
+  const closeStartConfirmation = () => {
+    setPendingModuleId(null);
+  };
+  const continueToModule = () => {
+    if (pendingModuleId) {
+      startModule(pendingModuleId);
+    }
+  };
 
   return (
     <div className={styles.pageContainer}>
@@ -88,7 +102,7 @@ export default function SeriesSimulationPage() {
         onGoModule={(moduleId) =>
           moduleId === "lessons"
             ? navigate("/lessons")
-            : startModule(moduleId)
+            : requestStartModule(moduleId)
         }
       />
 
@@ -118,13 +132,23 @@ export default function SeriesSimulationPage() {
                   accent={module.accent}
                   minuteLabel={t.simulations.minutes}
                   questionLabel={t.simulations.questions}
-                  onClick={() => startModule(module.id)}
+                  onClick={() => requestStartModule(module.id)}
                 />
               );
             })}
           </div>
         </section>
       </main>
+      {pendingModuleId ? (
+        <StartConfirmationModal
+          title="You are about to start this test."
+          message={null}
+          cancelLabel="Return"
+          startLabel="Continue"
+          onCancel={closeStartConfirmation}
+          onStart={continueToModule}
+        />
+      ) : null}
     </div>
   );
 }

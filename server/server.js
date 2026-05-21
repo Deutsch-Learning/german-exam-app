@@ -1,5 +1,6 @@
 require("dotenv").config();
 const crypto = require("crypto");
+const path = require("path");
 const express = require("express");
 const pool = require("./db");
 const cors = require("cors");
@@ -15,6 +16,11 @@ const adminMiddleware = require("./middleware/admin");
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
+const CLIENT_DIST_DIR = process.env.CLIENT_DIST_DIR
+  ? path.resolve(process.env.CLIENT_DIST_DIR)
+  : path.join(__dirname, "..", "client", "gem-app", "dist");
+const CLIENT_INDEX_FILE = path.join(CLIENT_DIST_DIR, "index.html");
+const isProduction = process.env.NODE_ENV === "production";
 
 const normalizeOrigin = (value) =>
   String(value ?? "")
@@ -62,10 +68,10 @@ const ACCESS_TOKEN_EXPIRES_IN = "15m";
 const REFRESH_COOKIE_NAME = "refresh_token";
 const REFRESH_DAYS = 7;
 const REFRESH_MAX_AGE_MS = REFRESH_DAYS * 24 * 60 * 60 * 1000;
-const COOKIE_SECURE = process.env.NODE_ENV === "production";
+const COOKIE_SECURE = isProduction;
 const DEFAULT_TOTAL_AVAILABLE_EXAMS = Number(process.env.TOTAL_AVAILABLE_EXAMS || 20);
 
-if (!process.env.JWT_SECRET && process.env.NODE_ENV === "production") {
+if (!process.env.JWT_SECRET && isProduction) {
   throw new Error("JWT_SECRET is required in production");
 }
 
@@ -782,7 +788,7 @@ const verifyEmailToken = async (token) => {
   return r.rows[0] ?? null;
 };
 
-app.get("/verify-email/:token", async (req, res) => {
+const verifyEmailGetHandler = async (req, res) => {
   try {
     const user = await verifyEmailToken(req.params.token);
     if (!user) return res.status(400).json({ ok: false, error: "Invalid or expired verification link" });
@@ -791,9 +797,12 @@ app.get("/verify-email/:token", async (req, res) => {
     console.error(err);
     return res.status(500).json({ ok: false, error: "Server error" });
   }
-});
+};
 
-app.post("/verify-email", async (req, res) => {
+app.get("/api/auth/verify-email/:token", verifyEmailGetHandler);
+if (!isProduction) app.get("/verify-email/:token", verifyEmailGetHandler);
+
+const verifyEmailPostHandler = async (req, res) => {
   try {
     const user = await verifyEmailToken(req.body?.token);
     if (!user) return res.status(400).json({ ok: false, error: "Invalid or expired verification link" });
@@ -802,7 +811,10 @@ app.post("/verify-email", async (req, res) => {
     console.error(err);
     return res.status(500).json({ ok: false, error: "Server error" });
   }
-});
+};
+
+app.post("/api/auth/verify-email", verifyEmailPostHandler);
+app.post("/verify-email", verifyEmailPostHandler);
 
 const loginHandler = async (req, res) => {
   try {
@@ -1118,7 +1130,7 @@ const recentSimulationsHandler = async (req, res) => {
 
 app.get("/api/user/simulations", requireAuth, recentSimulationsHandler);
 
-app.get("/dashboard", requireAuth, async (req, res) => {
+const dashboardHandler = async (req, res) => {
   try {
     const userId = req.user.id;
 
@@ -1186,7 +1198,10 @@ app.get("/dashboard", requireAuth, async (req, res) => {
     console.error(err);
     return res.status(500).json({ ok: false, error: "Server error" });
   }
-});
+};
+
+app.get("/api/dashboard", requireAuth, dashboardHandler);
+if (!isProduction) app.get("/dashboard", requireAuth, dashboardHandler);
 
 const updateProfileHandler = async (req, res) => {
   try {
@@ -1195,12 +1210,11 @@ const updateProfileHandler = async (req, res) => {
       typeof username !== "string" ||
       typeof firstName !== "string" ||
       typeof lastName !== "string" ||
-      typeof email !== "string" ||
-      typeof dateOfBirth !== "string"
+      typeof email !== "string"
     ) {
       return res.status(400).json({
         ok: false,
-        error: "username, firstName, lastName, email and dateOfBirth are required",
+        error: "username, firstName, lastName and email are required",
       });
     }
 
@@ -1208,7 +1222,7 @@ const updateProfileHandler = async (req, res) => {
     const safeFirst = firstName.trim().slice(0, 80);
     const safeLast = lastName.trim().slice(0, 80);
     const safeEmail = normalizeEmail(email);
-    const safeDob = dateOfBirth.trim();
+    const safeDob = typeof dateOfBirth === "string" ? dateOfBirth.trim() : "";
 
     if (!/^[a-z0-9._-]{3,30}$/.test(safeUsername)) {
       return res.status(400).json({ ok: false, error: "Username must be 3-30 chars (a-z, 0-9, . _ -)" });
@@ -1219,7 +1233,7 @@ const updateProfileHandler = async (req, res) => {
     if (!isEmail(safeEmail)) {
       return res.status(400).json({ ok: false, error: "A valid email is required" });
     }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(safeDob)) {
+    if (safeDob && !/^\d{4}-\d{2}-\d{2}$/.test(safeDob)) {
       return res.status(400).json({ ok: false, error: "dateOfBirth must be in YYYY-MM-DD format" });
     }
 
@@ -1232,7 +1246,7 @@ const updateProfileHandler = async (req, res) => {
            first_name = $2,
            last_name = $3,
            email = $4,
-           date_of_birth = $5::date,
+           date_of_birth = COALESCE($5::date, date_of_birth),
            email_verified = CASE WHEN $6 THEN FALSE ELSE email_verified END,
            email_verified_at = CASE WHEN $6 THEN NULL ELSE email_verified_at END,
            verification_token_hash = CASE WHEN $6 THEN $7 ELSE verification_token_hash END,
@@ -1245,7 +1259,7 @@ const updateProfileHandler = async (req, res) => {
         safeFirst,
         safeLast,
         safeEmail,
-        safeDob,
+        safeDob || null,
         emailChanged,
         verificationToken ? tokenHash(verificationToken) : null,
         verificationToken ? expiresFromNow(VERIFICATION_HOURS, "hours") : null,
@@ -1911,9 +1925,23 @@ app.get("/api/admin/audit-logs", requireAdmin, async (req, res) => {
   }
 });
 
-app.get("/", (req, res) => {
-  res.send("Server is running🚀");
-});
+if (!isProduction) {
+  app.get("/", (req, res) => {
+    res.send("Server is running");
+  });
+}
+
+if (isProduction) {
+  app.use(express.static(CLIENT_DIST_DIR, { index: "index.html" }));
+  app.use((req, res, next) => {
+    const acceptsHtml = req.accepts(["html", "json"]) === "html";
+    if (req.method !== "GET" || !acceptsHtml) return next();
+    return res.sendFile(CLIENT_INDEX_FILE, (err) => {
+      if (err) return next(err);
+      return undefined;
+    });
+  });
+}
 
 ensureSchema()
   .then(() => {

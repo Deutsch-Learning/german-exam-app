@@ -1,8 +1,17 @@
 {
+  "scripts": {
+    "dev": "concurrently \"cd server && npm run dev\" \"cd client/gem-app && npm run dev\"",
+    "install:server": "npm install --prefix server",
+    "install:client": "npm install --include=dev --prefix client/gem-app",
+    "build": "npm run install:server && npm run install:client && npm run build --prefix client/gem-app",
+    "start": "node server/server.js",
+    "hostinger:build": "npm run build",
+    "hostinger:start": "node server/server.js"
+  },
+  "engines": {
+    "node": "22.x"
+  },
   "devDependencies": {
     "concurrently": "^9.2.1"
-  },
-  "scripts": {
-  "start": "concurrently \"cd server && npm run dev\" \"cd client/gem-app && npm run dev\""
-}
+  }
 }

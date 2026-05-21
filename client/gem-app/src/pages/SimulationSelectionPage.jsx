@@ -155,7 +155,16 @@ export const SimulationDisciplineCard = ({ iconPath, iconNode, title, time, ques
   </button>
 );
 
-export const StartConfirmationModal = ({ examName, moduleTitle, onCancel, onStart }) => (
+export const StartConfirmationModal = ({
+  examName,
+  moduleTitle,
+  title,
+  message,
+  cancelLabel = "Cancel",
+  startLabel = "Start",
+  onCancel,
+  onStart,
+}) => (
   <div className={styles.modalOverlay} role="presentation" onMouseDown={onCancel}>
     <section
       className={styles.confirmModal}
@@ -165,17 +174,21 @@ export const StartConfirmationModal = ({ examName, moduleTitle, onCancel, onStar
       onMouseDown={(event) => event.stopPropagation()}
     >
       <p className={styles.modalEyebrow}>Simulation</p>
-      <h2 id="start-confirm-title">You are about to start the {examName} test</h2>
-      <p>
-        {moduleTitle ? `${moduleTitle} will begin now. ` : ""}
-        Are you ready to start?
-      </p>
+      <h2 id="start-confirm-title">{title ?? `You are about to start the ${examName} test`}</h2>
+      {message === null ? null : message ? (
+        <p>{message}</p>
+      ) : (
+        <p>
+          {moduleTitle ? `${moduleTitle} will begin now. ` : ""}
+          Are you ready to start?
+        </p>
+      )}
       <div className={styles.modalActions}>
         <button type="button" className={styles.modalCancelButton} onClick={onCancel}>
-          Cancel
+          {cancelLabel}
         </button>
         <button type="button" className={styles.modalStartButton} onClick={onStart}>
-          Start
+          {startLabel}
         </button>
       </div>
     </section>
