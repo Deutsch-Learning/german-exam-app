@@ -95,7 +95,7 @@ const translations = {
         login: "Connexion",
         home: "Accueil",
         currentTopics: "Sujets actuels",
-        aboutTests: "À propos TestDaF/DSH",
+        aboutTests: "À propos",
         pages: "Pages",
         createAccount: "Créer un compte",
       },
