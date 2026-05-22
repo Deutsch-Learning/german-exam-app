@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import Landing from "./pages/Landing";
 import LoginPage from "./pages/Login";
 import RegisterPage from "./pages/Register";
@@ -32,49 +32,60 @@ import ResetPasswordPage from "./pages/ResetPasswordPage";
 import AdminPanel from "./pages/AdminPanel";
 import { LanguageProvider } from "./context/LanguageContext";
 import { AdminRoute, ProtectedRoute } from "./components/RouteGuards";
+import MotionShell from "./components/motion/MotionShell";
+
+function AppRoutes() {
+  const location = useLocation();
+
+  return (
+    <MotionShell>
+      <Routes location={location}>
+        <Route path="/" element={<Landing />} />
+        <Route path="/landing" element={<Landing />} />
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
+        <Route path="/verify-email" element={<VerifyEmailPage />} />
+        <Route path="/verify-email/:token" element={<VerifyEmailPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
+        <Route path="/dashboard" element={<ProtectedRoute><DashboardMainPage /></ProtectedRoute>} />
+        <Route path="/admin/*" element={<AdminRoute><AdminPanel /></AdminRoute>} />
+        <Route path="/simulations" element={<ProtectedRoute><SimulationSelectionPage /></ProtectedRoute>} />
+        <Route path="/simulations/:examId/:seriesId" element={<SeriesSimulationPage />} />
+        <Route path="/simulations/:examId" element={<SeriesSelectionPage />} />
+        <Route path="/simulation/:examId/:seriesId/:moduleId" element={<SimulationModulePage />} />
+        <Route path="/simulation/:moduleId" element={<ProtectedRoute><SimulationModulePage /></ProtectedRoute>} />
+        <Route path="/topics/:topicId" element={<TopicPage />} />
+        <Route path="/faq" element={<InfoPage type="faq" />} />
+        <Route path="/privacy-policy" element={<InfoPage type="privacy" />} />
+        <Route path="/refund-condition" element={<InfoPage type="refund" />} />
+        <Route path="/offers" element={<OffersPage />} />
+        <Route path="/checkout/:offerId" element={<ProtectedRoute><CheckoutPage /></ProtectedRoute>} />
+        <Route path="/start-preparation" element={<StartPreparationPage />} />
+        <Route path="/free-test/:seriesId" element={<FreeTestPage />} />
+        <Route path="/session-expired" element={<SessionExpiredPage />} />
+        <Route path="/reading" element={<ProtectedRoute><ReadingPage /></ProtectedRoute>} />
+        <Route path="/listening" element={<ProtectedRoute><ListeningPage /></ProtectedRoute>} />
+        <Route path="/writing" element={<ProtectedRoute><WritingPage /></ProtectedRoute>} />
+        <Route path="/speaking" element={<ProtectedRoute><SpeakingPage /></ProtectedRoute>} />
+        <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+        <Route path="/progress" element={<ProtectedRoute><ProgressPage /></ProtectedRoute>} />
+        <Route path="/recent-simulations" element={<ProtectedRoute><AllRecentSimulationsPage /></ProtectedRoute>} />
+        <Route path="/lessons" element={<LessonsPage />} />
+        <Route path="/about" element={<AboutPage />} />
+        <Route path="/actualites" element={<ActualitesPage />} />
+        <Route path="/contact" element={<ContactPage />} />
+        <Route path="*" element={<NotFoundPage />} />
+      </Routes>
+    </MotionShell>
+  );
+}
 
 function App() {
   return (
     <LanguageProvider>
       <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Landing />} />
-          <Route path="/landing" element={<Landing />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
-          <Route path="/verify-email" element={<VerifyEmailPage />} />
-          <Route path="/verify-email/:token" element={<VerifyEmailPage />} />
-          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-          <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
-          <Route path="/dashboard" element={<ProtectedRoute><DashboardMainPage /></ProtectedRoute>} />
-          <Route path="/admin/*" element={<AdminRoute><AdminPanel /></AdminRoute>} />
-          <Route path="/simulations" element={<ProtectedRoute><SimulationSelectionPage /></ProtectedRoute>} />
-          <Route path="/simulations/:examId/:seriesId" element={<SeriesSimulationPage />} />
-          <Route path="/simulations/:examId" element={<SeriesSelectionPage />} />
-          <Route path="/simulation/:examId/:seriesId/:moduleId" element={<SimulationModulePage />} />
-          <Route path="/simulation/:moduleId" element={<ProtectedRoute><SimulationModulePage /></ProtectedRoute>} />
-          <Route path="/topics/:topicId" element={<TopicPage />} />
-          <Route path="/faq" element={<InfoPage type="faq" />} />
-          <Route path="/privacy-policy" element={<InfoPage type="privacy" />} />
-          <Route path="/refund-condition" element={<InfoPage type="refund" />} />
-          <Route path="/offers" element={<OffersPage />} />
-          <Route path="/checkout/:offerId" element={<ProtectedRoute><CheckoutPage /></ProtectedRoute>} />
-          <Route path="/start-preparation" element={<StartPreparationPage />} />
-          <Route path="/free-test/:seriesId" element={<FreeTestPage />} />
-          <Route path="/session-expired" element={<SessionExpiredPage />} />
-          <Route path="/reading" element={<ProtectedRoute><ReadingPage /></ProtectedRoute>} />
-          <Route path="/listening" element={<ProtectedRoute><ListeningPage /></ProtectedRoute>} />
-          <Route path="/writing" element={<ProtectedRoute><WritingPage /></ProtectedRoute>} />
-          <Route path="/speaking" element={<ProtectedRoute><SpeakingPage /></ProtectedRoute>} />
-          <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
-          <Route path="/progress" element={<ProtectedRoute><ProgressPage /></ProtectedRoute>} />
-          <Route path="/recent-simulations" element={<ProtectedRoute><AllRecentSimulationsPage /></ProtectedRoute>} />
-          <Route path="/lessons" element={<LessonsPage />} />
-          <Route path="/about" element={<AboutPage />} />
-          <Route path="/actualites" element={<ActualitesPage />} />
-          <Route path="/contact" element={<ContactPage />} />
-          <Route path="*" element={<NotFoundPage />} />
-        </Routes>
+        <AppRoutes />
       </BrowserRouter>
     </LanguageProvider>
   );

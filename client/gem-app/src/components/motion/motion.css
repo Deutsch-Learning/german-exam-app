@@ -1,0 +1,142 @@
+:root {
+  --motion-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --motion-ease-in-out: cubic-bezier(0.76, 0, 0.24, 1);
+  --motion-fast: 180ms;
+  --motion-base: 280ms;
+  --motion-slow: 520ms;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  text-rendering: optimizeLegibility;
+}
+
+.motion-page {
+  min-height: 100vh;
+  transform-origin: 50% 24%;
+  will-change: opacity, transform, filter;
+}
+
+.motion-route-overlay {
+  position: fixed;
+  inset: -14vh -8vw auto -8vw;
+  z-index: 2147483000;
+  height: 128vh;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 18% 18%, rgba(255, 255, 255, 0.72), transparent 24%),
+    radial-gradient(circle at 82% 26%, rgba(255, 255, 255, 0.52), transparent 22%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(242, 247, 255, 0.94) 42%, rgba(230, 57, 70, 0.16));
+  box-shadow: 0 32px 90px rgba(15, 23, 42, 0.14);
+  backdrop-filter: blur(18px) saturate(140%);
+  transform: translate3d(0, 100%, 0);
+  will-change: transform, opacity, border-radius;
+}
+
+.motion-route-overlay::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 -1px;
+  height: 22vh;
+  background:
+    radial-gradient(120% 90% at 15% 0%, rgba(255, 255, 255, 0.95), transparent 52%),
+    radial-gradient(110% 88% at 70% 0%, rgba(255, 255, 255, 0.88), transparent 58%);
+  opacity: 0.76;
+}
+
+.motion-reveal {
+  opacity: 0;
+  transform: translate3d(0, 22px, 0) scale(0.985);
+  filter: blur(8px);
+  transition:
+    opacity 620ms var(--motion-ease-out),
+    transform 720ms var(--motion-ease-out),
+    filter 720ms var(--motion-ease-out);
+  transition-delay: var(--motion-reveal-delay, 0ms);
+  will-change: opacity, transform, filter;
+}
+
+.motion-reveal.is-visible {
+  opacity: 1;
+  transform: translate3d(0, 0, 0) scale(1);
+  filter: blur(0);
+}
+
+:where(button, a, input, select, textarea, [role="button"]) {
+  transition:
+    background-color var(--motion-fast) var(--motion-ease-out),
+    border-color var(--motion-fast) var(--motion-ease-out),
+    color var(--motion-fast) var(--motion-ease-out),
+    box-shadow var(--motion-base) var(--motion-ease-out),
+    transform var(--motion-base) var(--motion-ease-out),
+    opacity var(--motion-fast) var(--motion-ease-out);
+}
+
+:where(button, a, [role="button"]):where(:hover, :focus-visible) {
+  transform: translate3d(0, -1px, 0);
+}
+
+:where(button, a, [role="button"]):active {
+  transform: translate3d(0, 0, 0) scale(0.985);
+}
+
+:where(button, a, [role="button"]):disabled {
+  transform: none;
+}
+
+:where(input, select, textarea):focus {
+  transition-duration: var(--motion-base);
+}
+
+:where(img, svg, video, canvas) {
+  backface-visibility: hidden;
+}
+
+:where([class*="card"], [class*="Card"], [class*="panel"], [class*="Panel"]) {
+  transition:
+    box-shadow var(--motion-base) var(--motion-ease-out),
+    border-color var(--motion-base) var(--motion-ease-out),
+    transform var(--motion-base) var(--motion-ease-out),
+    background-color var(--motion-base) var(--motion-ease-out);
+}
+
+:where([class*="card"], [class*="Card"], [class*="panel"], [class*="Panel"]):where(:hover, :focus-within) {
+  transform: translate3d(0, -2px, 0);
+}
+
+@media (max-width: 720px) {
+  .motion-route-overlay {
+    inset-inline: -18vw;
+  }
+
+  .motion-reveal {
+    transform: translate3d(0, 16px, 0) scale(0.992);
+    filter: blur(5px);
+    transition-duration: 480ms, 540ms, 540ms;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+  }
+
+  .motion-route-overlay {
+    display: none;
+  }
+
+  .motion-reveal,
+  .motion-reveal.is-visible {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
