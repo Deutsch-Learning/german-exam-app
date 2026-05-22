@@ -201,6 +201,74 @@
   transition: width 0.25s ease;
 }
 
+.stepNavigator {
+  display: grid;
+  gap: 12px;
+}
+
+.stepNavigatorHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 0.9rem;
+  font-weight: 850;
+}
+
+.stepDots {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(34px, 1fr));
+  gap: 7px;
+  max-height: 118px;
+  overflow: auto;
+  padding: 2px;
+}
+
+.stepDot {
+  min-width: 34px;
+  min-height: 34px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  display: inline-grid;
+  place-items: center;
+  font-size: 0.78rem;
+  font-weight: 950;
+  position: relative;
+  font-variant-numeric: tabular-nums;
+}
+
+.stepDot[data-state="completed"] {
+  background: #ffffff;
+  border-color: #ffffff;
+  color: var(--module-accent);
+}
+
+.stepDot[data-state="current"] {
+  background: var(--exam-yellow, #facc15);
+  border-color: var(--exam-yellow, #facc15);
+  color: #2b2100;
+  box-shadow: 0 0 0 3px rgba(250, 204, 21, 0.28);
+}
+
+.stepDot[data-state="visited"] {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.stepDot[data-part-start="true"]::before {
+  content: "";
+  position: absolute;
+  top: -4px;
+  left: 50%;
+  width: 18px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--exam-yellow, #facc15);
+  transform: translateX(-50%);
+}
+
 .workArea {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -271,6 +339,10 @@
   opacity: 0.5;
 }
 
+.questionButton[data-static="true"] {
+  cursor: default;
+}
+
 .questionCurrent {
   border-color: var(--module-accent);
   box-shadow: 0 0 0 3px var(--module-soft);
@@ -316,6 +388,7 @@
 .editorPanel,
 .passagePane,
 .questionPane,
+.partIntroPanel,
 .resultPanel {
   border: 1px solid #e5e7eb;
   border-radius: 10px;
@@ -367,6 +440,13 @@
 }
 
 .readingActionPanel {
+  max-width: 760px;
+  margin-left: auto;
+  margin-right: auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.stepActionPanel {
   max-width: 760px;
   margin-left: auto;
   margin-right: auto;
@@ -435,8 +515,88 @@
 .promptPanel,
 .editorPanel,
 .recorderPanel,
-.supportPanel {
+.supportPanel,
+.partIntroPanel {
   padding: 22px;
+}
+
+.partIntroPanel {
+  display: grid;
+  gap: 22px;
+  animation: questionReveal 0.24s ease-out both;
+}
+
+.partIntroHeader {
+  display: grid;
+  gap: 18px;
+}
+
+.partIntroHeader h2 {
+  margin: 10px 0 8px;
+  color: #111827;
+  font-size: clamp(1.6rem, 3vw, 2.4rem);
+  line-height: 1.1;
+}
+
+.partIntroHeader p {
+  margin: 0;
+  color: #4b5563;
+  line-height: 1.6;
+}
+
+.partMetaStack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.partMetaStack span {
+  min-height: 36px;
+  border-radius: 999px;
+  background: var(--module-soft);
+  color: var(--module-accent);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  font-weight: 900;
+}
+
+.partIntroBody {
+  border: 1px solid #edf0f3;
+  border-radius: 12px;
+  background: #fbfcfe;
+  padding: 18px;
+}
+
+.partIntroActions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.partIntroActions .primaryButton {
+  min-width: 190px;
+}
+
+.examMaterial {
+  display: grid;
+  gap: 14px;
+  color: #1f2937;
+}
+
+.examMaterial p,
+.examMaterial ul {
+  margin: 0;
+  line-height: 1.75;
+  white-space: pre-line;
+}
+
+.examMaterial ul {
+  padding-left: 20px;
+}
+
+.examMaterialCompact {
+  margin-top: 18px;
 }
 
 .sectionLabel {
@@ -507,6 +667,14 @@
 
 .questionStep {
   color: var(--module-accent);
+}
+
+.partMiniLabel {
+  margin: 12px 0 0;
+  color: #667085;
+  font-size: 0.82rem;
+  font-weight: 850;
+  text-transform: uppercase;
 }
 
 .optionList {
@@ -1031,6 +1199,11 @@
     grid-template-columns: minmax(0, 1.12fr) minmax(320px, 0.88fr);
   }
 
+  .partIntroHeader {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+  }
+
   .audioHeader {
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: start;
@@ -1081,6 +1254,7 @@
   .promptPanel,
   .recorderPanel,
   .supportPanel,
+  .partIntroPanel,
   .sidebar {
     padding: 16px;
   }
@@ -1257,6 +1431,7 @@
 .editorPanel,
 .passagePane,
 .questionPane,
+.partIntroPanel,
 .resultPanel,
 .sidebar {
   border: 1px solid var(--exam-border);
@@ -1272,6 +1447,7 @@
 .editorPanel,
 .recorderPanel,
 .supportPanel,
+.partIntroPanel,
 .sidebar {
   padding: 24px;
 }
@@ -1283,6 +1459,20 @@
 .readingLayout {
   grid-template-columns: 1fr !important;
   gap: 22px;
+}
+
+@media (min-width: 980px) {
+  .readingLayout {
+    grid-template-columns: minmax(0, 1.12fr) minmax(360px, 0.88fr) !important;
+    align-items: start;
+  }
+
+  .readingLayout .passagePane {
+    position: sticky;
+    top: 98px;
+    max-height: calc(100vh - 132px);
+    overflow: auto;
+  }
 }
 
 .passagePane h2,
@@ -1874,6 +2064,13 @@
 }
 
 .actionPanel.readingActionPanel {
+  max-width: 760px;
+  margin-left: auto;
+  margin-right: auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.actionPanel.stepActionPanel {
   max-width: 760px;
   margin-left: auto;
   margin-right: auto;

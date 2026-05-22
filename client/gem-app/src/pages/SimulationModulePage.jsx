@@ -898,6 +898,119 @@ const getTaskDuration = (module, task) => {
   return typeBase + levelExtra;
 };
 
+const normalizePartKey = (value, fallback = "part-1") => {
+  const text = String(value ?? "").trim().toLowerCase();
+  const partMatch = text.match(/(?:teil|part)\s*(\d+)/i);
+  if (partMatch) return `part-${partMatch[1]}`;
+  const safe = text
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+  return safe ? `part-${safe}` : fallback;
+};
+
+const getTaskPartKey = (task, index = 0) => {
+  if (task?.partKey) return task.partKey;
+  if (task?.partNumber) return `part-${task.partNumber}`;
+  return normalizePartKey(task?.partTitle || task?.typeLabel, `part-${index + 1}`);
+};
+
+const stripQuestionMaterial = (text, tasks = []) => {
+  const lines = String(text ?? "")
+    .replace(/\r/g, "")
+    .replace(/--- PAGE\s+\d+\/\d+\s+---/gi, "")
+    .split("\n");
+  const taskPrompts = tasks
+    .map((task) => String(task.question ?? "").split("\n")[0].trim())
+    .filter((prompt) => prompt.length > 18);
+  const cleaned = [];
+  let skippingTable = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      if (!skippingTable) cleaned.push("");
+      continue;
+    }
+
+    if (/^Anzeigen\s*:/i.test(trimmed)) {
+      skippingTable = false;
+      cleaned.push(trimmed);
+      continue;
+    }
+
+    if (/^Nr\.?\s+(Aussage|Situation|Person|Aufgabe|Frage)/i.test(trimmed)) {
+      skippingTable = true;
+      continue;
+    }
+
+    if (skippingTable) continue;
+    if (/^\d{1,2}\s+.+\s+(?:n\s+n|___)$/i.test(trimmed)) continue;
+    if (/^Aufgabe\s+\d{1,2}\s*:/i.test(trimmed)) continue;
+    if (/^n\s+[a-c]\)/i.test(trimmed)) continue;
+    if (taskPrompts.some((prompt) => trimmed.includes(prompt) || prompt.includes(trimmed))) continue;
+
+    cleaned.push(line.replace(/\s+$/g, ""));
+  }
+
+  const result = cleaned
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return result || String(text ?? "").trim();
+};
+
+const buildExamParts = (module) => {
+  const partMap = new Map();
+  const moduleParts = Array.isArray(module.parts) ? module.parts : [];
+
+  moduleParts.forEach((part, index) => {
+    const partKey = String(part.id ?? "").startsWith("part-")
+      ? part.id
+      : normalizePartKey(part.id || part.label || part.heading || part.title, `part-${index + 1}`);
+    partMap.set(partKey, {
+      id: partKey,
+      number: part.number || index + 1,
+      title: part.heading || part.title || part.label || `Part ${index + 1}`,
+      instructions: part.instructions || part.text || "",
+      durationMinutes: part.durationMinutes,
+      points: part.points,
+      taskIndexes: [],
+    });
+  });
+
+  module.tasks.forEach((task, index) => {
+    const partKey = getTaskPartKey(task, index);
+    if (!partMap.has(partKey)) {
+      partMap.set(partKey, {
+        id: partKey,
+        number: task.partNumber || partMap.size + 1,
+        title: task.partTitle || String(task.typeLabel || `Part ${partMap.size + 1}`).replace(/\s+-\s+.+$/, ""),
+        instructions: task.partInstructions || "",
+        durationMinutes: task.partDurationMinutes,
+        points: task.partPoints,
+        taskIndexes: [],
+      });
+    }
+    const part = partMap.get(partKey);
+    part.taskIndexes.push(index);
+    if (!part.instructions && task.partInstructions) part.instructions = task.partInstructions;
+    if (!part.durationMinutes && task.partDurationMinutes) part.durationMinutes = task.partDurationMinutes;
+    if (!part.points && task.partPoints) part.points = task.partPoints;
+  });
+
+  return [...partMap.values()]
+    .filter((part) => part.taskIndexes.length)
+    .map((part, index) => ({
+      ...part,
+      number: part.number || index + 1,
+      displayTitle: `Part ${part.number || index + 1} - ${String(part.title || "").replace(/^Teil\s+\d+\s*:?\s*/i, "") || "Instructions"}`,
+      sourceText: stripQuestionMaterial(part.instructions, part.taskIndexes.map((taskIndex) => module.tasks[taskIndex])),
+      firstIndex: part.taskIndexes[0],
+      lastIndex: part.taskIndexes[part.taskIndexes.length - 1],
+    }));
+};
+
 const getStoredProgress = (key) => {
   try {
     return JSON.parse(localStorage.getItem(key) ?? "null");
@@ -1136,6 +1249,7 @@ const buildSeriesModule = (baseModule, content, series) => {
       examPart: `${series.examName} ${series.code} - ${baseModule.examPart}`,
       tasks: content.tasks?.length ? content.tasks : baseModule.tasks,
       passage: content.passage ?? baseModule.passage,
+      parts: content.parts ?? baseModule.parts,
       audio: content.audio ?? baseModule.audio,
       focus: content.focus ?? baseModule.focus,
       advancement: content.advancement ?? baseModule.advancement,
@@ -1156,6 +1270,7 @@ const buildSeriesModule = (baseModule, content, series) => {
     examPart: `${series.examName} ${series.code} - ${baseModule.examPart}`,
     tasks: baseModule.tasks.map((task, index) => buildSeriesTask(baseModule.id, task, index, content, series)),
     passage: content.passage ?? baseModule.passage,
+    parts: content.parts ?? baseModule.parts,
     audio: content.audio ?? baseModule.audio,
     focus: content.focus ?? baseModule.focus,
     advancement: content.advancement ?? baseModule.advancement,
@@ -1320,7 +1435,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const blockedVisitorRefresh = visitorSeriesAttempt && !visitorAccessAllowed;
   const waitingForImportedSeries = Boolean(params.seriesId && !selectedSeries && importedModuleState.loading);
   const shouldPersistProgress =
-    Boolean(auth?.id) && !blockedSeriesAccess && !blockedVisitorRefresh && !waitingForImportedSeries;
+    !blockedSeriesAccess && !blockedVisitorRefresh && !waitingForImportedSeries;
   const module = useMemo(
     () => buildSeriesModule(baseModule, selectedSeriesContent, selectedSeries),
     [baseModule, selectedSeriesContent, selectedSeries]
@@ -1355,6 +1470,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const [timerSeconds, setTimerSeconds] = useState(totalExamDuration);
   const [simulationMode, setSimulationMode] = useState(true);
   const [completed, setCompleted] = useState(false);
+  const [partIntroVisible, setPartIntroVisible] = useState(true);
   const [saveStatus, setSaveStatus] = useState("");
   const [resultStatus, setResultStatus] = useState("");
   const [writingVersions, setWritingVersions] = useState([]);
@@ -1388,6 +1504,14 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
   const currentTask = module.tasks[Math.min(currentIndex, totalTasks - 1)];
   const currentAnswer = answers[currentIndex];
+  const examParts = useMemo(() => buildExamParts(module), [module]);
+  const currentPartIndex = Math.max(
+    0,
+    examParts.findIndex((part) => part.taskIndexes.includes(currentIndex))
+  );
+  const currentPart = examParts[currentPartIndex] ?? examParts[0];
+  const currentPartQuestionIndex = currentPart ? Math.max(0, currentPart.taskIndexes.indexOf(currentIndex)) : 0;
+  const currentPartQuestionTotal = currentPart?.taskIndexes.length ?? totalTasks;
   const currentTaskDuration = getTaskDuration(module, currentTask);
   const currentAudioDuration = module.id === "listen" ? getEstimatedAudioDuration(module.audio) : 0;
   const answeredCount = module.tasks.filter((task, index) => getTaskAnswered(module, task, answers[index])).length;
@@ -1411,6 +1535,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       setTimerSeconds(totalExamDuration);
       setSimulationMode(true);
       setCompleted(false);
+      setPartIntroVisible(true);
       setWritingVersions([]);
       setSaveStatus("Mode visiteur : la progression n'est pas sauvegardée.");
       setRestoredKey(progressKey);
@@ -1430,6 +1555,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setTimerSeconds(Number(stored?.timerSeconds) || totalExamDuration);
     setSimulationMode(stored?.completed ? Boolean(stored?.simulationMode) : true);
     setCompleted(Boolean(stored?.completed));
+    setPartIntroVisible(stored?.completed ? false : stored?.partIntroVisible ?? restoredIndex === 0);
     setWritingVersions(stored?.writingVersions ?? []);
     const restoredAudioTimestamp = Number(stored?.audioTimestamp) || 0;
     setAudioTimestamp(restoredAudioTimestamp);
@@ -1491,6 +1617,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
   const finishModule = useCallback(() => {
     setCompleted(true);
+    setPartIntroVisible(false);
     setAudioPlaying(false);
     if ("speechSynthesis" in window) {
       gracefulStopSpeech(80);
@@ -1517,6 +1644,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       elapsedSeconds,
       timerSeconds,
       taskDuration: currentTaskDuration,
+      partIntroVisible,
+      currentPartId: currentPart?.id,
       simulationMode,
       completed,
       audioTimestamp,
@@ -1533,6 +1662,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       audioTimestamp,
       completed,
       currentIndex,
+      currentPart?.id,
       currentTaskDuration,
       currentRoute,
       elapsedSeconds,
@@ -1540,6 +1670,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       module.examPart,
       moduleTitle,
       notes,
+      partIntroVisible,
       prepRemaining,
       progressPercent,
       progressScopeId,
@@ -1565,11 +1696,12 @@ export default function SimulationModulePage({ moduleIdOverride }) {
         const snapshot = buildProgressSnapshot();
         localStorage.setItem(progressKey, JSON.stringify(snapshot));
         if (
-          snapshot.simulationMode ||
+          auth?.id &&
+          (snapshot.simulationMode ||
           snapshot.completed ||
           snapshot.currentIndex > 0 ||
           snapshot.answeredCount > 0 ||
-          Object.values(snapshot.notes ?? {}).some((note) => String(note ?? "").trim())
+          Object.values(snapshot.notes ?? {}).some((note) => String(note ?? "").trim()))
         ) {
           upsertSimulationHistoryEntry(snapshot);
         }
@@ -1578,7 +1710,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
         setSaveStatus("Sauvegarde locale impossible : espace navigateur insuffisant.");
       }
     },
-    [buildProgressSnapshot, progressKey, shouldPersistProgress]
+    [auth?.id, buildProgressSnapshot, progressKey, shouldPersistProgress]
   );
 
   useEffect(() => {
@@ -1696,6 +1828,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setTimerSeconds(totalExamDuration);
     setSimulationMode(true);
     setCompleted(false);
+    setPartIntroVisible(true);
     setWritingVersions([]);
     setAudioTimestamp(0);
     audioTimestampRef.current = 0;
@@ -1716,41 +1849,27 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     }
   }, [module.id, module.tasks, totalExamDuration]);
 
-  const toggleFlag = useCallback(() => {
-    setFlagged((previous) => ({ ...previous, [currentIndex]: !previous[currentIndex] }));
-  }, [currentIndex]);
-
   const goToNext = useCallback(() => {
     if (currentIndex >= totalTasks - 1) {
       finishModule();
       return;
     }
-    const nextIndex = Math.min(totalTasks - 1, currentIndex + 1);
+    const nextPart = currentPart && currentIndex >= currentPart.lastIndex ? examParts[currentPartIndex + 1] : null;
+    const nextIndex = nextPart ? nextPart.firstIndex : Math.min(totalTasks - 1, currentIndex + 1);
     setCurrentIndex(nextIndex);
+    setPartIntroVisible(Boolean(nextPart));
     setSpeakingPhase("prep");
     setPrepRemaining(module.tasks[nextIndex]?.prepSeconds ?? speakingTasks[0].prepSeconds);
     setPrepActive(module.id === "speak" && simulationMode);
     setRecordingSeconds(0);
     recordingSecondsRef.current = 0;
-  }, [currentIndex, finishModule, module, simulationMode, totalTasks]);
+  }, [currentIndex, currentPart, currentPartIndex, examParts, finishModule, module, simulationMode, totalTasks]);
 
   const goToPrevious = useCallback(() => {
     const previousIndex = Math.max(0, currentIndex - 1);
     setCurrentIndex(previousIndex);
+    setPartIntroVisible(false);
   }, [currentIndex]);
-
-  const skipCurrent = useCallback(() => {
-    setSkipped((previous) => ({ ...previous, [currentIndex]: true }));
-    goToNext();
-  }, [currentIndex, goToNext]);
-
-  const goToQuestion = useCallback(
-    (index) => {
-      if (simulationMode) return;
-      setCurrentIndex(index);
-    },
-    [simulationMode]
-  );
 
   const clearSpeechTimers = useCallback(() => {
     if (speechStartTimerRef.current) {
@@ -2035,14 +2154,28 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       return;
     }
 
-    const nextIndex = Math.min(totalTasks - 1, currentIndex + 1);
+    const nextPart = currentPart && currentIndex >= currentPart.lastIndex ? examParts[currentPartIndex + 1] : null;
+    const nextIndex = nextPart ? nextPart.firstIndex : Math.min(totalTasks - 1, currentIndex + 1);
     setCurrentIndex(nextIndex);
+    setPartIntroVisible(Boolean(nextPart));
     setSpeakingPhase("prep");
     setPrepRemaining(module.tasks[nextIndex]?.prepSeconds ?? speakingTasks[0].prepSeconds);
     setPrepActive(module.id === "speak" && simulationMode);
     setRecordingSeconds(0);
     recordingSecondsRef.current = 0;
-  }, [currentIndex, finishModule, isRecording, module, persistProgress, simulationMode, stopRecording, totalTasks]);
+  }, [
+    currentIndex,
+    currentPart,
+    currentPartIndex,
+    examParts,
+    finishModule,
+    isRecording,
+    module,
+    persistProgress,
+    simulationMode,
+    stopRecording,
+    totalTasks,
+  ]);
 
   useEffect(() => {
     if (!simulationMode || completed) return undefined;
@@ -2104,6 +2237,113 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     });
     void startRecording();
   }, [currentIndex, startRecording]);
+
+  const startCurrentPart = useCallback(() => {
+    const startIndex = currentPart?.firstIndex ?? currentIndex;
+    setCurrentIndex(startIndex);
+    setPartIntroVisible(false);
+    setSpeakingPhase("prep");
+    setPrepRemaining(module.tasks[startIndex]?.prepSeconds ?? speakingTasks[0].prepSeconds);
+    setPrepActive(module.id === "speak" && simulationMode);
+    setRecordingSeconds(0);
+    recordingSecondsRef.current = 0;
+    persistProgress(`Part ${currentPart?.number ?? currentPartIndex + 1} demarree a ${formatClock()}`);
+  }, [currentIndex, currentPart, currentPartIndex, module.id, module.tasks, persistProgress, simulationMode]);
+
+  const renderPartMaterial = (part, { compact = false } = {}) => {
+    const sourceText = part?.sourceText || module.passage?.intro || currentTask?.prompt || currentTask?.question || "";
+    const blocks = String(sourceText)
+      .split(/\n{2,}/)
+      .map((block) => block.trim())
+      .filter(Boolean);
+
+    return (
+      <div className={`${styles.examMaterial} ${compact ? styles.examMaterialCompact : ""}`}>
+        {blocks.length ? (
+          blocks.map((block, index) => {
+            const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
+            const listLineCount = lines.filter((line) => /^(\(?[a-j]\)|[-*]|\d+\.)\s+/i.test(line)).length;
+            const looksLikeList = lines.length > 1 && listLineCount >= Math.ceil(lines.length * 0.6);
+            if (looksLikeList) {
+              return (
+                <ul key={`${part?.id ?? "part"}-${index}`}>
+                  {lines.map((line) => (
+                    <li key={line} translate="no">{line.replace(/^[-*]\s*/, "")}</li>
+                  ))}
+                </ul>
+              );
+            }
+            return <p key={`${part?.id ?? "part"}-${index}`} translate="no">{block}</p>;
+          })
+        ) : (
+          <p translate="no">Les consignes de cette partie sont disponibles dans la question active.</p>
+        )}
+      </div>
+    );
+  };
+
+  const renderQuestionStepper = () => (
+    <div className={styles.stepNavigator} aria-label="Progression des questions">
+      <div className={styles.stepNavigatorHeader}>
+        <span>Part {currentPart?.number ?? currentPartIndex + 1} of {Math.max(1, examParts.length)}</span>
+        <strong>
+          Question {currentIndex + 1} of {totalTasks}
+          {currentPartQuestionTotal > 1 ? ` / Part question ${currentPartQuestionIndex + 1} of ${currentPartQuestionTotal}` : ""}
+        </strong>
+      </div>
+      <div className={styles.stepDots} role="list" aria-label="Questions">
+        {module.tasks.map((task, index) => {
+          const answered = getTaskAnswered(module, task, answers[index]);
+          const isCurrent = index === currentIndex && !partIntroVisible;
+          const isPartStart = examParts.some((part) => part.firstIndex === index);
+          const state = isCurrent ? "current" : answered ? "completed" : index < currentIndex ? "visited" : "remaining";
+          return (
+            <span
+              key={task.id}
+              role="listitem"
+              className={styles.stepDot}
+              data-state={state}
+              data-part-start={isPartStart ? "true" : "false"}
+              aria-current={isCurrent ? "step" : undefined}
+              aria-label={`Question ${index + 1}: ${state}`}
+            >
+              {index + 1}
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  const renderPartIntro = () => (
+    <section className={styles.partIntroPanel}>
+      <div className={styles.partIntroHeader}>
+        <div>
+          <p className={styles.sectionLabel}>Part {currentPart?.number ?? currentPartIndex + 1}</p>
+          <h2>{currentPart?.displayTitle ?? "Part introduction"}</h2>
+          <p>
+            Read the instructions and source material first. When you are ready, start the questions for this part.
+          </p>
+        </div>
+        <div className={styles.partMetaStack}>
+          <span><ClipboardCheck size={16} /> {currentPartQuestionTotal} question{currentPartQuestionTotal > 1 ? "s" : ""}</span>
+          {currentPart?.durationMinutes ? <span><Clock3 size={16} /> {currentPart.durationMinutes} min</span> : null}
+          {currentPart?.points ? <span><ShieldCheck size={16} /> {currentPart.points} pts</span> : null}
+        </div>
+      </div>
+
+      <div className={styles.partIntroBody}>
+        {renderPartMaterial(currentPart)}
+      </div>
+
+      <div className={styles.partIntroActions}>
+        <button type="button" className={styles.primaryButton} onClick={startCurrentPart}>
+          Start Questions
+          <ChevronRight size={16} />
+        </button>
+      </div>
+    </section>
+  );
 
   const renderQuestionControl = (task, answer) => {
     if (task.type === "multiple" || task.type === "trueFalse") {
@@ -2231,23 +2471,16 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       <section className={styles.passagePane}>
         <div className={styles.sectionLabel}>
           <BookOpen size={18} />
-          Texte niveau {level}
+          Part {currentPart?.number ?? currentPartIndex + 1} source
         </div>
-        <h2 translate="no">{module.passage.title}</h2>
+        <h2 translate="no">{currentPart?.displayTitle ?? module.passage.title}</h2>
         <p className={styles.introText} translate="no">{module.passage.intro}</p>
-        <div className={styles.paragraphList}>
-          {module.passage.paragraphs.map((paragraph) => (
-            <article key={paragraph.id} className={styles.readingParagraph}>
-              <span>{paragraph.id}</span>
-              <p translate="no">{paragraph.text}</p>
-            </article>
-          ))}
-        </div>
+        {renderPartMaterial(currentPart, { compact: true })}
       </section>
 
       <section key={currentTask.id} className={styles.questionPane}>
         <div className={styles.questionTopline}>
-          <span className={styles.questionStep}>Question {currentIndex + 1}/{totalTasks}</span>
+          <span className={styles.questionStep}>Question {currentIndex + 1} of {totalTasks}</span>
           <span>{currentTask.typeLabel}</span>
         </div>
         <h2>{currentTask.question}</h2>
@@ -2327,9 +2560,10 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
         <section className={styles.questionPane}>
           <div className={styles.questionTopline}>
-            <span>{currentTask.typeLabel}</span>
+            <span className={styles.questionStep}>Question {currentIndex + 1} of {totalTasks}</span>
             <span>{level}</span>
           </div>
+          <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
           <h2>{currentTask.question}</h2>
           {renderQuestionControl(currentTask, currentAnswer)}
           {!simulationMode ? (
@@ -2352,9 +2586,10 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       <div className={styles.writingLayout}>
         <section className={styles.promptPanel}>
           <div className={styles.questionTopline}>
-            <span>{currentTask.typeLabel}</span>
+            <span className={styles.questionStep}>Question {currentIndex + 1} of {totalTasks}</span>
             <span>{level}</span>
           </div>
+          <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
           <h2>{currentTask.title}</h2>
           <p translate="no">{currentTask.prompt}</p>
           <div className={styles.promptMeta}>
@@ -2433,9 +2668,10 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       <div className={styles.speakingLayout}>
         <section className={styles.promptPanel}>
           <div className={styles.questionTopline}>
-            <span>{currentTask.typeLabel}</span>
+            <span className={styles.questionStep}>Question {currentIndex + 1} of {totalTasks}</span>
             <span>{level}</span>
           </div>
+          <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
           <h2>{currentTask.title}</h2>
           <p translate="no">{currentTask.prompt}</p>
           {currentTask.visual ? (
@@ -2579,6 +2815,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       );
     }
 
+    if (partIntroVisible && currentPart) return renderPartIntro();
+
     if (module.id === "read") return renderReading();
     if (module.id === "listen") return renderListening();
     if (module.id === "write") return renderWriting();
@@ -2700,6 +2938,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               <span style={{ width: `${progressPercent}%` }} />
             </div>
           </div>
+
+          {!completed ? renderQuestionStepper() : null}
         </header>
 
         <div className={`${styles.workArea} ${module.id === "read" ? styles.readingWorkArea : ""}`}>
@@ -2718,24 +2958,22 @@ export default function SimulationModulePage({ moduleIdOverride }) {
                 const isSkipped = Boolean(skipped[index]);
                 const isFlagged = Boolean(flagged[index]);
                 return (
-                  <button
+                  <span
                     key={task.id}
-                    type="button"
                     className={[
                       styles.questionButton,
                       index === currentIndex ? styles.questionCurrent : "",
                       answered ? styles.questionAnswered : "",
                       isSkipped ? styles.questionSkipped : "",
                     ].join(" ")}
-                    onClick={() => goToQuestion(index)}
-                    disabled={simulationMode && index !== currentIndex}
+                    data-static="true"
                     aria-current={index === currentIndex ? "step" : undefined}
                     aria-label={`Question ${index + 1}`}
                   >
                     <span>{index + 1}</span>
                     {answered ? <CheckCircle2 size={14} /> : isSkipped ? <SkipForward size={14} /> : <Circle size={14} />}
                     {isFlagged ? <Flag size={12} className={styles.flagMini} /> : null}
-                  </button>
+                  </span>
                 );
               })}
             </div>
@@ -2780,36 +3018,22 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           ) : null}
         </div>
 
-        {!completed ? (
+        {!completed && !partIntroVisible ? (
           <section
-            className={`${styles.actionPanel} ${module.id === "read" ? styles.readingActionPanel : ""}`}
+            className={`${styles.actionPanel} ${styles.stepActionPanel}`}
             aria-label="Navigation des exercices"
           >
             <button
               type="button"
               className={`${styles.secondaryButton} ${styles.mobileNavButton}`}
               onClick={goToPrevious}
-              disabled={currentIndex === 0 || (simulationMode && module.id !== "read") || isRecording}
+              disabled={currentIndex === 0 || isRecording}
             >
               <ChevronLeft size={16} />
               Retour
             </button>
-            {module.id !== "read" ? (
-            <button type="button" className={`${styles.secondaryButton} ${styles.desktopActionButton}`} onClick={toggleFlag}>
-              <Flag size={16} />
-              {flagged[currentIndex] ? t.modulePage.removeFlag : t.modulePage.flagQuestion}
-            </button>
-            ) : null}
-            {module.id !== "read" ? (
-            <button type="button" className={`${styles.secondaryButton} ${styles.desktopActionButton}`} onClick={skipCurrent} disabled={isRecording}>
-              <SkipForward size={16} />
-              {t.common.skip}
-            </button>
-            ) : null}
-            {module.id !== "read" ? (
+            {partIntroVisible ? (
             <button type="button" className={styles.secondaryButton} onClick={() => persistProgress(`Sauvegardé à ${formatClock()}`)}>
-              <Save size={16} />
-              {t.modulePage.saveProgress}
             </button>
             ) : null}
             <button

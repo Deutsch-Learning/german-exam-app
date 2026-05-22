@@ -922,7 +922,22 @@ const queryImportedExamRows = async (provider, seriesNumber = null) => {
   );
 };
 
-const buildReadingTask = (question) => {
+const buildTaskPartMeta = (question, index = 0) => {
+  const metadata = asJsonObject(question.source_metadata);
+  const partNumber = Number(question.part_number) || Number(question.section_position) || index + 1;
+  const partTitle = question.section_title || (partNumber ? `Teil ${partNumber}` : "Part");
+  return {
+    partKey: `part-${partNumber || index + 1}`,
+    partNumber,
+    partTitle,
+    partInstructions: clipText(question.section_instructions || "", 5200),
+    partDurationMinutes: Number(question.section_duration_minutes) || null,
+    partPoints: Number(question.section_points) || null,
+    sourceQuestionNumber: metadata.sourceQuestionNumber ?? question.position ?? index + 1,
+  };
+};
+
+const buildReadingTask = (question, index = 0) => {
   const questionType = String(question.question_type || "").toLowerCase();
   const correctValue = extractCorrectValue(question.correct_answer);
   const options = normalizeChoiceOptions(question.options);
@@ -934,6 +949,7 @@ const buildReadingTask = (question) => {
     hint: question.section_title ? `Relisez ${question.section_title}.` : "Relisez le texte source.",
     explanation: question.explanation || "Réponse issue du document importé.",
     sourceQuestionId: question.id,
+    ...buildTaskPartMeta(question, index),
   };
 
   if (questionType.includes("true_false")) {
@@ -1016,6 +1032,7 @@ const buildWritingTask = (question, index) => {
     ].filter(Boolean),
     sampleAnswer: correct.sampleAnswer ? clipText(correct.sampleAnswer, 1600) : undefined,
     sourceQuestionId: question.id,
+    ...buildTaskPartMeta(question, index),
   };
 };
 
@@ -1039,6 +1056,7 @@ const buildSpeakingTask = (question, index) => {
       points ? `${points} Punkte` : null,
     ].filter(Boolean),
     sourceQuestionId: question.id,
+    ...buildTaskPartMeta(question, index),
   };
 };
 
@@ -1049,9 +1067,14 @@ const buildImportedModuleContent = ({ exam, sections, questions }) => {
   const sourceLabel = metadata.sourceLabel || `Series ${String(exam.series_number).padStart(2, "0")}`;
   const title = metadata.title || sourceLabel || exam.name;
   const sectionSummaries = sections.map((section) => ({
-    id: `Teil ${section.part_number || section.position}`,
+    id: `part-${section.part_number || section.position}`,
+    label: `Teil ${section.part_number || section.position}`,
+    number: Number(section.part_number) || Number(section.position) || null,
     heading: section.title,
     text: clipText(section.instructions || section.title, 2600),
+    instructions: clipText(section.instructions || section.title, 5200),
+    durationMinutes: Number(section.duration_minutes) || null,
+    points: Number(section.points) || null,
   }));
 
   let tasks;
@@ -1060,7 +1083,7 @@ const buildImportedModuleContent = ({ exam, sections, questions }) => {
   } else if (moduleId === "speak") {
     tasks = questions.map((question, index) => buildSpeakingTask(question, index));
   } else {
-    tasks = questions.map((question) => buildReadingTask(question));
+    tasks = questions.map((question, index) => buildReadingTask(question, index));
   }
 
   return {
@@ -1081,6 +1104,7 @@ const buildImportedModuleContent = ({ exam, sections, questions }) => {
       "Questions reliées à leur série",
       "Correction basée sur les réponses extraites",
     ],
+    parts: sectionSummaries,
     passage:
       moduleId === "read"
         ? {
