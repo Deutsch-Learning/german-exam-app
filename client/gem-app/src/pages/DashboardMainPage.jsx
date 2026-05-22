@@ -94,7 +94,7 @@ const LanguageDropdown = ({ language, setLanguage }) => {
   );
 };
 
-const TopNav = ({ onToggleMenu, onGoHome, onGoDashboard, onGoProfile, onGoActualites, onGoAbout, onGoContact, onGoModule, onGoLessons, onSwitchAdmin, isAdminUser, language, setLanguage, labels }) => {
+const TopNav = ({ onToggleMenu, onGoDashboard, onGoProfile, onGoActualites, onGoAbout, onGoContact, onGoModule, onGoLessons, onSwitchAdmin, isAdminUser, language, setLanguage, labels }) => {
   const [openFormation, setOpenFormation] = useState(false);
 
   return (
@@ -104,7 +104,6 @@ const TopNav = ({ onToggleMenu, onGoHome, onGoDashboard, onGoProfile, onGoActual
         <img src={logo} alt="Deutsch Lernen" className={styles.logo} />
       </div>
       <div className={styles.navLinks}>
-        <button type="button" className={styles.linkBtn} onClick={onGoHome}>{labels.home}</button>
         <button type="button" className={styles.linkBtn} onClick={onGoDashboard}>{labels.dashboard}</button>
         <button type="button" className={styles.linkBtn} onClick={onGoActualites}>{labels.news} <ChevronDownIcon /></button>
         <button type="button" className={styles.linkBtn} onClick={onGoAbout}>{labels.about} <ChevronDownIcon /></button>
@@ -353,13 +352,12 @@ export default function DashboardMainPage() {
       // Local cleanup still needs to happen if the token is already expired.
     }
     clearAuthSession();
-    navigate("/login");
+    navigate("/", { replace: true });
   }, [navigate]);
 
   const labels = useMemo(() => {
     const common = t.common;
     return {
-      home: common.home,
       news: common.news,
       about: common.about,
       training: common.training,
@@ -377,7 +375,6 @@ export default function DashboardMainPage() {
     <div className={styles.appWrapper}>
       <TopNav
         onToggleMenu={() => setSidebarOpen(true)}
-        onGoHome={() => navigate("/")}
         onGoDashboard={() => navigate("/dashboard?view=user")}
         onGoProfile={() => navigate("/profile")}
         onGoActualites={() => navigate("/actualites")}

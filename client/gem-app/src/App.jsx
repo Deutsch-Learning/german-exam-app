@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import Landing from "./pages/Landing";
 import LoginPage from "./pages/Login";
@@ -31,19 +32,55 @@ import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 import AdminPanel from "./pages/AdminPanel";
 import { LanguageProvider } from "./context/LanguageContext";
-import { AdminRoute, ProtectedRoute } from "./components/RouteGuards";
+import { AdminRoute, ProtectedRoute, PublicOnlyRoute } from "./components/RouteGuards";
 import MotionShell from "./components/motion/MotionShell";
+import API from "./services/api";
+import { clearAuthSession, isLoggedIn, storeAuthSession } from "./utils/access";
 
 function AppRoutes() {
   const location = useLocation();
+  const [authReady, setAuthReady] = useState(() => isLoggedIn());
+
+  useEffect(() => {
+    if (isLoggedIn()) return undefined;
+
+    let cancelled = false;
+    API.post("/api/auth/refresh", null, { _retry: true })
+      .then((response) => {
+        const token = response.data?.accessToken ?? response.data?.token;
+        const user = response.data?.user;
+        if (token && user) {
+          storeAuthSession(
+            { user, token, expiresIn: response.data?.expiresIn ?? "15m" },
+            false
+          );
+        } else {
+          clearAuthSession();
+        }
+      })
+      .catch(() => {
+        clearAuthSession();
+      })
+      .finally(() => {
+        if (!cancelled) setAuthReady(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (!authReady) {
+    return <div style={{ minHeight: "100vh", background: "#fff" }} aria-label="Loading session" />;
+  }
 
   return (
     <MotionShell>
       <Routes location={location}>
-        <Route path="/" element={<Landing />} />
-        <Route path="/landing" element={<Landing />} />
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/register" element={<RegisterPage />} />
+        <Route path="/" element={<PublicOnlyRoute><Landing /></PublicOnlyRoute>} />
+        <Route path="/landing" element={<PublicOnlyRoute><Landing /></PublicOnlyRoute>} />
+        <Route path="/login" element={<PublicOnlyRoute><LoginPage /></PublicOnlyRoute>} />
+        <Route path="/register" element={<PublicOnlyRoute><RegisterPage /></PublicOnlyRoute>} />
         <Route path="/verify-email" element={<VerifyEmailPage />} />
         <Route path="/verify-email/:token" element={<VerifyEmailPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />

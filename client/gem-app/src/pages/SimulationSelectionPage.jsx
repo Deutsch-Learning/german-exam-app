@@ -50,13 +50,21 @@ export const SimulationTopNav = ({ onGoHome, onGoAbout, onGoProfile, onGoDashboa
     <nav className={styles.topNav}>
     <div className={styles.navContainer}>
       <div className={styles.navLeft}>
-        <img src={logo} alt="Deutsch Lernen Logo" className={styles.logo} onClick={onGoHome} style={{ cursor: "pointer" }} />
+        <img
+          src={logo}
+          alt="Deutsch Lernen Logo"
+          className={styles.logo}
+          onClick={loggedIn ? onGoDashboard : onGoHome}
+          style={{ cursor: "pointer" }}
+        />
       </div>
 
       <div className={styles.navCenter}>
-        <button type="button" className={styles.navLink} onClick={onGoHome}>
-          {t.common.home}
-        </button>
+        {!loggedIn ? (
+          <button type="button" className={styles.navLink} onClick={onGoHome}>
+            {t.common.home}
+          </button>
+        ) : null}
         {loggedIn ? (
           <button type="button" className={styles.navLink} onClick={onGoDashboard}>
             {t.common.dashboard}

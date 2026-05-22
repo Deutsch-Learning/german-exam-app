@@ -1,6 +1,16 @@
 import { Navigate, useLocation } from "react-router-dom";
 import { isAdmin, isLoggedIn } from "../utils/access";
 
+const getAuthenticatedHomePath = () => (isAdmin() ? "/admin/dashboard" : "/dashboard");
+
+export function PublicOnlyRoute({ children }) {
+  if (isLoggedIn()) {
+    return <Navigate to={getAuthenticatedHomePath()} replace />;
+  }
+
+  return children;
+}
+
 export function ProtectedRoute({ children }) {
   const location = useLocation();
 

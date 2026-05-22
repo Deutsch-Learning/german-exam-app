@@ -12,6 +12,7 @@ import BackButton from "../components/BackButton";
 import { aboutTestSections } from "../data/siteContent";
 import { languageOptions } from "../utils/language";
 import { useLanguage } from "../context/LanguageContext";
+import { isLoggedIn } from "../utils/access";
 
 const ChevronDownIcon = () => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -25,6 +26,7 @@ const Navbar = () => {
   const [openLang, setOpenLang] = useState(false);
   const [openFormation, setOpenFormation] = useState(false);
   const selected = languageOptions.find((option) => option.id === language) ?? languageOptions[0];
+  const loggedIn = isLoggedIn();
 
   const modules = [
     { id: "listen", label: t.modules.listen },
@@ -37,13 +39,15 @@ const Navbar = () => {
     <nav className={styles.topNav}>
       <div className={styles.navContainer}>
         <div className={styles.navLeft}>
-          <button type="button" className={styles.logoButton} onClick={() => navigate("/")}>
+          <button type="button" className={styles.logoButton} onClick={() => navigate(loggedIn ? "/dashboard" : "/")}>
             <img src={logo} alt="Deutsch Lernen Logo" className={styles.logo} />
           </button>
         </div>
 
         <div className={styles.navCenter}>
-          <button type="button" className={styles.navLink} onClick={() => navigate("/")}>{t.common.home}</button>
+          {!loggedIn ? (
+            <button type="button" className={styles.navLink} onClick={() => navigate("/")}>{t.common.home}</button>
+          ) : null}
           <button type="button" className={styles.navLink} onClick={() => navigate("/actualites")}>{t.common.news} <ChevronDownIcon /></button>
           <button type="button" className={`${styles.navLink} ${styles.active}`} onClick={() => navigate("/about")}>{t.common.about} <ChevronDownIcon /></button>
           <div className={styles.dropdown}>

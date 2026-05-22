@@ -2609,11 +2609,16 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   return (
     <div className={styles.page} style={{ "--module-accent": module.accent, "--module-soft": module.soft }}>
       <nav className={styles.nav}>
-        <button type="button" className={styles.logoButton} onClick={() => navigate("/")} aria-label="Retour">
+        <button
+          type="button"
+          className={styles.logoButton}
+          onClick={() => navigate(loggedIn ? "/dashboard" : "/")}
+          aria-label="Retour"
+        >
           <img src={logo} alt="Deutsch Lernen" />
         </button>
         <div className={styles.navActions}>
-          {loggedIn ? (
+          {!loggedIn ? (
             <button type="button" onClick={() => navigate("/")}>
               <Home size={16} />
               {t.common.home}
