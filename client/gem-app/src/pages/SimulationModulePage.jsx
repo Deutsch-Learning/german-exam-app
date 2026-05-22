@@ -42,6 +42,16 @@ import { getSeriesById, getSeriesModuleContent } from "../data/testSeries";
 import { getProgressKey, upsertSimulationHistoryEntry } from "../utils/simulationHistory";
 import { canOpenSeries, getAuthUser, isVisitorSeriesAttempt } from "../utils/access";
 import { useTestProtection } from "../utils/testProtection";
+import SmoothedAudioPlayer from "../components/SmoothedAudioPlayer";
+import {
+  SPEECH_START_DELAY_MS,
+  createListeningUtterance,
+  createRecordingBlob,
+  getMicrophoneConstraints,
+  getPreferredRecorderOptions,
+  gracefulStopSpeech,
+  startSpeechWatchdog,
+} from "../utils/audio";
 import NotFoundPage from "./NotFoundPage";
 
 const LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"];
@@ -858,17 +868,6 @@ const getEstimatedAudioDuration = (audio) => {
   return Math.max(18, Math.ceil(spokenSeconds + punctuationPauses + 6));
 };
 
-const pickGermanVoice = () => {
-  if (!("speechSynthesis" in window)) return null;
-  const voices = window.speechSynthesis.getVoices();
-  if (!voices.length) return null;
-  return (
-    voices.find((voice) => /de[-_]/i.test(voice.lang)) ??
-    voices.find((voice) => /german/i.test(voice.name)) ??
-    null
-  );
-};
-
 const getTaskDuration = (module, task) => {
   if (!task) return 60;
 
@@ -1322,6 +1321,9 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const audioStartedAtRef = useRef(0);
   const audioStartOffsetRef = useRef(0);
   const audioTimestampRef = useRef(0);
+  const speechStartTimerRef = useRef(null);
+  const speechStopTimerRef = useRef(null);
+  const speechWatchdogRef = useRef(null);
   const recordingIntervalRef = useRef(null);
   const recordingSecondsRef = useRef(0);
   const recordingTaskIndexRef = useRef(0);
@@ -1434,7 +1436,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setCompleted(true);
     setAudioPlaying(false);
     if ("speechSynthesis" in window) {
-      window.speechSynthesis.cancel();
+      gracefulStopSpeech(80);
     }
     void saveResultToBackend(score);
   }, [saveResultToBackend, score]);
@@ -1572,7 +1574,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
         audioSessionRef.current = false;
         setAudioSessionActive(false);
         if ("speechSynthesis" in window) {
-          window.speechSynthesis.cancel();
+          speechStopTimerRef.current = gracefulStopSpeech();
         }
       }
     }, 250);
@@ -1590,8 +1592,19 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setRecordError("");
   }, [completed, currentIndex, currentTask.prepSeconds, module.id, simulationMode]);
 
+  useEffect(() => {
+    if (!("speechSynthesis" in window)) return undefined;
+    const warmVoices = () => window.speechSynthesis.getVoices();
+    warmVoices();
+    window.speechSynthesis.addEventListener?.("voiceschanged", warmVoices);
+    return () => window.speechSynthesis.removeEventListener?.("voiceschanged", warmVoices);
+  }, []);
+
   useEffect(
     () => () => {
+      if (speechStartTimerRef.current) window.clearTimeout(speechStartTimerRef.current);
+      if (speechStopTimerRef.current) window.clearTimeout(speechStopTimerRef.current);
+      if (speechWatchdogRef.current) window.clearInterval(speechWatchdogRef.current);
       if ("speechSynthesis" in window) {
         window.speechSynthesis.cancel();
       }
@@ -1642,7 +1655,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setResultStatus("");
     setSaveStatus("Simulation démarrée : navigation verrouillée.");
     if ("speechSynthesis" in window) {
-      window.speechSynthesis.cancel();
+      gracefulStopSpeech(80);
     }
   }, [module.id, module.tasks, totalExamDuration]);
 
@@ -1682,6 +1695,31 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     [simulationMode]
   );
 
+  const clearSpeechTimers = useCallback(() => {
+    if (speechStartTimerRef.current) {
+      window.clearTimeout(speechStartTimerRef.current);
+      speechStartTimerRef.current = null;
+    }
+    if (speechStopTimerRef.current) {
+      window.clearTimeout(speechStopTimerRef.current);
+      speechStopTimerRef.current = null;
+    }
+    if (speechWatchdogRef.current) {
+      window.clearInterval(speechWatchdogRef.current);
+      speechWatchdogRef.current = null;
+    }
+  }, []);
+
+  const stopListeningSpeech = useCallback((soft = true) => {
+    clearSpeechTimers();
+    if (!("speechSynthesis" in window)) return;
+    if (soft) {
+      speechStopTimerRef.current = gracefulStopSpeech();
+      return;
+    }
+    window.speechSynthesis.cancel();
+  }, [clearSpeechTimers]);
+
   const playListeningAudio = useCallback(() => {
     if (module.id !== "listen") return;
 
@@ -1703,18 +1741,22 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       setAudioError("");
 
       if ("speechSynthesis" in window) {
-        window.speechSynthesis.cancel();
-        const utterance = new window.SpeechSynthesisUtterance(module.audio.transcript);
-        const selectedVoice = pickGermanVoice();
-        if (selectedVoice) utterance.voice = selectedVoice;
-        utterance.lang = "de-DE";
-        utterance.rate = module.audio.rate;
-        utterance.volume = 1;
-        utterance.pitch = 1;
+        stopListeningSpeech(false);
+        const utterance = createListeningUtterance(module.audio);
+        if (!utterance) {
+          setAudioPlaying(false);
+          audioSessionRef.current = false;
+          setAudioSessionActive(false);
+          setAudioError("La synthese vocale n'est pas disponible sur ce navigateur.");
+          return;
+        }
         utterance.onstart = () => {
           setAudioError("");
+          if (speechWatchdogRef.current) window.clearInterval(speechWatchdogRef.current);
+          speechWatchdogRef.current = startSpeechWatchdog();
         };
         utterance.onend = () => {
+          clearSpeechTimers();
           setAudioTimestamp(currentAudioDuration);
           audioTimestampRef.current = currentAudioDuration;
           setAudioPlaying(false);
@@ -1722,6 +1764,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           setAudioSessionActive(false);
         };
         utterance.onerror = () => {
+          clearSpeechTimers();
           setAudioPlaying(false);
           audioSessionRef.current = false;
           setAudioSessionActive(false);
@@ -1729,7 +1772,10 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             "La lecture audio a échoué sur cet appareil. Vérifiez le volume système et autorisez la synthèse vocale dans le navigateur."
           );
         };
-        window.speechSynthesis.speak(utterance);
+        speechStartTimerRef.current = window.setTimeout(() => {
+          speechStartTimerRef.current = null;
+          window.speechSynthesis.speak(utterance);
+        }, SPEECH_START_DELAY_MS);
       } else {
         setAudioPlaying(false);
         audioSessionRef.current = false;
@@ -1738,17 +1784,23 @@ export default function SimulationModulePage({ moduleIdOverride }) {
         return;
       }
     } else if ("speechSynthesis" in window) {
+      clearSpeechTimers();
       window.speechSynthesis.resume();
+      speechWatchdogRef.current = startSpeechWatchdog();
     }
 
     audioStartOffsetRef.current = startingFresh ? 0 : audioTimestampRef.current;
     audioStartedAtRef.current = Date.now();
     setAudioPlaying(true);
-  }, [audioSessionActive, audioTimestamp, currentAudioDuration, module, replaysUsed]);
+  }, [audioSessionActive, audioTimestamp, clearSpeechTimers, currentAudioDuration, module, replaysUsed, stopListeningSpeech]);
 
   const pauseListeningAudio = useCallback(() => {
     setAudioPlaying(false);
     audioStartOffsetRef.current = audioTimestampRef.current;
+    if (speechWatchdogRef.current) {
+      window.clearInterval(speechWatchdogRef.current);
+      speechWatchdogRef.current = null;
+    }
     if ("speechSynthesis" in window) {
       window.speechSynthesis.pause();
     }
@@ -1761,10 +1813,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     audioStartOffsetRef.current = 0;
     audioSessionRef.current = false;
     setAudioSessionActive(false);
-    if ("speechSynthesis" in window) {
-      window.speechSynthesis.cancel();
-    }
-  }, []);
+    stopListeningSpeech(true);
+  }, [stopListeningSpeech]);
 
   const saveWritingVersion = useCallback(() => {
     if (module.id !== "write") return;
@@ -1867,10 +1917,11 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia(getMicrophoneConstraints());
       mediaStreamRef.current = stream;
       audioChunksRef.current = [];
-      const recorder = new window.MediaRecorder(stream);
+      const recorderOptions = getPreferredRecorderOptions();
+      const recorder = new window.MediaRecorder(stream, recorderOptions);
       mediaRecorderRef.current = recorder;
 
       recorder.ondataavailable = (event) => {
@@ -1880,13 +1931,13 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       };
 
       recorder.onstop = () => {
-        const blob = new window.Blob(audioChunksRef.current, { type: "audio/webm" });
+        const blob = audioChunksRef.current.length ? createRecordingBlob(audioChunksRef.current) : null;
         finishRecording(blob);
         stream.getTracks().forEach((track) => track.stop());
         mediaStreamRef.current = null;
       };
 
-      recorder.start();
+      recorder.start(250);
       setIsRecording(true);
     } catch {
       fallbackRecordingRef.current = true;
@@ -2372,7 +2423,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           {recordError ? <p className={styles.warningText}><AlertCircle size={16} /> {recordError}</p> : null}
 
           {playbackSrc ? (
-            <audio className={styles.playback} src={playbackSrc} controls />
+            <SmoothedAudioPlayer key={playbackSrc} src={playbackSrc} label="Lecture de votre reponse orale" />
           ) : answer.simulated ? (
             <p className={styles.mutedText}>Réponse minutée enregistrée sans fichier audio.</p>
           ) : (
