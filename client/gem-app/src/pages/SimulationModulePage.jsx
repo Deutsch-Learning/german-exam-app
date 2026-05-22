@@ -39,6 +39,7 @@ import logo from "../assets/images/logo.png";
 import speakingImage from "../assets/images/active_people.png";
 import { getTranslations } from "../context/LanguageContext";
 import { getSeriesById, getSeriesModuleContent } from "../data/testSeries";
+import { fetchImportedSeriesModule } from "../services/importedExams";
 import { getProgressKey, upsertSimulationHistoryEntry } from "../utils/simulationHistory";
 import { canOpenSeries, getAuthUser, isVisitorSeriesAttempt } from "../utils/access";
 import { useTestProtection } from "../utils/testProtection";
@@ -1123,6 +1124,27 @@ const buildSeriesTask = (moduleId, task, index, content, series) => {
 const buildSeriesModule = (baseModule, content, series) => {
   if (!content || !series) return baseModule;
 
+  if (content.isImported) {
+    return {
+      ...baseModule,
+      eyebrow: `${series.code} / ${baseModule.eyebrow}`,
+      examPart: `${series.examName} ${series.code} - ${baseModule.examPart}`,
+      tasks: content.tasks?.length ? content.tasks : baseModule.tasks,
+      passage: content.passage ?? baseModule.passage,
+      audio: content.audio ?? baseModule.audio,
+      focus: content.focus ?? baseModule.focus,
+      advancement: content.advancement ?? baseModule.advancement,
+      seriesContext: {
+        examId: series.examId,
+        examName: series.examName,
+        seriesId: series.id,
+        seriesCode: series.code,
+        seriesTitle: series.title,
+        theme: content.theme ?? series.theme,
+      },
+    };
+  }
+
   return {
     ...baseModule,
     eyebrow: `${series.code} / ${baseModule.eyebrow}`,
@@ -1249,21 +1271,59 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const params = useParams();
   const routeModuleId = moduleIdOverride ?? params.moduleId ?? "read";
   const baseModule = MODULES[routeModuleId] ?? MODULES.read;
-  const selectedSeries = useMemo(
+  const staticSelectedSeries = useMemo(
     () => getSeriesById(params.examId, params.seriesId),
     [params.examId, params.seriesId]
   );
-  const selectedSeriesContent = useMemo(
+  const staticSelectedSeriesContent = useMemo(
     () => getSeriesModuleContent(params.examId, params.seriesId, baseModule.id),
     [baseModule.id, params.examId, params.seriesId]
   );
+  const [importedModuleState, setImportedModuleState] = useState({
+    loading: Boolean(params.examId && params.seriesId),
+    series: null,
+    content: null,
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    setImportedModuleState({
+      loading: Boolean(params.examId && params.seriesId),
+      series: null,
+      content: null,
+    });
+
+    fetchImportedSeriesModule(params.examId, params.seriesId, baseModule.id)
+      .then((payload) => {
+        if (cancelled) return;
+        setImportedModuleState({
+          loading: false,
+          series: payload?.series ?? null,
+          content: payload?.content ?? null,
+        });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setImportedModuleState({ loading: false, series: null, content: null });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [baseModule.id, params.examId, params.seriesId]);
+
+  const selectedSeries = importedModuleState.series ?? staticSelectedSeries;
+  const selectedSeriesContent = importedModuleState.content ?? staticSelectedSeriesContent;
   const auth = useMemo(() => getAuthUser(), []);
   const loggedIn = Boolean(auth?.id);
   const visitorSeriesAttempt = isVisitorSeriesAttempt(selectedSeries);
   const visitorAccessAllowed = Boolean(location.state?.visitorFreeAccess);
   const blockedSeriesAccess = Boolean(selectedSeries && !canOpenSeries(selectedSeries));
   const blockedVisitorRefresh = visitorSeriesAttempt && !visitorAccessAllowed;
-  const shouldPersistProgress = Boolean(auth?.id) && !blockedSeriesAccess && !blockedVisitorRefresh;
+  const waitingForImportedSeries = Boolean(params.seriesId && !selectedSeries && importedModuleState.loading);
+  const shouldPersistProgress =
+    Boolean(auth?.id) && !blockedSeriesAccess && !blockedVisitorRefresh && !waitingForImportedSeries;
   const module = useMemo(
     () => buildSeriesModule(baseModule, selectedSeriesContent, selectedSeries),
     [baseModule, selectedSeriesContent, selectedSeries]
@@ -2507,6 +2567,35 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     if (module.id === "write") return renderWriting();
     return renderSpeaking();
   };
+
+  if (waitingForImportedSeries) {
+    return (
+      <div className={styles.page} style={{ "--module-accent": module.accent, "--module-soft": module.soft }}>
+        <section className={styles.resultPanel}>
+          <p className={styles.sectionLabel}>Series</p>
+          <h2>Chargement des exercices importés...</h2>
+        </section>
+      </div>
+    );
+  }
+
+  if (params.seriesId && !selectedSeries && !importedModuleState.loading) {
+    return (
+      <NotFoundPage
+        title="404 error"
+        message="The selected series could not be found."
+      />
+    );
+  }
+
+  if (selectedSeries?.isImported && !selectedSeriesContent && !importedModuleState.loading) {
+    return (
+      <NotFoundPage
+        title="404 error"
+        message="This imported module is not available for the selected series yet."
+      />
+    );
+  }
 
   if (blockedSeriesAccess || blockedVisitorRefresh) {
     return (

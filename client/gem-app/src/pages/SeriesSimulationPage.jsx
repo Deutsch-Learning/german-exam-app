@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Lock } from "lucide-react";
 import styles from "./SimulationSelectionPage.module.css";
 import "./SimplePages.css";
 import NotFoundPage from "./NotFoundPage";
 import { getSeriesById, simulationModules } from "../data/testSeries";
+import { fetchImportedSeries } from "../services/importedExams";
 import { canOpenSeries, isVisitorSeriesAttempt } from "../utils/access";
 import BackButton from "../components/BackButton";
 import { useLanguage } from "../context/LanguageContext";
@@ -32,7 +33,50 @@ export default function SeriesSimulationPage() {
   const { examId, seriesId } = useParams();
   const { t } = useLanguage();
   const [pendingModuleId, setPendingModuleId] = useState(null);
-  const series = getSeriesById(examId, seriesId);
+  const staticSeries = useMemo(() => getSeriesById(examId, seriesId), [examId, seriesId]);
+  const [remoteSeriesState, setRemoteSeriesState] = useState({
+    examId: "",
+    seriesId: "",
+    series: null,
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    fetchImportedSeries(examId)
+      .then((items) => {
+        if (cancelled) return;
+        setRemoteSeriesState({
+          examId,
+          seriesId,
+          series: items.find((item) => item.id === seriesId) ?? null,
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setRemoteSeriesState({ examId, seriesId, series: null });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [examId, seriesId]);
+
+  const remoteMatchesRoute = remoteSeriesState.examId === examId && remoteSeriesState.seriesId === seriesId;
+  const loadingRemoteSeries = Boolean(examId && seriesId && !remoteMatchesRoute);
+  const series = (remoteMatchesRoute ? remoteSeriesState.series : null) ?? staticSeries;
+
+  if (!series && loadingRemoteSeries) {
+    return (
+      <div className="simple-page">
+        <main className="simple-shell">
+          <section className="simple-card status-panel">
+            <p className="simple-eyebrow">Series</p>
+            <h1>Loading imported series...</h1>
+          </section>
+        </main>
+      </div>
+    );
+  }
 
   if (!series) {
     return <NotFoundPage message="The selected series could not be found." />;
@@ -69,7 +113,7 @@ export default function SeriesSimulationPage() {
 
   const orderedModules = ["read", "listen", "write", "speak"]
     .map((moduleId) => simulationModules.find((module) => module.id === moduleId))
-    .filter(Boolean);
+    .filter((module) => module && series.modules?.[module.id]);
   const visitorState = isVisitorSeriesAttempt(series) || Boolean(location.state?.visitorFreeAccess)
     ? { visitorFreeAccess: true }
     : undefined;
@@ -120,16 +164,16 @@ export default function SeriesSimulationPage() {
         <section className={styles.gridSection}>
           <div className={styles.cardGrid}>
             {orderedModules.map((module) => {
-              const content = series.modules[module.id];
+              const content = series.modules[module.id] ?? module;
               return (
                 <SimulationDisciplineCard
                   key={module.id}
                   iconPath={moduleAssets[module.id]?.iconPath}
                   iconNode={moduleAssets[module.id]?.iconNode}
-                  title={content.label}
-                  time={60}
-                  questions={39}
-                  accent={module.accent}
+                  title={content.label ?? module.label}
+                  time={content.durationMinutes ?? 60}
+                  questions={content.questionCount ?? 39}
+                  accent={content.accent ?? module.accent ?? series.accent}
                   minuteLabel={t.simulations.minutes}
                   questionLabel={t.simulations.questions}
                   onClick={() => requestStartModule(module.id)}

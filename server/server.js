@@ -698,6 +698,466 @@ app.get("/test-db", async (req, res) => {
   }
 });
 
+const PUBLIC_EXAM_META = {
+  goethe: {
+    examId: "goethe",
+    examName: "Goethe-Zertifikat",
+    accent: "#c10016",
+  },
+  telc: {
+    examId: "telc",
+    examName: "TELC Deutsch",
+    accent: "#0f766e",
+  },
+  testdaf: {
+    examId: "testdaf",
+    examName: "TestDaF",
+    accent: "#2563eb",
+  },
+  dsh: {
+    examId: "dsh",
+    examName: "DSH",
+    accent: "#7c3aed",
+  },
+};
+
+const PUBLIC_MODULE_META = {
+  read: {
+    id: "read",
+    label: "Compréhension Écrite",
+    shortLabel: "Written comprehension",
+    description: "Imported reading tasks from the original exam document.",
+    defaultMinutes: 65,
+  },
+  listen: {
+    id: "listen",
+    label: "Compréhension Orale",
+    shortLabel: "Oral comprehension",
+    description: "Imported listening tasks from the original exam document.",
+    defaultMinutes: 40,
+  },
+  write: {
+    id: "write",
+    label: "Expression Écrite",
+    shortLabel: "Written expression",
+    description: "Imported writing prompts from the original exam document.",
+    defaultMinutes: 60,
+  },
+  speak: {
+    id: "speak",
+    label: "Expression Orale",
+    shortLabel: "Oral expression",
+    description: "Imported speaking prompts from the original exam document.",
+    defaultMinutes: 15,
+  },
+};
+
+const MODULE_ORDER = ["read", "listen", "write", "speak"];
+
+const normalizeProviderId = (value) => {
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  if (normalized.includes("goethe")) return "goethe";
+  if (normalized.includes("testdaf")) return "testdaf";
+  if (normalized.includes("telc")) return "telc";
+  if (normalized === "dsh" || normalized.includes("deutsche-sprachpruefung")) return "dsh";
+  return normalized;
+};
+
+const toImportedSeriesId = (provider, level, seriesNumber) =>
+  `imported-${provider}-${String(level || "level").toLowerCase()}-series-${String(seriesNumber).padStart(2, "0")}`;
+
+const parseSeriesNumber = (seriesId) => {
+  const raw = String(seriesId ?? "").trim();
+  if (/^\d+$/.test(raw)) return Number(raw);
+  const match = raw.match(/series-(\d+)/i);
+  return match ? Number(match[1]) : null;
+};
+
+const asJsonObject = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {};
+
+const cleanText = (value) =>
+  String(value ?? "")
+    .replace(/\r/g, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+
+const clipText = (value, max = 1200) => {
+  const text = cleanText(value);
+  if (text.length <= max) return text;
+  return `${text.slice(0, Math.max(0, max - 1)).trim()}…`;
+};
+
+const extractCorrectValue = (correctAnswer) => {
+  const correct = asJsonObject(correctAnswer);
+  const value = correct.value ?? correct.answer ?? correct.correct ?? correct.correctAnswer;
+  return value == null ? "" : String(value).trim();
+};
+
+const normalizeChoiceOptions = (options) => {
+  if (!Array.isArray(options)) return [];
+  return options
+    .map((option, index) => {
+      const value = option?.value ?? option?.id ?? String.fromCharCode(97 + index);
+      const label = option?.label ?? option?.text ?? option?.title ?? value;
+      return {
+        value: String(value),
+        label: clipText(label, 280),
+      };
+    })
+    .filter((option) => option.value && option.label);
+};
+
+const toPublicSeriesList = (rows) => {
+  const groups = new Map();
+
+  for (const row of rows) {
+    const provider = normalizeProviderId(row.provider);
+    const meta = PUBLIC_EXAM_META[provider] ?? {
+      examId: provider,
+      examName: row.exam_type || provider,
+      accent: "#111827",
+    };
+    const seriesNumber = Number(row.series_number);
+    if (!Number.isFinite(seriesNumber)) continue;
+
+    if (!groups.has(seriesNumber)) {
+      groups.set(seriesNumber, {
+        id: toImportedSeriesId(provider, row.level, seriesNumber),
+        code: `Series ${String(seriesNumber).padStart(2, "0")}`,
+        title: "",
+        level: row.level || "B1",
+        duration: "Imported modules",
+        theme: "",
+        setting: row.exam_type || meta.examName,
+        examId: meta.examId,
+        examName: row.exam_type || meta.examName,
+        accent: meta.accent,
+        isFree: seriesNumber === 1,
+        isImported: true,
+        source: "database",
+        seriesNumber,
+        modules: {},
+      });
+    }
+
+    const series = groups.get(seriesNumber);
+    const metadata = asJsonObject(row.metadata);
+    const moduleId = row.section_type;
+    const moduleMeta = PUBLIC_MODULE_META[moduleId];
+    if (!moduleMeta) continue;
+
+    const title = cleanText(metadata.title || metadata.sourceLabel || row.name);
+    if (!series.title && title) series.title = title;
+    if (!series.theme && title) series.theme = title;
+
+    series.modules[moduleId] = {
+      ...moduleMeta,
+      available: true,
+      sourceExamId: row.id,
+      sourceCode: row.code,
+      sourceLabel: metadata.sourceLabel || row.name,
+      title: title || moduleMeta.label,
+      questionCount: Number(row.question_count) || 0,
+      sectionCount: Number(row.section_count) || 0,
+      durationMinutes: Number(row.duration_minutes) || moduleMeta.defaultMinutes,
+    };
+  }
+
+  return Array.from(groups.values()).map((series) => {
+    const moduleIds = MODULE_ORDER.filter((moduleId) => series.modules[moduleId]);
+    return {
+      ...series,
+      title: series.title || `${series.examName} ${series.code}`,
+      theme: series.theme || series.examName,
+      duration: `${moduleIds.length} module${moduleIds.length > 1 ? "s" : ""}`,
+    };
+  });
+};
+
+const queryImportedExamRows = async (provider, seriesNumber = null) => {
+  const params = [provider];
+  const seriesClause = seriesNumber == null ? "" : "AND e.series_number = $2";
+  if (seriesNumber != null) params.push(seriesNumber);
+
+  return pool.query(
+    `
+      SELECT e.id, e.code, e.name, e.provider, e.exam_type, e.level, e.section_type,
+             e.series_number, e.metadata,
+             COALESCE(q.question_count, 0)::int AS question_count,
+             COALESCE(s.section_count, 0)::int AS section_count,
+             COALESCE(s.duration_minutes, 0)::int AS duration_minutes
+      FROM exams e
+      LEFT JOIN (
+        SELECT exam_id, COUNT(*) AS question_count
+        FROM exam_questions
+        GROUP BY exam_id
+      ) q ON q.exam_id = e.id
+      LEFT JOIN (
+        SELECT exam_id, COUNT(*) AS section_count, SUM(COALESCE(duration_minutes, 0)) AS duration_minutes
+        FROM exam_sections
+        GROUP BY exam_id
+      ) s ON s.exam_id = e.id
+      WHERE LOWER(e.provider) = LOWER($1)
+        AND e.is_active = TRUE
+        AND e.source_import_id IS NOT NULL
+        AND e.series_number IS NOT NULL
+        ${seriesClause}
+      ORDER BY e.series_number,
+               CASE e.section_type
+                 WHEN 'read' THEN 1
+                 WHEN 'listen' THEN 2
+                 WHEN 'write' THEN 3
+                 WHEN 'speak' THEN 4
+                 ELSE 9
+               END,
+               e.id
+    `,
+    params
+  );
+};
+
+const buildReadingTask = (question) => {
+  const questionType = String(question.question_type || "").toLowerCase();
+  const correctValue = extractCorrectValue(question.correct_answer);
+  const options = normalizeChoiceOptions(question.options);
+  const base = {
+    id: `db-question-${question.id}`,
+    level: question.level || "B1",
+    typeLabel: question.section_title || "Lesen",
+    question: clipText(question.prompt, 900),
+    hint: question.section_title ? `Relisez ${question.section_title}.` : "Relisez le texte source.",
+    explanation: question.explanation || "Réponse issue du document importé.",
+    sourceQuestionId: question.id,
+  };
+
+  if (questionType.includes("true_false")) {
+    return {
+      ...base,
+      type: "trueFalse",
+      correct: /^(richtig|true|vrai|ja|yes)$/i.test(correctValue) ? "true" : "false",
+    };
+  }
+
+  if (questionType.includes("yes_no")) {
+    return {
+      ...base,
+      type: "multiple",
+      options: [
+        { value: "ja", label: "Ja" },
+        { value: "nein", label: "Nein" },
+      ],
+      correct: /^ja$/i.test(correctValue) ? "ja" : "nein",
+    };
+  }
+
+  if (questionType.includes("multiple") && options.length >= 2) {
+    return {
+      ...base,
+      type: "multiple",
+      options,
+      correct: correctValue || options[0].value,
+    };
+  }
+
+  if (questionType.includes("matching")) {
+    const correct = correctValue || "x";
+    return {
+      ...base,
+      type: "blank",
+      typeLabel: `${base.typeLabel} - Zuordnung`,
+      question: `${base.question}\n\nAntwort mit a-j oder x (keine passende Anzeige).`,
+      correct,
+      alternatives: [correct.toUpperCase(), correct.toLowerCase()],
+    };
+  }
+
+  return {
+    ...base,
+    type: options.length >= 2 ? "multiple" : "blank",
+    options: options.length >= 2 ? options : undefined,
+    correct: options.length >= 2 ? correctValue || options[0].value : correctValue,
+    alternatives: correctValue ? [correctValue.toLowerCase(), correctValue.toUpperCase()] : [],
+  };
+};
+
+const buildWritingTask = (question, index) => {
+  const metadata = asJsonObject(question.source_metadata);
+  const scoring = asJsonObject(question.scoring);
+  const correct = asJsonObject(question.correct_answer);
+  const wordTarget = Number(metadata.wordTarget) || (question.part_number === 3 ? 40 : 80);
+  const minWords = Math.max(30, Math.round(wordTarget * 0.75));
+  const maxWords = Math.max(wordTarget + 20, Math.round(wordTarget * 1.45));
+
+  return {
+    id: `db-question-${question.id}`,
+    level: question.level || "B1",
+    typeLabel: question.section_title || `Schreiben Teil ${question.part_number || index + 1}`,
+    title: question.section_title || `Aufgabe ${index + 1}`,
+    register: question.part_number === 1 ? "informell" : question.part_number === 3 ? "halbformell" : "neutral",
+    minWords,
+    targetWords: wordTarget,
+    maxWords,
+    prompt: clipText(question.prompt || question.section_instructions, 2200),
+    criteria: [
+      "Alle Inhaltspunkte behandeln",
+      "Klare Struktur",
+      "Passender B1-Wortschatz",
+      `${Number(scoring.points) || 0} Punkte`,
+    ].filter(Boolean),
+    sampleAnswer: correct.sampleAnswer ? clipText(correct.sampleAnswer, 1600) : undefined,
+    sourceQuestionId: question.id,
+  };
+};
+
+const buildSpeakingTask = (question, index) => {
+  const scoring = asJsonObject(question.scoring);
+  const durationMinutes = Number(scoring.durationMinutes) || Number(question.section_duration_minutes) || 2;
+  const points = Number(scoring.points) || Number(question.section_points) || 0;
+
+  return {
+    id: `db-question-${question.id}`,
+    level: question.level || "B1",
+    typeLabel: question.section_title || `Sprechen Teil ${question.part_number || index + 1}`,
+    title: question.section_title || `Aufgabe ${index + 1}`,
+    prepSeconds: question.part_number === 1 ? 60 : 45,
+    responseSeconds: Math.max(60, Math.round(durationMinutes * 60)),
+    prompt: clipText(question.prompt || question.section_instructions, 2200),
+    checklist: [
+      "Aufgabe vollständig bearbeiten",
+      "Natürlich reagieren",
+      "Beispiele nennen",
+      points ? `${points} Punkte` : null,
+    ].filter(Boolean),
+    sourceQuestionId: question.id,
+  };
+};
+
+const buildImportedModuleContent = ({ exam, sections, questions }) => {
+  const moduleId = exam.section_type;
+  const moduleMeta = PUBLIC_MODULE_META[moduleId] ?? PUBLIC_MODULE_META.read;
+  const metadata = asJsonObject(exam.metadata);
+  const sourceLabel = metadata.sourceLabel || `Series ${String(exam.series_number).padStart(2, "0")}`;
+  const title = metadata.title || sourceLabel || exam.name;
+  const sectionSummaries = sections.map((section) => ({
+    id: `Teil ${section.part_number || section.position}`,
+    heading: section.title,
+    text: clipText(section.instructions || section.title, 2600),
+  }));
+
+  let tasks;
+  if (moduleId === "write") {
+    tasks = questions.map((question, index) => buildWritingTask(question, index));
+  } else if (moduleId === "speak") {
+    tasks = questions.map((question, index) => buildSpeakingTask(question, index));
+  } else {
+    tasks = questions.map((question) => buildReadingTask(question));
+  }
+
+  return {
+    id: moduleId,
+    isImported: true,
+    label: moduleMeta.label,
+    shortLabel: moduleMeta.shortLabel,
+    theme: title,
+    focus: [
+      exam.exam_type || "Goethe-Zertifikat",
+      sourceLabel,
+      moduleMeta.label,
+      `${tasks.length} question${tasks.length > 1 ? "s" : ""}`,
+    ],
+    advancement: [
+      "Contenu importé depuis les documents originaux",
+      "Structure conservée par parties",
+      "Questions reliées à leur série",
+      "Correction basée sur les réponses extraites",
+    ],
+    passage:
+      moduleId === "read"
+        ? {
+            title: `${sourceLabel}: ${title}`,
+            intro: metadata.instructions || "Lisez les textes et répondez aux questions.",
+            paragraphs: sectionSummaries.length
+              ? sectionSummaries
+              : [{ id: "A", text: "Texte importé depuis le document source." }],
+          }
+        : undefined,
+    audio: moduleId === "listen" ? asJsonObject(questions[0]?.audio) : undefined,
+    tasks,
+    sourceExamId: exam.id,
+  };
+};
+
+app.get("/api/exams/:provider/series", async (req, res) => {
+  try {
+    const provider = normalizeProviderId(req.params.provider);
+    if (!provider) return res.status(400).json({ ok: false, error: "Invalid exam provider" });
+
+    const importedRows = await queryImportedExamRows(provider);
+    const series = toPublicSeriesList(importedRows.rows);
+    return res.json({ ok: true, source: "database", series });
+  } catch (err) {
+    console.error("Imported series lookup failed", err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.get("/api/exams/:provider/series/:seriesId/:moduleId", async (req, res) => {
+  try {
+    const provider = normalizeProviderId(req.params.provider);
+    const seriesNumber = parseSeriesNumber(req.params.seriesId);
+    const moduleId = String(req.params.moduleId || "").trim().toLowerCase();
+    if (!provider || !seriesNumber || !PUBLIC_MODULE_META[moduleId]) {
+      return res.status(400).json({ ok: false, error: "Invalid imported module request" });
+    }
+
+    const importedRows = await queryImportedExamRows(provider, seriesNumber);
+    const series = toPublicSeriesList(importedRows.rows)[0];
+    const exam = importedRows.rows.find((row) => row.section_type === moduleId);
+    if (!series || !exam) {
+      return res.status(404).json({ ok: false, error: "Imported module not found" });
+    }
+
+    const sections = await pool.query(
+      `SELECT *
+       FROM exam_sections
+       WHERE exam_id = $1
+       ORDER BY position, id`,
+      [exam.id]
+    );
+    const questions = await pool.query(
+      `SELECT q.*, e.level, s.title AS section_title, s.part_number,
+              s.instructions AS section_instructions,
+              s.duration_minutes AS section_duration_minutes,
+              s.points AS section_points,
+              s.scoring AS section_scoring,
+              s.metadata AS section_metadata,
+              s.position AS section_position
+       FROM exam_questions q
+       JOIN exams e ON e.id = q.exam_id
+       LEFT JOIN exam_sections s ON s.id = q.section_id
+       WHERE q.exam_id = $1
+       ORDER BY COALESCE(s.position, 0), q.position, q.id`,
+      [exam.id]
+    );
+
+    const content = buildImportedModuleContent({
+      exam,
+      sections: sections.rows,
+      questions: questions.rows,
+    });
+    return res.json({ ok: true, source: "database", series, content });
+  } catch (err) {
+    console.error("Imported module lookup failed", err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
 const registerHandler = async (req, res) => {
   try {
     const { email, password, username, firstName, lastName } = req.body ?? {};

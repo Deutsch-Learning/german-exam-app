@@ -1,15 +1,37 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Lock } from "lucide-react";
 import "./SimplePages.css";
 import logo from "../assets/images/logo.png";
 import { examSimulations } from "../data/siteContent";
 import { getSeriesForExam } from "../data/testSeries";
+import { fetchImportedSeries } from "../services/importedExams";
 import { canOpenSeries, isVisitorSeriesAttempt } from "../utils/access";
 
 export default function StartPreparationPage() {
+  const [importedByExam, setImportedByExam] = useState({});
+
+  useEffect(() => {
+    let cancelled = false;
+
+    Promise.all(
+      examSimulations.map((exam) =>
+        fetchImportedSeries(exam.id)
+          .then((series) => [exam.id, series])
+          .catch(() => [exam.id, []])
+      )
+    ).then((entries) => {
+      if (!cancelled) setImportedByExam(Object.fromEntries(entries));
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const groupedSeries = examSimulations.map((exam) => ({
     exam,
-    series: getSeriesForExam(exam.id),
+    series: importedByExam[exam.id]?.length ? importedByExam[exam.id] : getSeriesForExam(exam.id),
   }));
 
   return (

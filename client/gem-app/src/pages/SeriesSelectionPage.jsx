@@ -1,15 +1,39 @@
+import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Lock } from "lucide-react";
 import "./SimplePages.css";
 import logo from "../assets/images/logo.png";
 import NotFoundPage from "./NotFoundPage";
 import { getExamSimulation, getSeriesForExam } from "../data/testSeries";
+import { fetchImportedSeries } from "../services/importedExams";
 import { canOpenSeries, isVisitorSeriesAttempt } from "../utils/access";
 
 export default function SeriesSelectionPage() {
   const { examId } = useParams();
   const exam = getExamSimulation(examId);
-  const series = getSeriesForExam(examId);
+  const staticSeries = useMemo(() => getSeriesForExam(examId), [examId]);
+  const [importedState, setImportedState] = useState({ examId: "", series: [] });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    fetchImportedSeries(examId)
+      .then((items) => {
+        if (!cancelled) setImportedState({ examId, series: items });
+      })
+      .catch(() => {
+        if (!cancelled) setImportedState({ examId, series: [] });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [examId]);
+
+  const importedMatchesRoute = importedState.examId === examId;
+  const importedSeries = importedMatchesRoute ? importedState.series : [];
+  const loadingImported = Boolean(examId && !importedMatchesRoute);
+  const series = importedSeries.length ? importedSeries : staticSeries;
 
   if (!exam || !series.length) {
     return <NotFoundPage message="The test series you opened is not available." />;
@@ -31,7 +55,7 @@ export default function SeriesSelectionPage() {
         <header className="simple-hero compact">
           <p className="simple-eyebrow">Series selection</p>
           <h1>{exam.name} series</h1>
-          <p>Choose a series to continue.</p>
+          <p>{loadingImported ? "Loading imported series..." : "Choose a series to continue."}</p>
         </header>
 
         <section className="series-minimal-grid" aria-label={`${exam.name} series`}>
