@@ -193,42 +193,59 @@ export const SimulationDisciplineCard = ({
 export const StartConfirmationModal = ({
   examName,
   moduleTitle,
-  title,
-  message,
-  cancelLabel = "Cancel",
-  startLabel = "Start",
+  examType,
+  moduleType,
+  questionCount,
+  durationMinutes,
+  cancelLabel = "Annuler",
+  startLabel = "Commencer",
+  busy = false,
   onCancel,
   onStart,
-}) => (
-  <div className={styles.modalOverlay} role="presentation" onMouseDown={onCancel}>
-    <section
-      className={styles.confirmModal}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="start-confirm-title"
-      onMouseDown={(event) => event.stopPropagation()}
-    >
-      <p className={styles.modalEyebrow}>Simulation</p>
-      <h2 id="start-confirm-title">{title ?? `You are about to start the ${examName} test`}</h2>
-      {message === null ? null : message ? (
-        <p>{message}</p>
-      ) : (
-        <p>
-          {moduleTitle ? `${moduleTitle} will begin now. ` : ""}
-          Are you ready to start?
+}) => {
+  const safeModuleType = moduleType || moduleTitle || "ce module";
+  const safeExamType = examType || examName || "cet examen";
+  const safeQuestionCount = Math.max(0, Math.round(Number(questionCount) || 0));
+  const safeDuration = Math.max(0, Math.round(Number(durationMinutes) || 0));
+
+  const handleCancel = () => {
+    if (!busy) onCancel?.();
+  };
+
+  const handleStart = () => {
+    if (!busy) onStart?.();
+  };
+
+  return (
+    <div className={styles.modalOverlay} role="presentation">
+      <section
+        className={styles.confirmModal}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="start-confirm-title"
+        aria-describedby="start-confirm-description"
+        aria-busy={busy ? "true" : "false"}
+      >
+        <h2 id="start-confirm-title">Début du test</h2>
+        <p id="start-confirm-description" className={styles.modalBody}>
+          Vous êtes sur le point de débuter un test de {safeModuleType} type examen {safeExamType}. Il comporte {safeQuestionCount} questions et dure {safeDuration} minutes exactement.
         </p>
-      )}
-      <div className={styles.modalActions}>
-        <button type="button" className={styles.modalCancelButton} onClick={onCancel}>
-          {cancelLabel}
-        </button>
-        <button type="button" className={styles.modalStartButton} onClick={onStart}>
-          {startLabel}
-        </button>
-      </div>
-    </section>
-  </div>
-);
+        <p className={styles.modalBody}>
+          Prenez la peine de bien lire les questions et les consignes avant de répondre.
+        </p>
+        <p className={styles.modalConfirmation}>ETES-VOUS PRÊT À COMMENCER ?</p>
+        <div className={styles.modalActions}>
+          <button type="button" className={styles.modalCancelButton} onClick={handleCancel} disabled={busy}>
+            {cancelLabel}
+          </button>
+          <button type="button" className={styles.modalStartButton} onClick={handleStart} disabled={busy}>
+            {startLabel}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+};
 
 export default function SimulationSelectionPage() {
   const navigate = useNavigate();

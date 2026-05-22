@@ -35,6 +35,7 @@ export default function SeriesSimulationPage() {
   const { examId, seriesId } = useParams();
   const { t } = useLanguage();
   const [pendingModuleId, setPendingModuleId] = useState(null);
+  const [startingModuleId, setStartingModuleId] = useState(null);
   const [remoteSeriesState, setRemoteSeriesState] = useState({
     examId: "",
     seriesId: "",
@@ -119,14 +120,17 @@ export default function SeriesSimulationPage() {
     ? { visitorFreeAccess: true }
     : undefined;
   const startModule = (moduleId) => {
+    setStartingModuleId(moduleId);
     navigate(`/simulation/${examId}/${seriesId}/${moduleId}`, {
-      state: { ...visitorState, autoStartSimulation: true },
+      state: { ...visitorState, autoStartSimulation: true, confirmedStart: true },
     });
   };
   const requestStartModule = (moduleId) => {
+    setStartingModuleId(null);
     setPendingModuleId(moduleId);
   };
   const closeStartConfirmation = () => {
+    if (startingModuleId) return;
     setPendingModuleId(null);
   };
   const logout = async () => {
@@ -140,9 +144,29 @@ export default function SeriesSimulationPage() {
     navigate("/", { replace: true });
   };
   const continueToModule = () => {
-    if (pendingModuleId) {
+    if (pendingModuleId && !startingModuleId) {
       startModule(pendingModuleId);
     }
+  };
+
+  const getStartDetails = (moduleId) => {
+    const baseModule = simulationModules.find((module) => module.id === moduleId);
+    const content = series.modules?.[moduleId] ?? baseModule ?? {};
+    const questionCount =
+      Number(content.questionCount) ||
+      (Array.isArray(content.taskOverrides) ? content.taskOverrides.length : 0) ||
+      (Array.isArray(content.tasks) ? content.tasks.length : 0);
+    const durationMinutes =
+      Number(content.durationMinutes) ||
+      Number(content.defaultMinutes) ||
+      (Number(content.simulationSeconds) ? Math.round(Number(content.simulationSeconds) / 60) : 60);
+
+    return {
+      moduleType: content.label ?? t.modules?.[moduleId] ?? baseModule?.label ?? "Module",
+      examType: series.examName ?? examId,
+      questionCount,
+      durationMinutes,
+    };
   };
 
   return (
@@ -197,10 +221,8 @@ export default function SeriesSimulationPage() {
       </main>
       {pendingModuleId ? (
         <StartConfirmationModal
-          title="You are about to start this test."
-          message={null}
-          cancelLabel="Return"
-          startLabel="Continue"
+          {...getStartDetails(pendingModuleId)}
+          busy={Boolean(startingModuleId)}
           onCancel={closeStartConfirmation}
           onStart={continueToModule}
         />
