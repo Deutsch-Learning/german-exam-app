@@ -312,8 +312,10 @@ export default function DashboardMainPage() {
         updateStoredUser(res.data.user);
       }
       setData(res.data);
-    } catch {
-      setError("Impossible de joindre le backend.");
+    } catch (err) {
+      const status = err?.response?.status;
+      const apiError = err?.response?.data?.error;
+      setError(status ? apiError ?? "Impossible de charger le dashboard." : "Impossible de joindre le backend.");
       setData(null);
     } finally {
       setLoading(false);
@@ -326,8 +328,11 @@ export default function DashboardMainPage() {
     const first = data?.user?.first_name ?? "";
     const last = data?.user?.last_name ?? "";
     const full = `${first} ${last}`.trim();
-    return full || data?.user?.username || "Utilisateur";
-  }, [data]);
+    const storedFirst = auth?.first_name ?? "";
+    const storedLast = auth?.last_name ?? "";
+    const storedFull = `${storedFirst} ${storedLast}`.trim();
+    return full || data?.user?.username || storedFull || auth?.username || "Utilisateur";
+  }, [auth, data]);
 
   const dashboardSimulations = useMemo(() => {
     return (data?.simulations ?? []).map((simulation) => ({

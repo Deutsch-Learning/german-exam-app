@@ -73,6 +73,7 @@ const REFRESH_DAYS = 7;
 const REFRESH_MAX_AGE_MS = REFRESH_DAYS * 24 * 60 * 60 * 1000;
 const COOKIE_SECURE = isProduction;
 const DEFAULT_TOTAL_AVAILABLE_EXAMS = Number(process.env.TOTAL_AVAILABLE_EXAMS || 20);
+const EMAIL_VERIFICATION_REQUIRED = process.env.EMAIL_VERIFICATION_REQUIRED === "true";
 
 if (!process.env.JWT_SECRET && isProduction) {
   throw new Error("JWT_SECRET is required in production");
@@ -642,6 +643,7 @@ const requireAuth = createAuthMiddleware({
   jwtSecret: JWT_SECRET,
   issuer: JWT_ISSUER,
   audience: JWT_AUDIENCE,
+  emailVerificationRequired: EMAIL_VERIFICATION_REQUIRED,
 });
 const requireAdmin = [requireAuth, adminMiddleware];
 
@@ -699,29 +701,34 @@ const registerHandler = async (req, res) => {
     const safeFirst = typeof firstName === "string" ? firstName.trim().slice(0, 80) : null;
     const safeLast = typeof lastName === "string" ? lastName.trim().slice(0, 80) : null;
     const passwordHash = await bcrypt.hash(password, 12);
-    const verificationToken = makeToken();
+    const verificationToken = EMAIL_VERIFICATION_REQUIRED ? makeToken() : null;
 
     const insert = await pool.query(
       `INSERT INTO users (
          email, username, first_name, last_name, password_hash, role, status,
          email_verified, verification_token_hash, verification_expires_at
        )
-       VALUES ($1, $2, $3, $4, $5, 'user', 'active', FALSE, $6, $7)
-       RETURNING id, email, username, first_name, last_name`,
+       VALUES ($1, $2, $3, $4, $5, 'user', 'active', $6, $7, $8)
+       RETURNING id, email, username, first_name, last_name, email_verified`,
       [
         normalizedEmail,
         safeUsername,
         safeFirst,
         safeLast,
         passwordHash,
-        tokenHash(verificationToken),
-        expiresFromNow(VERIFICATION_HOURS, "hours"),
+        !EMAIL_VERIFICATION_REQUIRED,
+        verificationToken ? tokenHash(verificationToken) : null,
+        verificationToken ? expiresFromNow(VERIFICATION_HOURS, "hours") : null,
       ]
     );
-    const verificationUrl = await sendVerificationEmail(insert.rows[0], verificationToken);
+    const verificationUrl = verificationToken
+      ? await sendVerificationEmail(insert.rows[0], verificationToken)
+      : null;
     return res.status(201).json({
       ok: true,
-      message: "Account created. Please confirm your email before logging in.",
+      message: EMAIL_VERIFICATION_REQUIRED
+        ? "Account created. Please confirm your email before logging in."
+        : "Account created. You can now log in.",
       devVerificationUrl: process.env.NODE_ENV === "production" ? undefined : verificationUrl,
     });
   } catch (err) {
@@ -741,6 +748,10 @@ app.post("/api/auth/register", registerHandler);
 
 app.post("/resend-verification", async (req, res) => {
   try {
+    if (!EMAIL_VERIFICATION_REQUIRED) {
+      return res.json({ ok: true, message: "Email verification is currently disabled." });
+    }
+
     const email = normalizeEmail(req.body?.email);
     if (!isEmail(email)) {
       return res.status(400).json({ ok: false, error: "A valid email is required" });
@@ -1241,7 +1252,9 @@ const updateProfileHandler = async (req, res) => {
     }
 
     const emailChanged = safeEmail !== req.user.email;
-    const verificationToken = emailChanged ? makeToken() : null;
+    const shouldVerifyEmail = EMAIL_VERIFICATION_REQUIRED && emailChanged;
+    const shouldTrustEmail = !EMAIL_VERIFICATION_REQUIRED && emailChanged;
+    const verificationToken = shouldVerifyEmail ? makeToken() : null;
 
     const updated = await pool.query(
       `UPDATE users
@@ -1250,8 +1263,8 @@ const updateProfileHandler = async (req, res) => {
            last_name = $3,
            email = $4,
            date_of_birth = COALESCE($5::date, date_of_birth),
-           email_verified = CASE WHEN $6 THEN FALSE ELSE email_verified END,
-           email_verified_at = CASE WHEN $6 THEN NULL ELSE email_verified_at END,
+           email_verified = CASE WHEN $6 THEN FALSE WHEN $10 THEN TRUE ELSE email_verified END,
+           email_verified_at = CASE WHEN $6 THEN NULL WHEN $10 THEN NOW() ELSE email_verified_at END,
            verification_token_hash = CASE WHEN $6 THEN $7 ELSE verification_token_hash END,
            verification_expires_at = CASE WHEN $6 THEN $8 ELSE verification_expires_at END
        WHERE id = $9
@@ -1263,16 +1276,17 @@ const updateProfileHandler = async (req, res) => {
         safeLast,
         safeEmail,
         safeDob || null,
-        emailChanged,
+        shouldVerifyEmail,
         verificationToken ? tokenHash(verificationToken) : null,
         verificationToken ? expiresFromNow(VERIFICATION_HOURS, "hours") : null,
         req.user.id,
+        shouldTrustEmail,
       ]
     );
 
     if (!updated.rows[0]) return res.status(404).json({ ok: false, error: "User not found" });
     let verificationUrl;
-    if (emailChanged) {
+    if (shouldVerifyEmail) {
       verificationUrl = await sendVerificationEmail(updated.rows[0], verificationToken);
     }
     return res.json({
