@@ -1,4 +1,5 @@
 const AUTH_KEY = "auth";
+const AUTH_HINT_KEY = "auth_session_hint";
 
 const safeJsonParse = (value, fallback = null) => {
   try {
@@ -12,12 +13,14 @@ const getStorage = (remember) => (remember ? localStorage : sessionStorage);
 
 export const clearAuthSession = () => {
   if (typeof localStorage !== "undefined") localStorage.removeItem(AUTH_KEY);
+  if (typeof localStorage !== "undefined") localStorage.removeItem(AUTH_HINT_KEY);
   if (typeof sessionStorage !== "undefined") sessionStorage.removeItem(AUTH_KEY);
 };
 
 export const storeAuthSession = ({ user, token, expiresIn }, remember = false) => {
   if (!user || !token) return;
   clearAuthSession();
+  if (typeof localStorage !== "undefined") localStorage.setItem(AUTH_HINT_KEY, "1");
   getStorage(remember).setItem(
     AUTH_KEY,
     JSON.stringify({
@@ -60,6 +63,9 @@ export const getAuthToken = () => getAuthSession()?.token ?? "";
 export const getAuthUser = () => getAuthSession()?.user ?? null;
 
 export const isLoggedIn = () => Boolean(getAuthToken() && getAuthUser()?.id);
+
+export const hasAuthSessionHint = () =>
+  typeof localStorage !== "undefined" && localStorage.getItem(AUTH_HINT_KEY) === "1";
 
 export const isAdmin = () => getAuthUser()?.role === "admin";
 

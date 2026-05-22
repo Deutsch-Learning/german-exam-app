@@ -35,14 +35,14 @@ import { LanguageProvider } from "./context/LanguageContext";
 import { AdminRoute, ProtectedRoute, PublicOnlyRoute } from "./components/RouteGuards";
 import MotionShell from "./components/motion/MotionShell";
 import API from "./services/api";
-import { clearAuthSession, isLoggedIn, storeAuthSession } from "./utils/access";
+import { clearAuthSession, hasAuthSessionHint, isLoggedIn, storeAuthSession } from "./utils/access";
 
 function AppRoutes() {
   const location = useLocation();
-  const [authReady, setAuthReady] = useState(() => isLoggedIn());
+  const [authReady, setAuthReady] = useState(() => isLoggedIn() || !hasAuthSessionHint());
 
   useEffect(() => {
-    if (isLoggedIn()) return undefined;
+    if (isLoggedIn() || !hasAuthSessionHint()) return undefined;
 
     let cancelled = false;
     API.post("/api/auth/refresh", null, { _retry: true })
