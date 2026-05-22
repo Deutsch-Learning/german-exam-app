@@ -6,6 +6,7 @@ import {
   BarChart3,
   Download,
   FileJson,
+  LogOut,
   Shield,
   Upload,
   Users,
@@ -13,6 +14,8 @@ import {
 import API from "../services/api";
 import logo from "../assets/images/logo.png";
 import styles from "./AdminPanel.module.css";
+import { clearDashboardCache } from "../services/dashboard";
+import { clearAuthSession } from "../utils/access";
 
 const formatDate = (value) => {
   if (!value) return "-";
@@ -51,6 +54,7 @@ const useAdminData = (loader) => {
 function AdminShell({ children }) {
   const location = useLocation();
   const navigate = useNavigate();
+  const [confirmLogout, setConfirmLogout] = useState(false);
   const links = [
     { to: "/admin/dashboard", label: "Dashboard", icon: BarChart3 },
     { to: "/admin/users", label: "Users", icon: Users },
@@ -58,6 +62,17 @@ function AdminShell({ children }) {
     { to: "/admin/api-usage", label: "API usage", icon: Activity },
     { to: "/admin/exports", label: "Exports", icon: Download },
   ];
+
+  const logout = async () => {
+    try {
+      await API.post("/api/auth/logout");
+    } catch {
+      // Local cleanup still needs to happen if the token is already expired.
+    }
+    clearAuthSession();
+    clearDashboardCache();
+    navigate("/", { replace: true });
+  };
 
   return (
     <div className={styles.adminPage}>
@@ -73,6 +88,14 @@ function AdminShell({ children }) {
             onClick={() => navigate("/dashboard?view=user")}
           >
             Switch to User
+          </button>
+          <button
+            type="button"
+            className={styles.logoutButton}
+            onClick={() => setConfirmLogout(true)}
+          >
+            <LogOut size={18} />
+            Logout
           </button>
           <nav className={styles.nav} aria-label="Admin navigation">
             {links.map((item) => {
@@ -92,6 +115,23 @@ function AdminShell({ children }) {
         </aside>
         <main className={styles.main}>{children}</main>
       </div>
+      {confirmLogout ? (
+        <div className={styles.modalOverlay} role="presentation">
+          <div className={styles.confirmModal} role="dialog" aria-modal="true" aria-labelledby="admin-logout-title">
+            <p className={styles.modalEyebrow}>Admin session</p>
+            <h2 id="admin-logout-title">Confirm logout</h2>
+            <p>Do you want to close the admin session and return to the public site?</p>
+            <div className={styles.modalActions}>
+              <button type="button" className={styles.secondaryButton} onClick={() => setConfirmLogout(false)}>
+                Cancel
+              </button>
+              <button type="button" className={styles.dangerButton} onClick={logout}>
+                Logout
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

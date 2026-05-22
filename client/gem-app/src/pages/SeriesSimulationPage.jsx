@@ -6,7 +6,9 @@ import "./SimplePages.css";
 import ComingSoonPage from "./ComingSoonPage";
 import { simulationModules } from "../data/testSeries";
 import { fetchImportedSeries } from "../services/importedExams";
-import { canOpenSeries, isVisitorSeriesAttempt } from "../utils/access";
+import API from "../services/api";
+import { clearDashboardCache } from "../services/dashboard";
+import { canOpenSeries, clearAuthSession, isVisitorSeriesAttempt } from "../utils/access";
 import BackButton from "../components/BackButton";
 import { useLanguage } from "../context/LanguageContext";
 import iconListen from "../assets/images/icon-audio.png";
@@ -127,6 +129,16 @@ export default function SeriesSimulationPage() {
   const closeStartConfirmation = () => {
     setPendingModuleId(null);
   };
+  const logout = async () => {
+    try {
+      await API.post("/api/auth/logout");
+    } catch {
+      // Local logout remains reliable when the server token is stale.
+    }
+    clearAuthSession();
+    clearDashboardCache();
+    navigate("/", { replace: true });
+  };
   const continueToModule = () => {
     if (pendingModuleId) {
       startModule(pendingModuleId);
@@ -147,6 +159,7 @@ export default function SeriesSimulationPage() {
             ? navigate("/lessons")
             : requestStartModule(moduleId)
         }
+        onLogout={logout}
       />
 
       <main className={styles.mainContent}>

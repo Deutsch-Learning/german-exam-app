@@ -1515,7 +1515,11 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const currentTaskDuration = getTaskDuration(module, currentTask);
   const currentAudioDuration = module.id === "listen" ? getEstimatedAudioDuration(module.audio) : 0;
   const answeredCount = module.tasks.filter((task, index) => getTaskAnswered(module, task, answers[index])).length;
-  const progressPercent = ((Math.min(currentIndex + 1, totalTasks) / totalTasks) * 100).toFixed(1);
+  const remainingCount = Math.max(0, totalTasks - answeredCount);
+  const completedPartCount = examParts.filter((part) =>
+    part.taskIndexes.every((taskIndex) => getTaskAnswered(module, module.tasks[taskIndex], answers[taskIndex]))
+  ).length;
+  const progressPercent = totalTasks ? ((answeredCount / totalTasks) * 100).toFixed(1) : "0";
   const score = calculateModuleScore(module, answers);
   const currentAnswered = getTaskAnswered(module, currentTask, currentAnswer);
   const currentSkipped = Boolean(skipped[currentIndex]);
@@ -1636,6 +1640,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       currentIndex,
       totalTasks,
       answeredCount,
+      remainingCount,
+      completedPartCount,
       progressPercent: Number(progressPercent),
       answers,
       skipped,
@@ -1660,6 +1666,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       answers,
       answeredCount,
       audioTimestamp,
+      completedPartCount,
       completed,
       currentIndex,
       currentPart?.id,
@@ -1673,6 +1680,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       partIntroVisible,
       prepRemaining,
       progressPercent,
+      remainingCount,
       progressScopeId,
       replaysUsed,
       selectedSeries,
@@ -2806,6 +2814,10 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               <RotateCcw size={16} />
               Recommencer
             </button>
+            <button type="button" className={styles.secondaryButton} onClick={() => navigate(selectedSeries ? `/simulations/${selectedSeries.examId}` : "/simulations", { state: { fromResults: true } })}>
+              <ClipboardCheck size={16} />
+              Choisir une nouvelle série
+            </button>
             <button type="button" className={styles.primaryButton} onClick={() => navigate(seriesRoute)}>
               {t.modulePage.chooseModule}
               <ChevronRight size={16} />
@@ -2931,8 +2943,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
           <div className={styles.progressWrap} aria-label={`Question ${currentIndex + 1} sur ${totalTasks}`}>
             <div className={styles.progressText}>
-              <span>{currentIndex + 1}/{totalTasks} {t.modulePage.questions}</span>
-              <span>{answeredCount} {t.modulePage.answersSaved}</span>
+              <span>{answeredCount}/{totalTasks} réponses</span>
+              <span>{remainingCount} restantes · {completedPartCount}/{Math.max(1, examParts.length)} sections</span>
             </div>
             <div className={styles.progressTrack}>
               <span style={{ width: `${progressPercent}%` }} />

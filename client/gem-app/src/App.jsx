@@ -1,42 +1,59 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import Landing from "./pages/Landing";
 import LoginPage from "./pages/Login";
 import RegisterPage from "./pages/Register";
-import DashboardMainPage from "./pages/DashboardMainPage";
-import SimulationSelectionPage from "./pages/SimulationSelectionPage";
-import SimulationModulePage from "./pages/SimulationModulePage";
-import ReadingPage from "./pages/Reading";
-import ListeningPage from "./pages/Listening";
-import WritingPage from "./pages/Writing";
-import SpeakingPage from "./pages/Speaking";
-import ProfilePage from "./pages/ProfilePage";
-import AboutPage from "./pages/AboutPage";
-import ActualitesPage from "./pages/ActualitesPage";
-import ContactPage from "./pages/ContactPage";
-import ProgressPage from "./pages/ProgressPage";
-import LessonsPage from "./pages/LessonsPage";
-import AllRecentSimulationsPage from "./pages/AllRecentSimulationsPage";
-import TopicPage from "./pages/TopicPage";
-import InfoPage from "./pages/InfoPage";
-import SeriesSelectionPage from "./pages/SeriesSelectionPage";
-import SeriesSimulationPage from "./pages/SeriesSimulationPage";
-import OffersPage from "./pages/OffersPage";
-import StartPreparationPage from "./pages/StartPreparationPage";
-import FreeTestPage from "./pages/FreeTestPage";
-import SessionExpiredPage from "./pages/SessionExpiredPage";
-import CheckoutPage from "./pages/CheckoutPage";
-import ComingSoonPage from "./pages/ComingSoonPage";
-import NotFoundPage from "./pages/NotFoundPage";
-import VerifyEmailPage from "./pages/VerifyEmailPage";
-import ForgotPasswordPage from "./pages/ForgotPasswordPage";
-import ResetPasswordPage from "./pages/ResetPasswordPage";
-import AdminPanel from "./pages/AdminPanel";
 import { LanguageProvider } from "./context/LanguageContext";
 import { AdminRoute, ProtectedRoute, PublicOnlyRoute } from "./components/RouteGuards";
 import MotionShell from "./components/motion/MotionShell";
 import API from "./services/api";
 import { clearAuthSession, hasAuthSessionHint, isLoggedIn, storeAuthSession } from "./utils/access";
+
+const DashboardMainPage = lazy(() => import("./pages/DashboardMainPage"));
+const SimulationSelectionPage = lazy(() => import("./pages/SimulationSelectionPage"));
+const SimulationModulePage = lazy(() => import("./pages/SimulationModulePage"));
+const ReadingPage = lazy(() => import("./pages/Reading"));
+const ListeningPage = lazy(() => import("./pages/Listening"));
+const WritingPage = lazy(() => import("./pages/Writing"));
+const SpeakingPage = lazy(() => import("./pages/Speaking"));
+const ProfilePage = lazy(() => import("./pages/ProfilePage"));
+const AboutPage = lazy(() => import("./pages/AboutPage"));
+const ActualitesPage = lazy(() => import("./pages/ActualitesPage"));
+const ContactPage = lazy(() => import("./pages/ContactPage"));
+const ProgressPage = lazy(() => import("./pages/ProgressPage"));
+const LessonsPage = lazy(() => import("./pages/LessonsPage"));
+const AllRecentSimulationsPage = lazy(() => import("./pages/AllRecentSimulationsPage"));
+const TopicPage = lazy(() => import("./pages/TopicPage"));
+const InfoPage = lazy(() => import("./pages/InfoPage"));
+const SeriesSelectionPage = lazy(() => import("./pages/SeriesSelectionPage"));
+const SeriesSimulationPage = lazy(() => import("./pages/SeriesSimulationPage"));
+const OffersPage = lazy(() => import("./pages/OffersPage"));
+const StartPreparationPage = lazy(() => import("./pages/StartPreparationPage"));
+const FreeTestPage = lazy(() => import("./pages/FreeTestPage"));
+const SessionExpiredPage = lazy(() => import("./pages/SessionExpiredPage"));
+const CheckoutPage = lazy(() => import("./pages/CheckoutPage"));
+const ComingSoonPage = lazy(() => import("./pages/ComingSoonPage"));
+const NotFoundPage = lazy(() => import("./pages/NotFoundPage"));
+const VerifyEmailPage = lazy(() => import("./pages/VerifyEmailPage"));
+const ForgotPasswordPage = lazy(() => import("./pages/ForgotPasswordPage"));
+const ResetPasswordPage = lazy(() => import("./pages/ResetPasswordPage"));
+const AdminPanel = lazy(() => import("./pages/AdminPanel"));
+
+const RouteFallback = () => (
+  <div
+    style={{
+      minHeight: "100vh",
+      display: "grid",
+      placeItems: "center",
+      background: "#fffdf4",
+      color: "#111827",
+      fontFamily: "Inter, system-ui, sans-serif",
+      fontWeight: 800,
+    }}
+  >
+    Chargement...
+  </div>
+);
 
 function AppRoutes() {
   const location = useLocation();
@@ -77,6 +94,7 @@ function AppRoutes() {
 
   return (
     <MotionShell>
+      <Suspense fallback={<RouteFallback />}>
       <Routes location={location}>
         <Route path="/" element={<PublicOnlyRoute><Landing /></PublicOnlyRoute>} />
         <Route path="/landing" element={<PublicOnlyRoute><Landing /></PublicOnlyRoute>} />
@@ -117,6 +135,7 @@ function AppRoutes() {
         <Route path="/contact" element={<ContactPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
+      </Suspense>
     </MotionShell>
   );
 }

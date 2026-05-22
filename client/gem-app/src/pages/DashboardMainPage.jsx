@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import styles from "./DashboardPage.module.css";
 import API from "../services/api";
+import { clearDashboardCache, fetchDashboardData } from "../services/dashboard";
 
 import logo from "../assets/images/logo.png";
 import userIcon from "../assets/images/icon-profile.png";
@@ -94,7 +95,7 @@ const LanguageDropdown = ({ language, setLanguage }) => {
   );
 };
 
-const TopNav = ({ onToggleMenu, onGoDashboard, onGoProfile, onGoActualites, onGoAbout, onGoContact, onGoModule, onGoLessons, onSwitchAdmin, isAdminUser, language, setLanguage, labels }) => {
+const TopNav = ({ onToggleMenu, onGoDashboard, onGoProfile, onGoActualites, onGoAbout, onGoContact, onGoModule, onGoLessons, onSwitchAdmin, onLogout, isAdminUser, language, setLanguage, labels }) => {
   const [openFormation, setOpenFormation] = useState(false);
 
   return (
@@ -129,6 +130,10 @@ const TopNav = ({ onToggleMenu, onGoDashboard, onGoProfile, onGoActualites, onGo
         ) : null}
         <LanguageDropdown language={language} setLanguage={setLanguage} />
         <button className={styles.profileBtn} onClick={onGoProfile} type="button"><img src={userIcon} alt="Profile" /></button>
+        <button className={styles.logoutTopBtn} onClick={onLogout} type="button" aria-label={labels.logout}>
+          <IconLogout color="currentColor" />
+          <span>{labels.logout}</span>
+        </button>
       </div>
     </nav>
   );
@@ -290,6 +295,18 @@ const RecentSimulationsCard = ({ simulations, labels, onResume, onMore }) => (
   </div>
 );
 
+const DashboardSkeleton = () => (
+  <div className={styles.dashboardGrid} aria-label="Chargement du dashboard">
+    {["progress", "skills", "recent"].map((item) => (
+      <div key={item} className={styles.skeletonCard}>
+        <span />
+        <strong />
+        <i />
+      </div>
+    ))}
+  </div>
+);
+
 export default function DashboardMainPage() {
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -305,12 +322,12 @@ export default function DashboardMainPage() {
     setError("");
     try {
       if (!auth?.id) { setError("Utilisateur non connecté."); setData(null); return; }
-      const res = await API.get("/api/dashboard");
-      if (!res.data?.ok) { setError(res.data?.error ?? "Impossible de charger le dashboard."); setData(null); return; }
-      if (res.data?.user) {
-        updateStoredUser(res.data.user);
+      const dashboard = await fetchDashboardData();
+      if (!dashboard?.ok) { setError(dashboard?.error ?? "Impossible de charger le dashboard."); setData(null); return; }
+      if (dashboard?.user) {
+        updateStoredUser(dashboard.user);
       }
-      setData(res.data);
+      setData(dashboard);
     } catch (err) {
       const status = err?.response?.status;
       const apiError = err?.response?.data?.error;
@@ -352,6 +369,7 @@ export default function DashboardMainPage() {
       // Local cleanup still needs to happen if the token is already expired.
     }
     clearAuthSession();
+    clearDashboardCache();
     navigate("/", { replace: true });
   }, [navigate]);
 
@@ -383,6 +401,7 @@ export default function DashboardMainPage() {
         onGoModule={(moduleId) => navigate(`/simulation/${moduleId}`)}
         onGoLessons={() => navigate("/lessons")}
         onSwitchAdmin={() => navigate("/admin/dashboard")}
+        onLogout={onLogout}
         isAdminUser={isAdmin()}
         language={language}
         setLanguage={setLanguage}
@@ -405,6 +424,7 @@ export default function DashboardMainPage() {
             <h1>{t.dashboard.welcome} {loading ? "..." : displayName}</h1>
             {error ? <p className={styles.errorText}>{error}</p> : null}
           </header>
+          {loading && !data ? <DashboardSkeleton /> : (
           <div className={styles.dashboardGrid}>
             <div className={styles.colLeft}>
               <ProgressCard progress={data?.progress} labels={t.dashboard} />
@@ -420,6 +440,7 @@ export default function DashboardMainPage() {
               />
             </div>
           </div>
+          )}
         </main>
       </div>
 

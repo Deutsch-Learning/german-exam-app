@@ -159,6 +159,28 @@
   padding: 0;
 }
 
+.navLogoutButton {
+  min-height: 40px;
+  border: 1px solid #fee2e2;
+  border-radius: var(--radius-full);
+  background: #fff5f5;
+  color: #b91c1c;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 850;
+  cursor: pointer;
+  white-space: nowrap;
+  position: relative;
+  z-index: 80;
+  transition: transform var(--transition-normal), background-color var(--transition-normal);
+}
+
+.navLogoutButton:hover {
+  transform: translateY(-1px);
+  background: #fee2e2;
+}
+
 .userAvatar {
   width: 40px;
   height: 40px;
@@ -447,6 +469,43 @@
 }
 
 @media (max-width: 520px) {
+  .topNav {
+    padding: 0 12px;
+  }
+
+  .navContainer {
+    height: auto;
+    min-height: 72px;
+    gap: 10px;
+  }
+
+  .logo {
+    height: 40px;
+  }
+
+  .navRight {
+    gap: 8px;
+  }
+
+  .langButton {
+    padding: 6px 9px;
+  }
+
+  .langButton span {
+    display: none;
+  }
+
+  .userAvatar {
+    width: 36px;
+    height: 36px;
+  }
+
+  .navLogoutButton {
+    min-height: 36px;
+    padding: 0 10px;
+    font-size: 0.78rem;
+  }
+
   .modalActions {
     flex-direction: column-reverse;
   }
@@ -474,5 +533,14 @@
   .cardStats {
     align-items: flex-start;
     padding-left: 20px; /* Aligns the icons and text uniformly inside the card */
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .navLogoutButton,
+  .modalOverlay,
+  .confirmModal {
+    transition: none;
   }
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { Lock } from "lucide-react";
 import "./SimplePages.css";
 import logo from "../assets/images/logo.png";
@@ -11,6 +11,7 @@ import { canOpenSeries, isVisitorSeriesAttempt } from "../utils/access";
 
 export default function SeriesSelectionPage() {
   const { examId } = useParams();
+  const location = useLocation();
   const exam = getExamSimulation(examId);
   const [importedState, setImportedState] = useState({ examId: "", series: [] });
 
@@ -44,7 +45,7 @@ export default function SeriesSelectionPage() {
   }
 
   return (
-    <div className="simple-page">
+    <div className={`simple-page ${location.state?.fromResults ? "from-results-transition" : ""}`}>
       <main className="simple-shell">
         <div className="simple-topbar">
           <Link className="simple-logo" to="/">
@@ -63,7 +64,11 @@ export default function SeriesSelectionPage() {
         </header>
 
         <section className="series-minimal-grid" aria-label={`${exam.name} series`}>
-          {series.map((item) => {
+          {loadingImported ? Array.from({ length: 6 }).map((_, index) => (
+            <span className="series-box series-box-skeleton" key={index}>
+              <span className="series-box-name">Loading</span>
+            </span>
+          )) : series.map((item) => {
             const canOpen = canOpenSeries(item);
 
             return (

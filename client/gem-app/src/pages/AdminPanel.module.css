@@ -48,6 +48,28 @@
   background: rgba(249, 196, 21, 0.22);
 }
 
+.logoutButton {
+  min-height: 42px;
+  border: 1px solid rgba(248, 113, 113, 0.42);
+  border-radius: 8px;
+  background: rgba(220, 38, 38, 0.12);
+  color: #fecaca;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 850;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: transform 0.18s ease, background-color 0.18s ease;
+}
+
+.logoutButton:hover {
+  transform: translateY(-1px);
+  background: rgba(220, 38, 38, 0.2);
+  color: #ffffff;
+}
+
 .nav {
   display: grid;
   gap: 8px;
@@ -262,6 +284,65 @@
   color: #ffffff;
 }
 
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.52);
+  backdrop-filter: blur(6px);
+}
+
+.confirmModal {
+  width: min(100%, 460px);
+  border-radius: 12px;
+  border: 1px solid #334155;
+  background: #0f172a;
+  color: #ffffff;
+  padding: 24px;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.4);
+  animation: adminModalIn 0.18s ease-out both;
+}
+
+.confirmModal h2 {
+  margin: 0;
+  font-size: clamp(1.35rem, 4vw, 1.9rem);
+}
+
+.confirmModal p:not(.modalEyebrow) {
+  margin: 12px 0 0;
+  color: #cbd5e1;
+  line-height: 1.6;
+}
+
+.modalEyebrow {
+  margin: 0 0 8px;
+  color: #f9c415;
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.modalActions {
+  margin-top: 22px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+@keyframes adminModalIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 .formGrid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -376,6 +457,7 @@
 
   .sidebar {
     position: static;
+    padding: 18px;
   }
 
   .nav {
@@ -390,6 +472,11 @@
     grid-template-columns: 1fr;
   }
 
+  .switchButton,
+  .logoutButton {
+    width: 100%;
+  }
+
   .documentImportGrid,
   .outlineList article {
     grid-template-columns: 1fr;
@@ -402,5 +489,23 @@
 
   .outlineList article {
     display: grid;
+  }
+}
+
+@media (max-width: 520px) {
+  .modalActions {
+    flex-direction: column-reverse;
+  }
+
+  .modalActions button {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .confirmModal,
+  .logoutButton {
+    animation: none;
+    transition: none;
   }
 }

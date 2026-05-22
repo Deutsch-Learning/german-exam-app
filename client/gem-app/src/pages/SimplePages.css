@@ -285,6 +285,40 @@
   box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
 }
 
+.from-results-transition .series-box {
+  animation: seriesRise 0.28s ease-out both;
+}
+
+.series-box-skeleton {
+  pointer-events: none;
+  color: transparent;
+  background:
+    linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.78), transparent),
+    #eef2f7;
+  background-size: 220% 100%, 100% 100%;
+  animation: simpleSkeleton 1.2s ease-in-out infinite;
+}
+
+@keyframes seriesRise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes simpleSkeleton {
+  from {
+    background-position: 180% 0, 0 0;
+  }
+  to {
+    background-position: -80% 0, 0 0;
+  }
+}
+
 .series-box.locked {
   background: #f9fafb;
   color: #6b7280;

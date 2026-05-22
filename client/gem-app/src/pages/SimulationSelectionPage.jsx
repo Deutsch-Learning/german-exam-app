@@ -9,9 +9,11 @@ import userIcon from "../assets/images/icon-profile.png";
 import BackButton from "../components/BackButton";
 import { languageOptions } from "../utils/language";
 import { useLanguage } from "../context/LanguageContext";
-import { isLoggedIn } from "../utils/access";
+import { clearAuthSession, isLoggedIn } from "../utils/access";
 import { examSimulations } from "../data/siteContent";
 import { fetchImportedSeries, hasPlayableImportedSeries } from "../services/importedExams";
+import API from "../services/api";
+import { clearDashboardCache } from "../services/dashboard";
 
 const ChevronIcon = () => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -40,7 +42,7 @@ export const OpenBookIcon = () => (
   <BookOpenCheck size={52} strokeWidth={1.8} />
 );
 
-export const SimulationTopNav = ({ onGoHome, onGoAbout, onGoProfile, onGoDashboard, onGoActualites, onGoContact, onGoModule }) => {
+export const SimulationTopNav = ({ onGoHome, onGoAbout, onGoProfile, onGoDashboard, onGoActualites, onGoContact, onGoModule, onLogout }) => {
   const [openLang, setOpenLang] = useState(false);
   const [openFormation, setOpenFormation] = useState(false);
   const { language, setLanguage, t } = useLanguage();
@@ -139,6 +141,11 @@ export const SimulationTopNav = ({ onGoHome, onGoAbout, onGoProfile, onGoDashboa
             </div>
           </button>
         ) : null}
+        {loggedIn && onLogout ? (
+          <button className={styles.navLogoutButton} type="button" onClick={onLogout}>
+            {t.common.logout}
+          </button>
+        ) : null}
       </div>
     </div>
   </nav>
@@ -227,6 +234,16 @@ export default function SimulationSelectionPage() {
   const navigate = useNavigate();
   const { t } = useLanguage();
   const [availability, setAvailability] = useState({});
+  const logout = async () => {
+    try {
+      await API.post("/api/auth/logout");
+    } catch {
+      // Local logout remains reliable when the server token is stale.
+    }
+    clearAuthSession();
+    clearDashboardCache();
+    navigate("/", { replace: true });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -256,6 +273,7 @@ export default function SimulationSelectionPage() {
         onGoActualites={() => navigate("/actualites")}
         onGoContact={() => navigate("/contact")}
         onGoModule={(moduleId) => moduleId === "lessons" ? navigate("/lessons") : navigate(`/simulation/${moduleId}`)}
+        onLogout={logout}
       />
 
       <main className={styles.mainContent}>
