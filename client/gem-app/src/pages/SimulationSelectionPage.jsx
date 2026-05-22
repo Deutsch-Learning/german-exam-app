@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { BookOpenCheck } from "lucide-react";
 import styles from "./SimulationSelectionPage.module.css";
@@ -11,6 +11,7 @@ import { languageOptions } from "../utils/language";
 import { useLanguage } from "../context/LanguageContext";
 import { isLoggedIn } from "../utils/access";
 import { examSimulations } from "../data/siteContent";
+import { fetchImportedSeries, hasPlayableImportedSeries } from "../services/importedExams";
 
 const ChevronIcon = () => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -144,8 +145,27 @@ export const SimulationTopNav = ({ onGoHome, onGoAbout, onGoProfile, onGoDashboa
   );
 };
 
-export const SimulationDisciplineCard = ({ iconPath, iconNode, title, time, questions, minuteLabel, questionLabel, accent = "#d32f2f", onClick }) => (
-  <button type="button" className={styles.card} style={{ "--card-accent": accent }} onClick={onClick}>
+export const SimulationDisciplineCard = ({
+  iconPath,
+  iconNode,
+  title,
+  time,
+  questions,
+  minuteLabel,
+  questionLabel,
+  accent = "#d32f2f",
+  badge,
+  unavailable = false,
+  onClick,
+}) => (
+  <button
+    type="button"
+    className={`${styles.card} ${unavailable ? styles.cardUnavailable : ""}`}
+    style={{ "--card-accent": accent }}
+    onClick={onClick}
+    aria-disabled={unavailable ? "true" : undefined}
+  >
+    {badge ? <span className={styles.cardBadge}>{badge}</span> : null}
     <div className={styles.cardIconWrapper}>
       {iconNode ? iconNode : <img src={iconPath} alt={`Icone ${title}`} className={styles.cardIcon} />}
     </div>
@@ -206,6 +226,25 @@ export const StartConfirmationModal = ({
 export default function SimulationSelectionPage() {
   const navigate = useNavigate();
   const { t } = useLanguage();
+  const [availability, setAvailability] = useState({});
+
+  useEffect(() => {
+    let cancelled = false;
+
+    Promise.all(
+      examSimulations.map((exam) =>
+        fetchImportedSeries(exam.id)
+          .then((series) => [exam.id, { loading: false, available: hasPlayableImportedSeries(series), series }])
+          .catch(() => [exam.id, { loading: false, available: false, series: [] }])
+      )
+    ).then((entries) => {
+      if (!cancelled) setAvailability(Object.fromEntries(entries));
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <div className={styles.pageContainer}>
@@ -232,17 +271,39 @@ export default function SimulationSelectionPage() {
         <section className={styles.gridSection}>
           <div className={styles.cardGrid}>
             {examSimulations.map((exam) => (
-              <SimulationDisciplineCard
-                key={exam.id}
-                iconNode={<OpenBookIcon />}
-                title={exam.name}
-                time={240}
-                questions={156}
-                accent={exam.accent}
-                minuteLabel={t.simulations.minutes}
-                questionLabel={t.simulations.questions}
-                onClick={() => navigate(exam.path)}
-              />
+              (() => {
+                const state = availability[exam.id];
+                const isChecking = !state;
+                const available = Boolean(state?.available);
+                const questions = state?.series?.reduce(
+                  (sum, item) =>
+                    sum +
+                    Object.values(item.modules ?? {}).reduce(
+                      (moduleSum, module) => moduleSum + (Number(module?.questionCount) || 0),
+                      0
+                    ),
+                  0
+                );
+
+                return (
+                  <SimulationDisciplineCard
+                    key={exam.id}
+                    iconNode={<OpenBookIcon />}
+                    title={exam.name}
+                    time={available ? 240 : "Soon"}
+                    questions={available ? questions || 0 : 0}
+                    accent={exam.accent}
+                    badge={isChecking ? "Checking" : available ? "Available" : "Coming Soon"}
+                    unavailable={!isChecking && !available}
+                    minuteLabel={available ? t.simulations.minutes : ""}
+                    questionLabel={available ? t.simulations.questions : "questions"}
+                    onClick={() => {
+                      if (isChecking) return;
+                      navigate(available ? exam.path : `/coming-soon/${exam.id}`);
+                    }}
+                  />
+                );
+              })()
             ))}
           </div>
         </section>

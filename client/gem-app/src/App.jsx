@@ -26,6 +26,7 @@ import StartPreparationPage from "./pages/StartPreparationPage";
 import FreeTestPage from "./pages/FreeTestPage";
 import SessionExpiredPage from "./pages/SessionExpiredPage";
 import CheckoutPage from "./pages/CheckoutPage";
+import ComingSoonPage from "./pages/ComingSoonPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import VerifyEmailPage from "./pages/VerifyEmailPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
@@ -98,6 +99,8 @@ function AppRoutes() {
         <Route path="/refund-condition" element={<InfoPage type="refund" />} />
         <Route path="/offers" element={<OffersPage />} />
         <Route path="/checkout/:offerId" element={<ProtectedRoute><CheckoutPage /></ProtectedRoute>} />
+        <Route path="/coming-soon/:examId" element={<ComingSoonPage />} />
+        <Route path="/coming-soon" element={<ComingSoonPage />} />
         <Route path="/start-preparation" element={<StartPreparationPage />} />
         <Route path="/free-test/:seriesId" element={<FreeTestPage />} />
         <Route path="/session-expired" element={<SessionExpiredPage />} />

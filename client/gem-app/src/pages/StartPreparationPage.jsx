@@ -4,8 +4,7 @@ import { Lock } from "lucide-react";
 import "./SimplePages.css";
 import logo from "../assets/images/logo.png";
 import { examSimulations } from "../data/siteContent";
-import { getSeriesForExam } from "../data/testSeries";
-import { fetchImportedSeries } from "../services/importedExams";
+import { fetchImportedSeries, hasPlayableImportedSeries } from "../services/importedExams";
 import { canOpenSeries, isVisitorSeriesAttempt } from "../utils/access";
 
 export default function StartPreparationPage() {
@@ -31,7 +30,8 @@ export default function StartPreparationPage() {
 
   const groupedSeries = examSimulations.map((exam) => ({
     exam,
-    series: importedByExam[exam.id]?.length ? importedByExam[exam.id] : getSeriesForExam(exam.id),
+    checked: Object.prototype.hasOwnProperty.call(importedByExam, exam.id),
+    series: importedByExam[exam.id] ?? [],
   }));
 
   return (
@@ -54,11 +54,20 @@ export default function StartPreparationPage() {
         </header>
 
         <div className="free-series-groups">
-          {groupedSeries.map(({ exam, series }) => (
+          {groupedSeries.map(({ exam, checked, series }) => (
             <section className="free-series-group" key={exam.id}>
               <h2>{exam.name}</h2>
               <div className="series-minimal-grid">
-                {series.map((item) => {
+                {!checked ? (
+                  <span className="series-box locked">
+                    <span className="series-box-name">Checking...</span>
+                  </span>
+                ) : !hasPlayableImportedSeries(series) ? (
+                  <Link className="series-box locked" to={`/coming-soon/${exam.id}`}>
+                    <span className="series-box-name">Coming Soon</span>
+                    <Lock className="series-lock-icon" size={17} />
+                  </Link>
+                ) : series.map((item) => {
                   const canOpen = canOpenSeries(item);
 
                   return (

@@ -1,17 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Lock } from "lucide-react";
 import "./SimplePages.css";
 import logo from "../assets/images/logo.png";
 import NotFoundPage from "./NotFoundPage";
-import { getExamSimulation, getSeriesForExam } from "../data/testSeries";
-import { fetchImportedSeries } from "../services/importedExams";
+import ComingSoonPage from "./ComingSoonPage";
+import { getExamSimulation } from "../data/testSeries";
+import { fetchImportedSeries, hasPlayableImportedSeries } from "../services/importedExams";
 import { canOpenSeries, isVisitorSeriesAttempt } from "../utils/access";
 
 export default function SeriesSelectionPage() {
   const { examId } = useParams();
   const exam = getExamSimulation(examId);
-  const staticSeries = useMemo(() => getSeriesForExam(examId), [examId]);
   const [importedState, setImportedState] = useState({ examId: "", series: [] });
 
   useEffect(() => {
@@ -33,10 +33,14 @@ export default function SeriesSelectionPage() {
   const importedMatchesRoute = importedState.examId === examId;
   const importedSeries = importedMatchesRoute ? importedState.series : [];
   const loadingImported = Boolean(examId && !importedMatchesRoute);
-  const series = importedSeries.length ? importedSeries : staticSeries;
+  const series = importedSeries;
 
-  if (!exam || !series.length) {
+  if (!exam) {
     return <NotFoundPage message="The test series you opened is not available." />;
+  }
+
+  if (!loadingImported && !hasPlayableImportedSeries(series)) {
+    return <ComingSoonPage examId={examId} />;
   }
 
   return (

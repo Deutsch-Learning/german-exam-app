@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Lock } from "lucide-react";
 import styles from "./SimulationSelectionPage.module.css";
 import "./SimplePages.css";
-import NotFoundPage from "./NotFoundPage";
-import { getSeriesById, simulationModules } from "../data/testSeries";
+import ComingSoonPage from "./ComingSoonPage";
+import { simulationModules } from "../data/testSeries";
 import { fetchImportedSeries } from "../services/importedExams";
 import { canOpenSeries, isVisitorSeriesAttempt } from "../utils/access";
 import BackButton from "../components/BackButton";
@@ -33,7 +33,6 @@ export default function SeriesSimulationPage() {
   const { examId, seriesId } = useParams();
   const { t } = useLanguage();
   const [pendingModuleId, setPendingModuleId] = useState(null);
-  const staticSeries = useMemo(() => getSeriesById(examId, seriesId), [examId, seriesId]);
   const [remoteSeriesState, setRemoteSeriesState] = useState({
     examId: "",
     seriesId: "",
@@ -63,7 +62,7 @@ export default function SeriesSimulationPage() {
 
   const remoteMatchesRoute = remoteSeriesState.examId === examId && remoteSeriesState.seriesId === seriesId;
   const loadingRemoteSeries = Boolean(examId && seriesId && !remoteMatchesRoute);
-  const series = (remoteMatchesRoute ? remoteSeriesState.series : null) ?? staticSeries;
+  const series = remoteMatchesRoute ? remoteSeriesState.series : null;
 
   if (!series && loadingRemoteSeries) {
     return (
@@ -79,7 +78,7 @@ export default function SeriesSimulationPage() {
   }
 
   if (!series) {
-    return <NotFoundPage message="The selected series could not be found." />;
+    return <ComingSoonPage examId={examId} title="This series is not yet available" />;
   }
 
   if (!canOpenSeries(series)) {

@@ -38,7 +38,6 @@ import styles from "./SimulationModulePage.module.css";
 import logo from "../assets/images/logo.png";
 import speakingImage from "../assets/images/active_people.png";
 import { getTranslations } from "../context/LanguageContext";
-import { getSeriesById, getSeriesModuleContent } from "../data/testSeries";
 import { fetchImportedSeriesModule } from "../services/importedExams";
 import { getProgressKey, upsertSimulationHistoryEntry } from "../utils/simulationHistory";
 import { canOpenSeries, getAuthUser, isVisitorSeriesAttempt } from "../utils/access";
@@ -54,6 +53,7 @@ import {
   startSpeechWatchdog,
 } from "../utils/audio";
 import NotFoundPage from "./NotFoundPage";
+import ComingSoonPage from "./ComingSoonPage";
 
 const LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"];
 const PASS_SCORE = 70;
@@ -890,6 +890,7 @@ const getTaskDuration = (module, task) => {
   const typeBase = {
     trueFalse: 45,
     multiple: 60,
+    select: 60,
     blank: 75,
     match: 120,
     order: 110,
@@ -918,6 +919,10 @@ const isQuestionAnswered = (task, answer) => {
 
   if (task.type === "blank") {
     return String(answer ?? "").trim().length > 0;
+  }
+
+  if (task.type === "select") {
+    return Boolean(answer);
   }
 
   return Boolean(answer);
@@ -1177,7 +1182,7 @@ const stringifyAnswer = (value) => {
 };
 
 const getAnswerLabel = (task, answer) => {
-  if (task.type === "multiple" || task.type === "trueFalse") {
+  if (task.type === "multiple" || task.type === "trueFalse" || task.type === "select") {
     const options = task.type === "trueFalse" ? TRUE_FALSE_OPTIONS : task.options;
     const option = options.find((item) => item.value === answer);
     return option ? getProtectedChoiceLabel(task, option) : stringifyAnswer(answer);
@@ -1188,7 +1193,7 @@ const getAnswerLabel = (task, answer) => {
 };
 
 const getCorrectLabel = (task) => {
-  if (task.type === "multiple" || task.type === "trueFalse") {
+  if (task.type === "multiple" || task.type === "trueFalse" || task.type === "select") {
     const options = task.type === "trueFalse" ? TRUE_FALSE_OPTIONS : task.options;
     const option = options.find((item) => item.value === task.correct);
     return option ? getProtectedChoiceLabel(task, option) : stringifyAnswer(task.correct);
@@ -1271,14 +1276,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const params = useParams();
   const routeModuleId = moduleIdOverride ?? params.moduleId ?? "read";
   const baseModule = MODULES[routeModuleId] ?? MODULES.read;
-  const staticSelectedSeries = useMemo(
-    () => getSeriesById(params.examId, params.seriesId),
-    [params.examId, params.seriesId]
-  );
-  const staticSelectedSeriesContent = useMemo(
-    () => getSeriesModuleContent(params.examId, params.seriesId, baseModule.id),
-    [baseModule.id, params.examId, params.seriesId]
-  );
   const [importedModuleState, setImportedModuleState] = useState({
     loading: Boolean(params.examId && params.seriesId),
     series: null,
@@ -1313,8 +1310,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     };
   }, [baseModule.id, params.examId, params.seriesId]);
 
-  const selectedSeries = importedModuleState.series ?? staticSelectedSeries;
-  const selectedSeriesContent = importedModuleState.content ?? staticSelectedSeriesContent;
+  const selectedSeries = importedModuleState.series;
+  const selectedSeriesContent = importedModuleState.content;
   const auth = useMemo(() => getAuthUser(), []);
   const loggedIn = Boolean(auth?.id);
   const visitorSeriesAttempt = isVisitorSeriesAttempt(selectedSeries);
@@ -2154,6 +2151,26 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       );
     }
 
+    if (task.type === "select") {
+      return (
+        <label className={styles.fieldLabel}>
+          Réponse
+          <select
+            className={styles.selectInput}
+            value={answer ?? ""}
+            onChange={(event) => setAnswerForCurrent(event.target.value)}
+          >
+            <option value="">Choisir une option</option>
+            {(task.options ?? []).map((option) => (
+              <option key={option.value} value={option.value} translate="no">
+                {getProtectedChoiceLabel(task, option)}
+              </option>
+            ))}
+          </select>
+        </label>
+      );
+    }
+
     if (task.type === "match") {
       const answerObject = answer ?? {};
       return (
@@ -2228,10 +2245,10 @@ export default function SimulationModulePage({ moduleIdOverride }) {
         </div>
       </section>
 
-      <section className={styles.questionPane}>
+      <section key={currentTask.id} className={styles.questionPane}>
         <div className={styles.questionTopline}>
+          <span className={styles.questionStep}>Question {currentIndex + 1}/{totalTasks}</span>
           <span>{currentTask.typeLabel}</span>
-          <span>{level}</span>
         </div>
         <h2>{currentTask.question}</h2>
         {renderQuestionControl(currentTask, currentAnswer)}
@@ -2579,22 +2596,16 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     );
   }
 
+  if (!params.seriesId && !importedModuleState.loading) {
+    return <ComingSoonPage title="This exercise flow is not yet available" />;
+  }
+
   if (params.seriesId && !selectedSeries && !importedModuleState.loading) {
-    return (
-      <NotFoundPage
-        title="404 error"
-        message="The selected series could not be found."
-      />
-    );
+    return <ComingSoonPage examId={params.examId} title="This test series is not yet available" />;
   }
 
   if (selectedSeries?.isImported && !selectedSeriesContent && !importedModuleState.loading) {
-    return (
-      <NotFoundPage
-        title="404 error"
-        message="This imported module is not available for the selected series yet."
-      />
-    );
+    return <ComingSoonPage examId={params.examId} title="This module is not yet available" />;
   }
 
   if (blockedSeriesAccess || blockedVisitorRefresh) {
@@ -2691,9 +2702,10 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           </div>
         </header>
 
-        <div className={styles.workArea}>
+        <div className={`${styles.workArea} ${module.id === "read" ? styles.readingWorkArea : ""}`}>
           <section className={styles.mainContent}>{renderModuleContent()}</section>
 
+          {module.id !== "read" ? (
           <aside className={styles.sidebar}>
             <div className={styles.sidebarHeader}>
               <h2>Tests</h2>
@@ -2765,31 +2777,41 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
             <p className={styles.saveStatus}>{saveStatus}</p>
           </aside>
+          ) : null}
         </div>
 
         {!completed ? (
-          <section className={styles.actionPanel} aria-label="Navigation des exercices">
+          <section
+            className={`${styles.actionPanel} ${module.id === "read" ? styles.readingActionPanel : ""}`}
+            aria-label="Navigation des exercices"
+          >
             <button
               type="button"
               className={`${styles.secondaryButton} ${styles.mobileNavButton}`}
               onClick={goToPrevious}
-              disabled={currentIndex === 0 || simulationMode || isRecording}
+              disabled={currentIndex === 0 || (simulationMode && module.id !== "read") || isRecording}
             >
               <ChevronLeft size={16} />
               Retour
             </button>
+            {module.id !== "read" ? (
             <button type="button" className={`${styles.secondaryButton} ${styles.desktopActionButton}`} onClick={toggleFlag}>
               <Flag size={16} />
               {flagged[currentIndex] ? t.modulePage.removeFlag : t.modulePage.flagQuestion}
             </button>
+            ) : null}
+            {module.id !== "read" ? (
             <button type="button" className={`${styles.secondaryButton} ${styles.desktopActionButton}`} onClick={skipCurrent} disabled={isRecording}>
               <SkipForward size={16} />
               {t.common.skip}
             </button>
+            ) : null}
+            {module.id !== "read" ? (
             <button type="button" className={styles.secondaryButton} onClick={() => persistProgress(`Sauvegardé à ${formatClock()}`)}>
               <Save size={16} />
               {t.modulePage.saveProgress}
             </button>
+            ) : null}
             <button
               type="button"
               className={`${styles.primaryButton} ${styles.mobileNavButton}`}

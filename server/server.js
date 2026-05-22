@@ -969,9 +969,13 @@ const buildReadingTask = (question) => {
     const correct = correctValue || "x";
     return {
       ...base,
-      type: "blank",
+      type: "select",
       typeLabel: `${base.typeLabel} - Zuordnung`,
-      question: `${base.question}\n\nAntwort mit a-j oder x (keine passende Anzeige).`,
+      question: `${base.question}\n\nWählen Sie die passende Anzeige. X = keine passende Anzeige.`,
+      options: "abcdefghijx".split("").map((value) => ({
+        value,
+        label: value === "x" ? "X - Keine passende Anzeige" : value.toUpperCase(),
+      })),
       correct,
       alternatives: [correct.toUpperCase(), correct.toLowerCase()],
     };

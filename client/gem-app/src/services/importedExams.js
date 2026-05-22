@@ -6,6 +6,11 @@ export const fetchImportedSeries = async (examId) => {
   return Array.isArray(response.data?.series) ? response.data.series : [];
 };
 
+export const hasPlayableImportedSeries = (series = []) =>
+  series.some((item) =>
+    Object.values(item.modules ?? {}).some((module) => Number(module?.questionCount) > 0)
+  );
+
 export const fetchImportedSeriesModule = async (examId, seriesId, moduleId) => {
   if (!examId || !seriesId || !moduleId) return null;
   const response = await API.get(
