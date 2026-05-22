@@ -1838,6 +1838,85 @@
   }
 }
 
+@media (max-width: 759px) {
+  .shell {
+    padding-bottom: calc(132px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .actionPanel {
+    position: fixed;
+    left: max(12px, env(safe-area-inset-left, 0px));
+    right: max(12px, env(safe-area-inset-right, 0px));
+    bottom: max(10px, env(safe-area-inset-bottom, 0px));
+    width: auto;
+    margin: 0;
+    padding: 10px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    border: 1px solid rgba(208, 213, 221, 0.86);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.94);
+    box-shadow: 0 18px 44px rgba(16, 24, 40, 0.18);
+    backdrop-filter: blur(18px);
+  }
+
+  .actionPanel > button:not(.mobileNavButton) {
+    display: none;
+  }
+
+  .mobileNavButton {
+    width: 100%;
+    min-height: 56px;
+    border-radius: 14px;
+    padding: 0 12px;
+    font-size: 0.95rem;
+    line-height: 1;
+    transition:
+      transform 0.18s ease,
+      background-color 0.18s ease,
+      border-color 0.18s ease,
+      box-shadow 0.18s ease;
+  }
+
+  .mobileNavButton svg {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 auto;
+  }
+
+  .mobileNavButton:active:not(:disabled) {
+    transform: scale(0.98);
+  }
+
+  .secondaryButton.mobileNavButton {
+    border-color: #d0d5dd;
+    background: #ffffff;
+    color: #344054;
+  }
+
+  .primaryButton.mobileNavButton {
+    background: linear-gradient(135deg, var(--exam-yellow), #ffd95a);
+    color: #2b2100;
+    box-shadow: 0 12px 26px rgba(244, 180, 0, 0.28);
+  }
+}
+
+@media (max-width: 420px) {
+  .actionPanel {
+    left: max(8px, env(safe-area-inset-left, 0px));
+    right: max(8px, env(safe-area-inset-right, 0px));
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .mobileNavButton {
+    min-height: 54px;
+    padding: 0 8px;
+    font-size: 0.88rem;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .audioPlayButton,
   .micStage .stopButton,
@@ -1847,7 +1926,8 @@
 
   .optionButton,
   .questionButton,
-  .primaryButton {
+  .primaryButton,
+  .mobileNavButton {
     transition: none;
   }
 }

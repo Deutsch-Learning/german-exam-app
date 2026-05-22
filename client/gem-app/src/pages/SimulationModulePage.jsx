@@ -2674,21 +2674,21 @@ export default function SimulationModulePage({ moduleIdOverride }) {
         </div>
 
         {!completed ? (
-          <section className={styles.actionPanel}>
+          <section className={styles.actionPanel} aria-label="Navigation des exercices">
             <button
               type="button"
-              className={styles.secondaryButton}
+              className={`${styles.secondaryButton} ${styles.mobileNavButton}`}
               onClick={goToPrevious}
               disabled={currentIndex === 0 || simulationMode || isRecording}
             >
               <ChevronLeft size={16} />
               Retour
             </button>
-            <button type="button" className={styles.secondaryButton} onClick={toggleFlag}>
+            <button type="button" className={`${styles.secondaryButton} ${styles.desktopActionButton}`} onClick={toggleFlag}>
               <Flag size={16} />
               {flagged[currentIndex] ? t.modulePage.removeFlag : t.modulePage.flagQuestion}
             </button>
-            <button type="button" className={styles.secondaryButton} onClick={skipCurrent} disabled={isRecording}>
+            <button type="button" className={`${styles.secondaryButton} ${styles.desktopActionButton}`} onClick={skipCurrent} disabled={isRecording}>
               <SkipForward size={16} />
               {t.common.skip}
             </button>
@@ -2698,7 +2698,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             </button>
             <button
               type="button"
-              className={styles.primaryButton}
+              className={`${styles.primaryButton} ${styles.mobileNavButton}`}
               onClick={goToNext}
               disabled={(nextDisabled && !currentSkipped) || isRecording}
             >
