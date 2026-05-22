@@ -2,6 +2,7 @@ require("dotenv").config();
 const crypto = require("crypto");
 const path = require("path");
 const express = require("express");
+const multer = require("multer");
 const pool = require("./db");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
@@ -12,6 +13,12 @@ const jwt = require("jsonwebtoken");
 const nodemailer = require("nodemailer");
 const { createAuthMiddleware } = require("./middleware/auth");
 const adminMiddleware = require("./middleware/admin");
+const {
+  analyzeExamDocument,
+  ensureDocumentImportSchema,
+  importParsedExamDocument,
+  summarizeOutline,
+} = require("./services/documentImport");
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -96,6 +103,14 @@ app.use(
   })
 );
 app.use(express.json({ limit: "1mb" }));
+
+const documentUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 30 * 1024 * 1024,
+    files: 1,
+  },
+});
 
 const authRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -595,6 +610,8 @@ async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS exam_content_type_level_idx
       ON exam_content(type, level, created_at DESC);
   `);
+
+  await ensureDocumentImportSchema(pool);
 }
 
 const getFeature = (req) => {
@@ -1731,6 +1748,93 @@ app.post("/api/admin/exams/upload-json", requireAdmin, async (req, res) => {
     return res.status(201).json({ ok: true, exams: inserted });
   } catch (err) {
     return res.status(400).json({ ok: false, error: err.message || "Invalid JSON upload" });
+  }
+});
+
+app.post("/api/admin/exams/analyze-document", requireAdmin, documentUpload.single("document"), async (req, res) => {
+  try {
+    if (!req.file?.buffer) {
+      return res.status(400).json({ ok: false, error: "Document file is required" });
+    }
+    const parsed = await analyzeExamDocument({
+      buffer: req.file.buffer,
+      filename: req.file.originalname,
+      mimetype: req.file.mimetype,
+    });
+    await auditAdminAction(req, "exam.document_analyze", "document", parsed.documentHash, {
+      filename: parsed.filename,
+      provider: parsed.metadata.provider,
+      sectionType: parsed.metadata.sectionType,
+      series: parsed.series.length,
+      questions: parsed.validation.questionCount,
+    });
+    return res.json({
+      ok: true,
+      analysis: {
+        documentHash: parsed.documentHash,
+        filename: parsed.filename,
+        sizeBytes: parsed.sizeBytes,
+        extraction: parsed.extraction,
+        metadata: parsed.metadata,
+        validation: parsed.validation,
+        outline: summarizeOutline(parsed),
+      },
+    });
+  } catch (err) {
+    console.error("Document analysis failed", err);
+    return res.status(400).json({ ok: false, error: err.message || "Document analysis failed" });
+  }
+});
+
+app.post("/api/admin/exams/import-document", requireAdmin, documentUpload.single("document"), async (req, res) => {
+  try {
+    if (!req.file?.buffer) {
+      return res.status(400).json({ ok: false, error: "Document file is required" });
+    }
+    const parsed = await analyzeExamDocument({
+      buffer: req.file.buffer,
+      filename: req.file.originalname,
+      mimetype: req.file.mimetype,
+    });
+    const result = await importParsedExamDocument({
+      pool,
+      parsed,
+      adminId: req.user.id,
+    });
+    await auditAdminAction(
+      req,
+      result.duplicate ? "exam.document_duplicate" : "exam.document_import",
+      "document",
+      parsed.documentHash,
+      {
+        filename: parsed.filename,
+        importId: result.import?.id,
+        duplicate: result.duplicate,
+        exams: result.exams.length,
+        provider: parsed.metadata.provider,
+        sectionType: parsed.metadata.sectionType,
+        series: parsed.series.length,
+        questions: parsed.validation.questionCount,
+      }
+    );
+    return res.status(result.duplicate ? 200 : 201).json({
+      ok: true,
+      duplicate: result.duplicate,
+      import: result.import,
+      exams: result.exams,
+      analysis: {
+        documentHash: parsed.documentHash,
+        filename: parsed.filename,
+        sizeBytes: parsed.sizeBytes,
+        extraction: parsed.extraction,
+        metadata: parsed.metadata,
+        validation: parsed.validation,
+        outline: summarizeOutline(parsed),
+      },
+    });
+  } catch (err) {
+    console.error("Document import failed", err);
+    return res.status(400).json({ ok: false, error: err.message || "Document import failed" });
   }
 });
 
