@@ -7,9 +7,9 @@ import "./motion.css";
 const pageVariants = {
   initial: {
     opacity: 0,
-    y: 18,
-    scale: 0.992,
-    filter: "blur(10px)",
+    y: 14,
+    scale: 0.996,
+    filter: "blur(6px)",
   },
   animate: {
     opacity: 1,
@@ -19,14 +19,14 @@ const pageVariants = {
   },
   exit: {
     opacity: 0,
-    y: -10,
-    scale: 0.996,
-    filter: "blur(8px)",
+    y: -8,
+    scale: 0.998,
+    filter: "blur(4px)",
   },
 };
 
 const pageTransition = {
-  duration: 0.34,
+  duration: 0.28,
   ease: [0.22, 1, 0.36, 1],
 };
 
@@ -92,12 +92,12 @@ function useScrollReveal(location, reduceMotion) {
           const rect = element.getBoundingClientRect();
           return rect.width > 0 && rect.height > 0;
         })
-        .slice(0, 160);
+        .slice(0, 120);
 
       elements.forEach((element, index) => {
         observed.add(element);
         element.classList.add("motion-reveal");
-        element.style.setProperty("--motion-reveal-delay", `${Math.min(index * 18, 180)}ms`);
+        element.style.setProperty("--motion-reveal-delay", `${Math.min(index * 14, 140)}ms`);
         observer.observe(element);
       });
     };
@@ -117,11 +117,11 @@ function useSmoothScroll(reduceMotion) {
     if (reduceMotion || typeof window === "undefined") return undefined;
 
     const lenis = new Lenis({
-      duration: 0.92,
+      duration: 0.82,
       easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
       smoothWheel: true,
       syncTouch: false,
-      wheelMultiplier: 0.86,
+      wheelMultiplier: 0.92,
     });
 
     let frameId;
@@ -146,19 +146,19 @@ function LiquidTransitionOverlay({ routeKey }) {
         className="motion-route-overlay motion-no-reveal"
         initial={{
           y: "100%",
-          opacity: 0.96,
+          opacity: 0.84,
           borderRadius: "42% 58% 0 0 / 22% 28% 0 0",
         }}
         animate={{
           y: "-115%",
-          opacity: [0.96, 0.96, 0],
+          opacity: [0.84, 0.8, 0],
           borderRadius: [
             "42% 58% 0 0 / 22% 28% 0 0",
             "24% 76% 0 0 / 16% 34% 0 0",
             "0 0 0 0",
           ],
         }}
-        transition={{ duration: 0.72, ease: [0.76, 0, 0.24, 1], times: [0, 0.72, 1] }}
+        transition={{ duration: 0.56, ease: [0.76, 0, 0.24, 1], times: [0, 0.7, 1] }}
         aria-hidden="true"
       />
     </AnimatePresence>

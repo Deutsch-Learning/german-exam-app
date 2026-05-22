@@ -340,6 +340,17 @@ export default function DashboardMainPage() {
 
   useEffect(() => { fetchDashboard(); }, [fetchDashboard]);
 
+  useEffect(() => {
+    if (!sidebarOpen) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [sidebarOpen]);
+
   const displayName = useMemo(() => {
     const first = data?.user?.first_name ?? "";
     const last = data?.user?.last_name ?? "";
@@ -390,7 +401,7 @@ export default function DashboardMainPage() {
   }, [t]);
 
   return (
-    <div className={styles.appWrapper}>
+    <div className={`${styles.appWrapper} ${sidebarOpen ? styles.menuOpen : ""}`}>
       <TopNav
         onToggleMenu={() => setSidebarOpen(true)}
         onGoDashboard={() => navigate("/dashboard?view=user")}

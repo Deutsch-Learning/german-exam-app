@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Menu, X } from "lucide-react";
 import { aboutTestSections, currentTopics, pageLinks } from "../../data/siteContent";
@@ -27,6 +27,28 @@ export default function Navbar({ logo, language = "fr", onChangeLanguage, labels
     setOpenLang(false);
     setMobileOpen(false);
   };
+
+  useEffect(() => {
+    if (!mobileOpen) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const handleEscape = (event) => {
+      if (event.key === "Escape") {
+        setOpenDropdown("");
+        setOpenLang(false);
+        setMobileOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleEscape);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [mobileOpen]);
 
   const renderTopicDropdown = ({ id, label, items }) => {
     const topicOpen = openDropdown === id || items.some((item) => item.id === openDropdown);
@@ -104,76 +126,79 @@ export default function Navbar({ logo, language = "fr", onChangeLanguage, labels
     dropdown.id === "topics" ? renderTopicDropdown(dropdown) : renderLinkDropdown(dropdown);
 
   return (
-    <header className="top-nav">
-      <div className="container nav-container">
-        <Link className="logo" to="/" aria-label="Deutsch Learning home">
-          <img src={logo} alt="Logo" />
-        </Link>
-        <button
-          type="button"
-          className="mobile-menu-button"
-          aria-label={mobileOpen ? "Close navigation menu" : "Open navigation menu"}
-          aria-expanded={mobileOpen}
-          onClick={() => setMobileOpen((value) => !value)}
-        >
-          {mobileOpen ? <X size={22} /> : <Menu size={22} />}
-        </button>
-        <nav className={`desktop-nav ${mobileOpen ? "mobile-open" : ""}`}>
-          <Link className="nav-link" to="/" onClick={closeMenus}>{labels.home ?? "Home"}</Link>
-          {dropdowns.map(renderDropdown)}
-          {labels.lessons ? <Link className="nav-link" to="/lessons" onClick={closeMenus}>{labels.lessons}</Link> : null}
-          <Link className="nav-link" to="/contact" onClick={closeMenus}>{labels.contact}</Link>
-          <div className="language-selector">
-            <button
-              type="button"
-              className="language-button"
-              onClick={() => setOpenLang((value) => !value)}
-            >
-              {selected.flag ? (
-                <img src={selected.flag} alt={selected.label} />
+    <>
+      <header className={`top-nav ${mobileOpen ? "menu-open" : ""}`}>
+        <div className="container nav-container">
+          <Link className="logo" to="/" aria-label="Deutsch Learning home">
+            <img src={logo} alt="Logo" />
+          </Link>
+          <button
+            type="button"
+            className="mobile-menu-button"
+            aria-label={mobileOpen ? "Close navigation menu" : "Open navigation menu"}
+            aria-expanded={mobileOpen}
+            onClick={() => setMobileOpen((value) => !value)}
+          >
+            {mobileOpen ? <X size={22} /> : <Menu size={22} />}
+          </button>
+          <nav className={`desktop-nav ${mobileOpen ? "mobile-open" : ""}`}>
+            <Link className="nav-link" to="/" onClick={closeMenus}>{labels.home ?? "Home"}</Link>
+            {dropdowns.map(renderDropdown)}
+            {labels.lessons ? <Link className="nav-link" to="/lessons" onClick={closeMenus}>{labels.lessons}</Link> : null}
+            <Link className="nav-link" to="/contact" onClick={closeMenus}>{labels.contact}</Link>
+            <div className="language-selector">
+              <button
+                type="button"
+                className="language-button"
+                onClick={() => setOpenLang((value) => !value)}
+              >
+                {selected.flag ? (
+                  <img src={selected.flag} alt={selected.label} />
+                ) : (
+                  <span className="flag-fallback" aria-hidden="true">GL</span>
+                )}
+                <span>{language.toUpperCase()}</span>
+                <span className="lang-chevron">v</span>
+              </button>
+              {openLang ? (
+                <div className="language-menu">
+                  {languageOptions.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => {
+                        onChangeLanguage?.(item.id);
+                        setOpenLang(false);
+                        setMobileOpen(false);
+                      }}
+                    >
+                      <img src={item.flag} alt="" />
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            <div className="auth-nav-actions">
+              {loggedIn ? (
+                <Link className="btn-register-nav" to="/dashboard" onClick={closeMenus}>
+                  {labels.dashboard ?? "Dashboard"}
+                </Link>
               ) : (
-                <span className="flag-fallback" aria-hidden="true">GL</span>
+                <>
+                  <Link className="btn-login" to="/login" onClick={closeMenus}>
+                    {labels.login}
+                  </Link>
+                  <Link className="btn-register-nav" to="/register" onClick={closeMenus}>
+                    {labels.createAccount ?? "Create an account"}
+                  </Link>
+                </>
               )}
-              <span>{language.toUpperCase()}</span>
-              <span className="lang-chevron">v</span>
-            </button>
-            {openLang ? (
-              <div className="language-menu">
-                {languageOptions.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => {
-                      onChangeLanguage?.(item.id);
-                      setOpenLang(false);
-                      setMobileOpen(false);
-                    }}
-                  >
-                    <img src={item.flag} alt="" />
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </div>
-          <div className="auth-nav-actions">
-            {loggedIn ? (
-              <Link className="btn-register-nav" to="/dashboard" onClick={closeMenus}>
-                {labels.dashboard ?? "Dashboard"}
-              </Link>
-            ) : (
-              <>
-                <Link className="btn-login" to="/login" onClick={closeMenus}>
-                  {labels.login}
-                </Link>
-                <Link className="btn-register-nav" to="/register" onClick={closeMenus}>
-                  {labels.createAccount ?? "Create an account"}
-                </Link>
-              </>
-            )}
-          </div>
-        </nav>
-      </div>
-    </header>
+            </div>
+          </nav>
+        </div>
+      </header>
+      {mobileOpen ? <button type="button" className="mobile-nav-scrim" aria-label="Close navigation menu" onClick={closeMenus} /> : null}
+    </>
   );
 }
