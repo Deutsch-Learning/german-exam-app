@@ -2,20 +2,19 @@ const socialLinks = [
   {
     id: "facebook",
     label: "Facebook",
-    href: "https://www.facebook.com/deutschlearning",
+    href: "",
     path: "M22 12.06C22 6.5 17.52 2 12 2S2 6.5 2 12.06C2 17.08 5.66 21.24 10.44 22v-7.03H7.9v-2.91h2.54V9.84c0-2.52 1.5-3.91 3.78-3.91 1.1 0 2.24.2 2.24.2v2.47h-1.26c-1.24 0-1.63.77-1.63 1.56v1.9h2.78l-.44 2.91h-2.34V22C18.34 21.24 22 17.08 22 12.06Z",
   },
   {
     id: "twitter",
     label: "Twitter",
-    href: "https://twitter.com/deutschlearning",
+    href: "",
     path: "M18.24 3H21.4l-6.91 7.9L22.62 21h-6.37l-4.99-6.52L5.55 21H2.38l7.39-8.45L1.97 3h6.53l4.51 5.96L18.24 3Zm-1.11 16.22h1.75L7.55 4.69H5.67l11.46 14.53Z",
   },
   {
     id: "linkedin",
     label: "LinkedIn",
-    href: "https://www.linkedin.com/company/deutschlearning",
-    path: "M4.98 3.5C4.98 4.88 3.87 6 2.5 6S.02 4.88.02 3.5 1.13 1 2.5 1s2.48 1.12 2.48 2.5ZM.36 8h4.28v13H.36V8Zm7.09 0h4.1v1.78h.06c.57-1.08 1.96-2.22 4.04-2.22 4.32 0 5.12 2.84 5.12 6.54V21h-4.28v-6.12c0-1.46-.03-3.34-2.04-3.34-2.04 0-2.35 1.59-2.35 3.23V21H7.45V8Z",
+    href: ""
   },
   {
     id: "whatsapp",
@@ -26,7 +25,7 @@ const socialLinks = [
   {
     id: "telegram",
     label: "Telegram",
-    href: "https://t.me/deutschlearning",
+    href: "https://t.me",
     path: "M23.91 3.79 20.29 20.9c-.27 1.21-.98 1.51-1.98.94l-5.49-4.05-2.65 2.55c-.29.29-.54.54-1.11.54l.4-5.59L19.62 6.1c.44-.4-.1-.62-.69-.22L6.37 13.78.96 12.09c-1.18-.37-1.2-1.18.25-1.74L22.37 2.2c.98-.37 1.84.22 1.54 1.59Z",
   },
 ];
