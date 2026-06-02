@@ -8,6 +8,14 @@ import { fetchImportedSeries, hasPlayableImportedSeries } from "../services/impo
 import { canOpenSeries, isVisitorSeriesAttempt } from "../utils/access";
 import { useSimulationLanguage } from "../utils/simulationLanguage";
 
+const LoadingDots = () => (
+  <span className="simple-loading-dots" aria-label="Serien werden geprueft">
+    <span />
+    <span />
+    <span />
+  </span>
+);
+
 export default function StartPreparationPage() {
   useSimulationLanguage();
   const [importedByExam, setImportedByExam] = useState({});
@@ -15,14 +23,18 @@ export default function StartPreparationPage() {
   useEffect(() => {
     let cancelled = false;
 
-    Promise.all(
-      examSimulations.map((exam) =>
-        fetchImportedSeries(exam.id)
-          .then((series) => [exam.id, series])
-          .catch(() => [exam.id, []])
-      )
-    ).then((entries) => {
-      if (!cancelled) setImportedByExam(Object.fromEntries(entries));
+    examSimulations.forEach((exam) => {
+      fetchImportedSeries(exam.id)
+        .then((series) => {
+          if (!cancelled) {
+            setImportedByExam((current) => ({ ...current, [exam.id]: series }));
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setImportedByExam((current) => ({ ...current, [exam.id]: [] }));
+          }
+        });
     });
 
     return () => {
@@ -62,7 +74,7 @@ export default function StartPreparationPage() {
               <div className="series-minimal-grid">
                 {!checked ? (
                   <span className="series-box locked">
-                    <span className="series-box-name">Pruefung laeuft...</span>
+                    <LoadingDots />
                   </span>
                 ) : !hasPlayableImportedSeries(series) ? (
                   <Link className="series-box locked" to={`/coming-soon/${exam.id}`}>

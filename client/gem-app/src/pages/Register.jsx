@@ -72,7 +72,7 @@ export default function RegisterPage() {
     if (!validateForm()) return;
     setIsLoading(true);
     try {
-      const res = await API.post("/register", {
+      const res = await API.post("/api/auth/register", {
         email: formData.email,
         password: formData.password,
         username: formData.username,

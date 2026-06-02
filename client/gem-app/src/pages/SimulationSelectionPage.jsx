@@ -39,6 +39,14 @@ const ClipboardIcon = () => (
   </svg>
 );
 
+const LoadingDots = () => (
+  <span className={styles.loadingDots} aria-label="Verfuegbarkeit wird geprueft">
+    <span />
+    <span />
+    <span />
+  </span>
+);
+
 export const OpenBookIcon = () => (
   <BookOpenCheck size={52} strokeWidth={1.8} />
 );
@@ -298,14 +306,22 @@ export default function SimulationSelectionPage() {
   useEffect(() => {
     let cancelled = false;
 
-    Promise.all(
-      examSimulations.map((exam) =>
-        fetchImportedSeries(exam.id)
-          .then((series) => [exam.id, { loading: false, available: hasPlayableImportedSeries(series), series }])
-          .catch(() => [exam.id, { loading: false, available: false, series: [] }])
-      )
-    ).then((entries) => {
-      if (!cancelled) setAvailability(Object.fromEntries(entries));
+    examSimulations.forEach((exam) => {
+      fetchImportedSeries(exam.id)
+        .then((series) => {
+          if (cancelled) return;
+          setAvailability((current) => ({
+            ...current,
+            [exam.id]: { loading: false, available: hasPlayableImportedSeries(series), series },
+          }));
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setAvailability((current) => ({
+            ...current,
+            [exam.id]: { loading: false, available: false, series: [] },
+          }));
+        });
     });
 
     return () => {
@@ -365,7 +381,7 @@ export default function SimulationSelectionPage() {
                     time={available ? 240 : "Bald"}
                     questions={available ? questions || 0 : 0}
                     accent={exam.accent}
-                    badge={isChecking ? "Pruefung laeuft" : available ? "Verfuegbar" : "Demnaechst"}
+                    badge={isChecking ? <LoadingDots /> : available ? "Verfuegbar" : "Demnaechst"}
                     unavailable={!isChecking && !available}
                     minuteLabel={available ? t.simulations.minutes : ""}
                     questionLabel={available ? t.simulations.questions : "Fragen"}

@@ -1,6 +1,7 @@
 import API from "./api";
 
-const CACHE_TTL_MS = 60_000;
+const CACHE_TTL_MS = 5 * 60_000;
+const SERIES_STORAGE_PREFIX = "imported-series:";
 const seriesCache = new Map();
 const moduleCache = new Map();
 
@@ -20,18 +21,50 @@ const setCached = (cache, key, promise) => {
   return promise;
 };
 
+const readStoredSeries = (key) => {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(`${SERIES_STORAGE_PREFIX}${key}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || Date.now() - Number(parsed.createdAt) > CACHE_TTL_MS) {
+      window.localStorage.removeItem(`${SERIES_STORAGE_PREFIX}${key}`);
+      return null;
+    }
+    return Array.isArray(parsed.series) ? parsed.series : null;
+  } catch {
+    return null;
+  }
+};
+
+const writeStoredSeries = (key, series) => {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      `${SERIES_STORAGE_PREFIX}${key}`,
+      JSON.stringify({ createdAt: Date.now(), series })
+    );
+  } catch {
+    // Cache writes are optional; network results still drive the UI.
+  }
+};
+
 export const fetchImportedSeries = async (examId) => {
   if (!examId) return [];
   const key = String(examId).toLowerCase();
   const cached = getCached(seriesCache, key);
   if (cached) return cached;
+  const stored = readStoredSeries(key);
+  if (stored) return stored;
 
   return setCached(
     seriesCache,
     key,
-    API.get(`/api/exams/${encodeURIComponent(examId)}/series`).then((response) =>
-      Array.isArray(response.data?.series) ? response.data.series : []
-    )
+    API.get(`/api/exams/${encodeURIComponent(examId)}/series`).then((response) => {
+      const series = Array.isArray(response.data?.series) ? response.data.series : [];
+      writeStoredSeries(key, series);
+      return series;
+    })
   );
 };
 
@@ -64,4 +97,9 @@ export const fetchImportedSeriesModule = async (examId, seriesId, moduleId) => {
 export const clearImportedExamCache = () => {
   seriesCache.clear();
   moduleCache.clear();
+  if (typeof window !== "undefined") {
+    Object.keys(window.localStorage)
+      .filter((key) => key.startsWith(SERIES_STORAGE_PREFIX))
+      .forEach((key) => window.localStorage.removeItem(key));
+  }
 };

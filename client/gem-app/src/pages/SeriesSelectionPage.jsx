@@ -10,6 +10,14 @@ import { fetchImportedSeries, hasPlayableImportedSeries } from "../services/impo
 import { canOpenSeries, isVisitorSeriesAttempt } from "../utils/access";
 import { useSimulationLanguage } from "../utils/simulationLanguage";
 
+const LoadingDots = () => (
+  <span className="simple-loading-dots" aria-label="Serien werden geladen">
+    <span />
+    <span />
+    <span />
+  </span>
+);
+
 export default function SeriesSelectionPage() {
   useSimulationLanguage();
   const { examId } = useParams();
@@ -62,13 +70,13 @@ export default function SeriesSelectionPage() {
         <header className="simple-hero compact">
           <p className="simple-eyebrow">Serienauswahl</p>
           <h1>{exam.name}-Serien</h1>
-          <p>{loadingImported ? "Importierte Serien werden geladen..." : "Waehlen Sie eine Serie, um fortzufahren."}</p>
+          <p>{loadingImported ? <LoadingDots /> : "Waehlen Sie eine Serie, um fortzufahren."}</p>
         </header>
 
         <section className="series-minimal-grid" aria-label={`${exam.name}-Serien`}>
           {loadingImported ? Array.from({ length: 6 }).map((_, index) => (
             <span className="series-box series-box-skeleton" key={index}>
-              <span className="series-box-name">Laedt</span>
+              <LoadingDots />
             </span>
           )) : series.map((item) => {
             const canOpen = canOpenSeries(item);

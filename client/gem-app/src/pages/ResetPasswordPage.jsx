@@ -27,7 +27,7 @@ export default function ResetPasswordPage() {
 
     setStatus("loading");
     try {
-      const res = await API.post("/reset-password", { token, password });
+      const res = await API.post("/api/auth/reset-password", { token, password });
       setStatus("success");
       setMessage(res.data?.message ?? "Mot de passe mis à jour.");
     } catch (err) {

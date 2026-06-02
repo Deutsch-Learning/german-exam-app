@@ -40,7 +40,7 @@ export default function VerifyEmailPage() {
     setMessage("");
     setDevLink("");
     try {
-      const res = await API.post("/resend-verification", { email });
+      const res = await API.post("/api/auth/resend-verification", { email });
       setStatus("success");
       setMessage(res.data?.message ?? "Si une vérification est nécessaire, un email a été envoyé.");
       setDevLink(res.data?.devVerificationUrl ?? "");
