@@ -602,6 +602,7 @@
 .examTextSectionTitle,
 .examTextSubtitle,
 .examTextInstruction,
+.examTextIntroInstruction,
 .examTextNotice {
   margin: 0;
   color: #111827;
@@ -623,6 +624,18 @@
   color: #26354b;
   font-size: 0.98rem;
   line-height: 1.65;
+}
+
+.examTextIntroInstruction {
+  color: #1f2937;
+  font-size: 1rem;
+  font-style: italic;
+  line-height: 1.65;
+}
+
+.examTextGroup {
+  display: grid;
+  gap: 12px;
 }
 
 .examTextNotice {

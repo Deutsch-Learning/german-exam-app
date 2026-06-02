@@ -1322,14 +1322,21 @@ const classifyExamTextLine = (line, index = 0, total = 1) => {
     return "notice";
   }
 
-  if (/^(anweisung|instructions?|directions?|aufgabe|consigne|lisez|lesen sie|hoeren sie|hören sie|schreiben sie|waehlen sie|wählen sie|kreuzen sie|ordnen sie|markieren sie|completez|complétez|choisissez|associez|ecoutez|écoutez)\b/i.test(text)) {
+  if (/lesen sie zuerst die anweisungen/i.test(text)) return "introInstruction";
+  if (/^(teil|part|section|abschnitt)\s*\d+\s*(\||-|:)/i.test(text)) return "sectionTitle";
+
+  if (/^(anweisung|instructions?|directions?|aufgabe|consigne)\b/i.test(text)) {
     return "instruction";
   }
 
-  if (/^(teil|part|section|abschnitt)\s*\d+\b/i.test(text)) return index === 0 ? "sectionTitle" : "subtitle";
+  if (/^(lisez|lesen sie|hoeren sie|horen sie|schreiben sie|waehlen sie|wahlen sie|kreuzen sie|ordnen sie|markieren sie|completez|choisissez|associez|ecoutez)\b/i.test(text)) {
+    return "body";
+  }
+
+  if (/^(teil|part|section|abschnitt)\s*\d+\b/i.test(text)) return "sectionTitle";
   if (/^(quelle|source|text|texte|transkript|transcript|situation|scenario|szenario)\b\s*:?\s*/i.test(text)) return "subtitle";
-  if (/^[A-ZÄÖÜ][\p{L}\p{N}\s'’().,:-]{2,72}:$/u.test(text)) return "subtitle";
-  if (total > 1 && index === 0 && text.length <= 90 && !/[?؟]$/.test(text)) return "sectionTitle";
+  if (/^[A-Z][\p{L}\p{N}\s'().,:-]{2,72}:$/u.test(text)) return "subtitle";
+  if (total > 1 && index === 0 && text.length <= 90 && !/[.!?]$/.test(text)) return "sectionTitle";
   if (text.length <= 56 && !/[.!?]$/.test(text)) return "subtitle";
 
   return "body";
@@ -2665,7 +2672,21 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             }
             const blockType = lines.length === 1
               ? classifyExamTextLine(lines[0], index, blocks.length)
-              : "instruction";
+              : null;
+            if (!blockType) {
+              return (
+                <div key={`${part?.id ?? "part"}-${index}`} className={styles.examTextGroup}>
+                  {lines.map((line, lineIndex) => {
+                    const lineType = classifyExamTextLine(line, lineIndex, lines.length);
+                    return (
+                      <p key={`${line}-${lineIndex}`} className={styles[`examText${lineType[0].toUpperCase()}${lineType.slice(1)}`]} translate="no">
+                        {line}
+                      </p>
+                    );
+                  })}
+                </div>
+              );
+            }
             return (
               <p key={`${part?.id ?? "part"}-${index}`} className={styles[`examText${blockType[0].toUpperCase()}${blockType.slice(1)}`]} translate="no">
                 {block}
@@ -2739,7 +2760,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
         <div>
           <p className={styles.sectionLabel}>Teil {currentPart?.number ?? currentPartIndex + 1}</p>
           <h2>{currentPart?.displayTitle ?? "Einleitung zum Teil"}</h2>
-          <p>
+          <p className={styles.examTextIntroInstruction}>
             Lesen Sie zuerst die Anweisungen und das Quellenmaterial. Wenn Sie bereit sind, starten Sie die Fragen dieses Teils.
           </p>
         </div>
