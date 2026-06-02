@@ -10,6 +10,7 @@ import BackButton from "../components/BackButton";
 import { languageOptions } from "../utils/language";
 import { useLanguage } from "../context/LanguageContext";
 import { clearAuthSession, isLoggedIn } from "../utils/access";
+import { useSimulationLanguage } from "../utils/simulationLanguage";
 import { examSimulations } from "../data/siteContent";
 import { fetchImportedSeries, hasPlayableImportedSeries } from "../services/importedExams";
 import API from "../services/api";
@@ -110,7 +111,7 @@ export const SimulationTopNav = ({ onGoHome, onGoAbout, onGoProfile, onGoDashboa
 
       <div className={styles.navRight}>
         <div className={styles.dropdown}>
-          <button className={styles.langButton} aria-label="Changer de langue" type="button" onClick={() => setOpenLang((v) => !v)}>
+          <button className={styles.langButton} aria-label="Sprache wechseln" type="button" onClick={() => setOpenLang((v) => !v)}>
             {selectedLanguage.flag ? <img src={selectedLanguage.flag} alt={selectedLanguage.label} className={styles.flagIcon} /> : <span className={styles.flagFallback}>🌐</span>}
               <span>{language.toUpperCase()}</span>
             <ChevronIcon />
@@ -135,7 +136,7 @@ export const SimulationTopNav = ({ onGoHome, onGoAbout, onGoProfile, onGoDashboa
           ) : null}
         </div>
         {loggedIn ? (
-          <button className={styles.profileButton} aria-label="Profil utilisateur" type="button" onClick={onGoProfile}>
+          <button className={styles.profileButton} aria-label="Benutzerprofil" type="button" onClick={onGoProfile}>
             <div className={styles.userAvatar}>
               <img src={userIcon} alt="" />
             </div>
@@ -174,7 +175,7 @@ export const SimulationDisciplineCard = ({
   >
     {badge ? <span className={styles.cardBadge}>{badge}</span> : null}
     <div className={styles.cardIconWrapper}>
-      {iconNode ? iconNode : <img src={iconPath} alt={`Icone ${title}`} className={styles.cardIcon} />}
+      {iconNode ? iconNode : <img src={iconPath} alt={`Symbol ${title}`} className={styles.cardIcon} />}
     </div>
     <h3 className={styles.cardTitle}>{title}</h3>
     <div className={styles.cardStats}>
@@ -197,14 +198,14 @@ export const StartConfirmationModal = ({
   moduleType,
   questionCount,
   durationMinutes,
-  cancelLabel = "Annuler",
-  startLabel = "Commencer",
+  cancelLabel = "Abbrechen",
+  startLabel = "Beginnen",
   busy = false,
   onCancel,
   onStart,
 }) => {
-  const safeModuleType = moduleType || moduleTitle || "ce module";
-  const safeExamType = examType || examName || "cet examen";
+  const safeModuleType = moduleType || moduleTitle || "dieses Modul";
+  const safeExamType = examType || examName || "diese Pruefung";
   const safeQuestionCount = Math.max(0, Math.round(Number(questionCount) || 0));
   const safeDuration = Math.max(0, Math.round(Number(durationMinutes) || 0));
 
@@ -215,6 +216,38 @@ export const StartConfirmationModal = ({
   const handleStart = () => {
     if (!busy) onStart?.();
   };
+
+  if (safeQuestionCount >= 0) {
+    return (
+      <div className={styles.modalOverlay} role="presentation">
+        <section
+          className={styles.confirmModal}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="start-confirm-title"
+          aria-describedby="start-confirm-description"
+          aria-busy={busy ? "true" : "false"}
+        >
+          <h2 id="start-confirm-title">Testbeginn</h2>
+          <p id="start-confirm-description" className={styles.modalBody}>
+            Sie beginnen gleich einen Test im Modul {safeModuleType} fuer die Pruefung {safeExamType}. Er enthaelt {safeQuestionCount} Fragen und dauert genau {safeDuration} Minuten.
+          </p>
+          <p className={styles.modalBody}>
+            Lesen Sie die Fragen und Anweisungen sorgfaeltig, bevor Sie antworten.
+          </p>
+          <p className={styles.modalConfirmation}>SIND SIE BEREIT ZU BEGINNEN?</p>
+          <div className={styles.modalActions}>
+            <button type="button" className={styles.modalCancelButton} onClick={handleCancel} disabled={busy}>
+              {cancelLabel}
+            </button>
+            <button type="button" className={styles.modalStartButton} onClick={handleStart} disabled={busy}>
+              {startLabel}
+            </button>
+          </div>
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className={styles.modalOverlay} role="presentation">
@@ -249,7 +282,7 @@ export const StartConfirmationModal = ({
 
 export default function SimulationSelectionPage() {
   const navigate = useNavigate();
-  const { t } = useLanguage();
+  const t = useSimulationLanguage();
   const [availability, setAvailability] = useState({});
   const logout = async () => {
     try {
@@ -296,8 +329,12 @@ export default function SimulationSelectionPage() {
       <main className={styles.mainContent}>
         <BackButton fallback="/dashboard" />
         <header className={styles.headerSection}>
-          <h1 className={styles.title}>Choisissez votre test</h1>
+          <h1 className={styles.title}>Waehlen Sie Ihren Test</h1>
           <p className={styles.subtitle}>
+            Waehlen Sie Goethe, TestDaF, DSH oder telc. Kostenlose Serien bleiben offen,
+            Premium-Serien sind ohne Vollzugriff gesperrt.
+          </p>
+          <p className={styles.subtitle} hidden>
             Sélectionnez Goethe, TestDaF, DSH ou telc. Les séries gratuites restent ouvertes,
             les séries premium sont verrouillées sans accès complet.
           </p>
@@ -325,13 +362,13 @@ export default function SimulationSelectionPage() {
                     key={exam.id}
                     iconNode={<OpenBookIcon />}
                     title={exam.name}
-                    time={available ? 240 : "Soon"}
+                    time={available ? 240 : "Bald"}
                     questions={available ? questions || 0 : 0}
                     accent={exam.accent}
-                    badge={isChecking ? "Checking" : available ? "Available" : "Coming Soon"}
+                    badge={isChecking ? "Pruefung laeuft" : available ? "Verfuegbar" : "Demnaechst"}
                     unavailable={!isChecking && !available}
                     minuteLabel={available ? t.simulations.minutes : ""}
-                    questionLabel={available ? t.simulations.questions : "questions"}
+                    questionLabel={available ? t.simulations.questions : "Fragen"}
                     onClick={() => {
                       if (isChecking) return;
                       navigate(available ? exam.path : `/coming-soon/${exam.id}`);

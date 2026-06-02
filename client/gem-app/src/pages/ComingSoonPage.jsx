@@ -4,8 +4,10 @@ import "./SimplePages.css";
 import logo from "../assets/images/logo.png";
 import { examSimulations } from "../data/siteContent";
 import { isLoggedIn } from "../utils/access";
+import { useSimulationLanguage } from "../utils/simulationLanguage";
 
 export default function ComingSoonPage({ examId: examIdProp, title }) {
+  useSimulationLanguage();
   const params = useParams();
   const examId = examIdProp ?? params.examId;
   const exam = examSimulations.find((item) => item.id === examId);
@@ -21,7 +23,7 @@ export default function ComingSoonPage({ examId: examIdProp, title }) {
             Deutsch Learning
           </Link>
           <Link className="simple-home-link" to={loggedIn ? "/simulations" : "/"}>
-            {loggedIn ? "Back to tests" : "Home"}
+            {loggedIn ? "Zurueck zu den Tests" : "Startseite"}
           </Link>
         </div>
 
@@ -29,19 +31,19 @@ export default function ComingSoonPage({ examId: examIdProp, title }) {
           <span className="coming-soon-icon">
             <Sparkles size={26} />
           </span>
-          <p className="simple-eyebrow">Coming Soon</p>
-          <h1>{title ?? `${exam?.name ?? "This test type"} is not yet available`}</h1>
+          <p className="simple-eyebrow">Demnaechst</p>
+          <h1>{title ?? `${exam?.name ?? "Diese Testart"} ist noch nicht verfuegbar`}</h1>
           <p>
-            We are currently preparing real questions for this section. It will open automatically
-            once validated content is available in the database.
+            Wir bereiten gerade echte Fragen fuer diesen Bereich vor. Er wird automatisch geoeffnet,
+            sobald gepruefte Inhalte in der Datenbank verfuegbar sind.
           </p>
-          <div className="coming-soon-details" aria-label="Availability details">
-            <span><Database size={16} /> No active question set found</span>
-            <span><Clock3 size={16} /> Content preparation in progress</span>
+          <div className="coming-soon-details" aria-label="Verfuegbarkeitsdetails">
+            <span><Database size={16} /> Kein aktiver Fragensatz gefunden</span>
+            <span><Clock3 size={16} /> Inhalt wird vorbereitet</span>
           </div>
           <div className="simple-actions">
             <Link className="simple-secondary-button" to={loggedIn ? "/simulations" : "/"}>
-              {loggedIn ? "Choose another test" : "Return home"}
+              {loggedIn ? "Anderen Test waehlen" : "Zur Startseite"}
             </Link>
           </div>
         </section>

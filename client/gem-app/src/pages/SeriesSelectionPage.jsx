@@ -8,8 +8,10 @@ import ComingSoonPage from "./ComingSoonPage";
 import { getExamSimulation } from "../data/testSeries";
 import { fetchImportedSeries, hasPlayableImportedSeries } from "../services/importedExams";
 import { canOpenSeries, isVisitorSeriesAttempt } from "../utils/access";
+import { useSimulationLanguage } from "../utils/simulationLanguage";
 
 export default function SeriesSelectionPage() {
+  useSimulationLanguage();
   const { examId } = useParams();
   const location = useLocation();
   const exam = getExamSimulation(examId);
@@ -37,7 +39,7 @@ export default function SeriesSelectionPage() {
   const series = importedSeries;
 
   if (!exam) {
-    return <NotFoundPage message="The test series you opened is not available." />;
+    return <NotFoundPage message="Die geoeffnete Testserie ist nicht verfuegbar." />;
   }
 
   if (!loadingImported && !hasPlayableImportedSeries(series)) {
@@ -53,20 +55,20 @@ export default function SeriesSelectionPage() {
             Deutsch Learning
           </Link>
           <Link className="simple-home-link" to="/">
-            Home
+            Startseite
           </Link>
         </div>
 
         <header className="simple-hero compact">
-          <p className="simple-eyebrow">Series selection</p>
-          <h1>{exam.name} series</h1>
-          <p>{loadingImported ? "Loading imported series..." : "Choose a series to continue."}</p>
+          <p className="simple-eyebrow">Serienauswahl</p>
+          <h1>{exam.name}-Serien</h1>
+          <p>{loadingImported ? "Importierte Serien werden geladen..." : "Waehlen Sie eine Serie, um fortzufahren."}</p>
         </header>
 
-        <section className="series-minimal-grid" aria-label={`${exam.name} series`}>
+        <section className="series-minimal-grid" aria-label={`${exam.name}-Serien`}>
           {loadingImported ? Array.from({ length: 6 }).map((_, index) => (
             <span className="series-box series-box-skeleton" key={index}>
-              <span className="series-box-name">Loading</span>
+              <span className="series-box-name">Laedt</span>
             </span>
           )) : series.map((item) => {
             const canOpen = canOpenSeries(item);
@@ -79,8 +81,8 @@ export default function SeriesSelectionPage() {
                 state={isVisitorSeriesAttempt(item) ? { visitorFreeAccess: true } : undefined}
                 aria-label={
                   canOpen
-                    ? `Open ${item.code}`
-                    : `${item.code} is locked. View offers to unlock premium series.`
+                    ? `${item.code} oeffnen`
+                    : `${item.code} ist gesperrt. Angebote ansehen, um Premium-Serien freizuschalten.`
                 }
               >
                 <span className="series-box-name">{item.code}</span>

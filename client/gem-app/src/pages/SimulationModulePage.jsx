@@ -37,11 +37,11 @@ import API from "../services/api";
 import styles from "./SimulationModulePage.module.css";
 import logo from "../assets/images/logo.png";
 import speakingImage from "../assets/images/active_people.png";
-import { getTranslations } from "../context/LanguageContext";
 import { fetchImportedSeriesModule } from "../services/importedExams";
 import { getProgressKey, upsertSimulationHistoryEntry } from "../utils/simulationHistory";
 import { canOpenSeries, getAuthUser, isVisitorSeriesAttempt } from "../utils/access";
 import { useTestProtection } from "../utils/testProtection";
+import { useSimulationLanguage } from "../utils/simulationLanguage";
 import SmoothedAudioPlayer from "../components/SmoothedAudioPlayer";
 import {
   SPEECH_START_DELAY_MS,
@@ -667,6 +667,232 @@ const germanSpeakingPrompts = {
   "speak-10": "Inwiefern veraendert eine neue Sprache die Art zu denken und zu handeln? Entwickeln Sie eine strukturierte Antwort.",
 };
 
+const GERMAN_TASK_COPY = {
+  "read-1": {
+    typeLabel: "Mehrfachauswahl",
+    question: "Welche wichtigste Aenderung wird im Text angekuendigt?",
+    options: [
+      { value: "a", label: "Die Bibliothek schliesst waehrend der Pruefungen." },
+      { value: "b", label: "Die Bibliothek bleibt an einigen Tagen laenger geoeffnet." },
+      { value: "c", label: "Die Bibliothek wird kostenpflichtig." },
+    ],
+    hint: "Achten Sie auf die Oeffnungszeiten in Absatz A.",
+    explanation: "Absatz A kuendigt Oeffnungszeiten bis 22 Uhr von Montag bis Donnerstag an.",
+  },
+  "read-2": {
+    typeLabel: "Richtig / Falsch",
+    question: "Das Erdgeschoss ist fuer ruhiges Arbeiten reserviert.",
+    hint: "Vergleichen Sie die beiden Bereiche in Absatz B.",
+    explanation: "Ruhiges Arbeiten findet im ersten Stock statt. Das Erdgeschoss ist fuer Gruppen vorgesehen.",
+  },
+  "read-3": {
+    typeLabel: "Lueckentext",
+    question: "Ergaenzen Sie: Die Anmeldung zu den Workshops erfolgt ueber die Plattform ____.",
+    hint: "Die Antwort steht am Ende von Absatz C.",
+    explanation: "Die genannte Plattform heisst Bibliothek Plus.",
+  },
+  "read-4": {
+    typeLabel: "Titel zuordnen",
+    question: "Ordnen Sie jedem Absatz seine Hauptidee zu.",
+    headings: ["Angepasste Arbeitsbereiche", "Laengerer Zugang", "Ein Unterstuetzungsprogramm"],
+    correct: {
+      A: "Laengerer Zugang",
+      B: "Angepasste Arbeitsbereiche",
+      C: "Ein Unterstuetzungsprogramm",
+    },
+    hint: "Suchen Sie zuerst das Schluesselwort jedes Absatzes.",
+    explanation: "Die Abschnitte behandeln nacheinander Oeffnungszeiten, Arbeitsbereiche und Workshops.",
+  },
+  "read-5": {
+    typeLabel: "Mehrfachauswahl",
+    question: "Warum aendert die Universitaet die Oeffnungszeiten?",
+    options: [
+      { value: "a", label: "Um auf die Beduerfnisse der Studierenden zu reagieren." },
+      { value: "b", label: "Um Personalkosten zu senken." },
+      { value: "c", label: "Um Abendkurse zu ersetzen." },
+    ],
+    hint: "Die Begruendung steht im zweiten Satz von Absatz A.",
+    explanation: "Der Text nennt eine haeufige Bitte von Studierenden als Grund.",
+  },
+  "read-6": {
+    typeLabel: "Richtig / Falsch",
+    question: "Gruppenraeume koennen online reserviert werden.",
+    hint: "Lesen Sie Absatz B noch einmal.",
+    explanation: "Der Text sagt, dass Raeume online fuer zwei Stunden gebucht werden koennen.",
+  },
+  "read-7": {
+    typeLabel: "Lueckentext",
+    question: "Nach 19 Uhr koennen Studierende Buecher in eine ____ Rueckgabebox legen.",
+    correct: "automatische",
+    alternatives: ["automatische", "automatisch"],
+    hint: "Die Einschraenkung und die Alternative stehen in Absatz D.",
+    explanation: "Die Rueckgabebox ist automatisch und befindet sich nahe am Haupteingang.",
+  },
+  "read-8": {
+    typeLabel: "Mehrfachauswahl",
+    question: "Welche wichtige Einschraenkung gibt es bei der Ausleihe?",
+    options: [
+      { value: "a", label: "Die Ausleihe laeuft die ganze Nacht weiter." },
+      { value: "b", label: "Die Ausleihe ist nach 19 Uhr geschlossen, Rueckgaben bleiben aber moeglich." },
+      { value: "c", label: "Rueckgaben sind nach 19 Uhr verboten." },
+    ],
+    hint: "Absatz D stellt eine Grenze und eine Moeglichkeit gegenueber.",
+    explanation: "Die Ausleihe schliesst nach 19 Uhr, aber Rueckgaben ueber die Box bleiben moeglich.",
+  },
+  "read-9": {
+    typeLabel: "Titel zuordnen",
+    question: "Welcher Titel passt am besten zu den Absaetzen B, C und D?",
+    headings: ["Organisation der Raeume", "Paedagogische Angebote", "Praktische Einschraenkungen"],
+    correct: {
+      B: "Organisation der Raeume",
+      C: "Paedagogische Angebote",
+      D: "Praktische Einschraenkungen",
+    },
+    hint: "Fassen Sie jeden Absatz zuerst in zwei Woertern zusammen.",
+    explanation: "B beschreibt die Raeume, C die Workshops und D die Grenzen des Services.",
+  },
+  "read-10": {
+    typeLabel: "Mehrfachauswahl",
+    question: "Welcher Ton kennzeichnet die Ankuendigung insgesamt?",
+    options: [
+      { value: "a", label: "Informativ mit einigen praktischen Bedingungen." },
+      { value: "b", label: "Kritisch und ironisch." },
+      { value: "c", label: "Werblich ohne konkrete Details." },
+    ],
+    hint: "Beachten Sie die Struktur: Ankuendigung, Regeln, Grenzen.",
+    explanation: "Die Ankuendigung gibt konkrete Informationen und nennt praktische Einschraenkungen.",
+  },
+  "listen-1": {
+    typeLabel: "Mehrfachauswahl",
+    question: "Wo findet die Ansage statt?",
+    options: [
+      { value: "a", label: "In einem Bahnhof." },
+      { value: "b", label: "In einer Bibliothek." },
+      { value: "c", label: "In einem Restaurant." },
+    ],
+    hint: "Hoeren Sie auf Woerter zum Verkehr.",
+    explanation: "Die Ansage spricht von einem Zug, einem Gleis und Reisenden.",
+  },
+  "listen-2": {
+    typeLabel: "Fehlendes Wort",
+    question: "Der Zug nach Berlin faehrt von Gleis ____ ab.",
+    correct: "7",
+    alternatives: ["sieben"],
+    hint: "Die Zahl wird nach dem Gleiswechsel genannt.",
+    explanation: "Die Ansage nennt Gleis 7.",
+  },
+  "listen-3": {
+    typeLabel: "Richtig / Falsch",
+    question: "Der Zug hat ungefaehr fuenfzehn Minuten Verspaetung.",
+    hint: "Achten Sie auf die Zeitangabe.",
+    explanation: "Die Ansage nennt eine Verspaetung von ungefaehr fuenfzehn Minuten.",
+  },
+  "listen-4": {
+    typeLabel: "In die richtige Reihenfolge bringen",
+    question: "Bringen Sie die Ereignisse in die gehoerte Reihenfolge.",
+    events: [
+      { value: "change", label: "Gleiswechsel" },
+      { value: "delay", label: "Ansage der Verspaetung" },
+      { value: "coffee", label: "Hinweis fuer Reisende" },
+    ],
+    hint: "Achten Sie auf Signalwoerter wie zuerst, danach und schliesslich.",
+    explanation: "Zuerst kommt der Gleiswechsel, dann die Verspaetung, danach der Hinweis zum Warten.",
+  },
+  "listen-5": {
+    typeLabel: "Mehrfachauswahl",
+    question: "Warum sollen die Reisenden aufmerksam bleiben?",
+    options: [
+      { value: "a", label: "Das Gleis koennte sich erneut aendern." },
+      { value: "b", label: "Die Fahrkarten sind nicht mehr gueltig." },
+      { value: "c", label: "Der Zug faellt aus." },
+    ],
+    hint: "Hoeren Sie die letzte Empfehlung.",
+    explanation: "Die Ansage bittet die Reisenden, die Anzeigen weiter zu beobachten.",
+  },
+  "listen-6": {
+    typeLabel: "Fehlendes Wort",
+    question: "Die Reisenden koennen auf der unteren Ebene in der Naehe des ____ warten.",
+    correct: "Cafes",
+    alternatives: ["cafe", "cafes", "café", "cafés"],
+    hint: "Der Ort wird nach dem praktischen Hinweis genannt.",
+    explanation: "Das Cafe auf der unteren Ebene wird als Warteort genannt.",
+  },
+  "listen-7": {
+    typeLabel: "Mehrfachauswahl",
+    question: "Welche Information wird in der Ansage nicht genannt?",
+    options: [
+      { value: "a", label: "Das neue Gleis." },
+      { value: "b", label: "Die genaue Ursache der Verspaetung." },
+      { value: "c", label: "Das Ziel des Zuges." },
+    ],
+    hint: "Unterscheiden Sie genannte Fakten von fehlenden Gruenden.",
+    explanation: "Die Ansage nennt Gleis und Ziel, aber nicht die genaue Ursache der Verspaetung.",
+  },
+  "listen-8": {
+    typeLabel: "Richtig / Falsch",
+    question: "Die Reisenden sollen sofort zu einem Schalter gehen.",
+    hint: "Der Hinweis betrifft vor allem das Warten und die Anzeigen.",
+    explanation: "In der Ansage wird kein Gang zum Schalter verlangt.",
+  },
+  "listen-9": {
+    typeLabel: "In die richtige Reihenfolge bringen",
+    question: "Ordnen Sie diese Informationen nach ihrer Bedeutung in der Ansage.",
+    events: [
+      { value: "platform", label: "Neues Gleis" },
+      { value: "delay", label: "Voraussichtliche Verspaetung" },
+      { value: "screens", label: "Anzeigen beobachten" },
+    ],
+    hint: "Die wichtigste Information hilft, den Zug nicht zu verpassen.",
+    explanation: "Das neue Gleis ist am wichtigsten, danach folgen Verspaetung und Beobachtung der Anzeigen.",
+  },
+  "listen-10": {
+    typeLabel: "Mehrfachauswahl",
+    question: "Welches Register beschreibt die Ansage am besten?",
+    options: [
+      { value: "a", label: "Formal, kurz und funktional." },
+      { value: "b", label: "Umgangssprachlich und humorvoll." },
+      { value: "c", label: "Erzaehlend und persoenlich." },
+    ],
+    hint: "Oeffentliche Ansagen nutzen oft direkte Formulierungen.",
+    explanation: "Die Ansage vermittelt praktische Informationen in einem formalen Register.",
+  },
+  "write-1": { typeLabel: "Kurze E-Mail", title: "Eine Information erfragen", register: "formell", prompt: germanWritingPrompts["write-1"], criteria: ["Anrede", "drei klare Fragen", "Grussformel"] },
+  "write-2": { typeLabel: "Persoenliche Nachricht", title: "Einen Freund einladen", register: "informell", prompt: germanWritingPrompts["write-2"], criteria: ["natuerlicher Ton", "Datum oder Zeitpunkt", "zwei Aktivitaeten"] },
+  "write-3": { typeLabel: "Praktische E-Mail", title: "Einen Termin verschieben", register: "formell", prompt: germanWritingPrompts["write-3"], criteria: ["Entschuldigung", "einfacher Grund", "zwei Vorschlaege"] },
+  "write-4": { typeLabel: "Kurze Stellungnahme", title: "Online lernen", register: "neutral", prompt: germanWritingPrompts["write-4"], criteria: ["klare Meinung", "Konnektoren", "persoenliches Beispiel"] },
+  "write-5": { typeLabel: "Beschwerde-E-Mail", title: "Wohnungsproblem", register: "formell", prompt: germanWritingPrompts["write-5"], criteria: ["praezise Beschreibung", "klare Bitte", "hoefliches Register"] },
+  "write-6": { typeLabel: "Strukturierter Aufsatz", title: "Oeffentliche Verkehrsmittel", register: "neutral", prompt: germanWritingPrompts["write-6"], criteria: ["Einleitung", "ausgewogene Argumente", "Schluss"] },
+  "write-7": { typeLabel: "Meinungsartikel", title: "Arbeit und Studium", register: "neutral", prompt: germanWritingPrompts["write-7"], criteria: ["Nuance", "Beispiele", "Empfehlung"] },
+  "write-8": { typeLabel: "Argumentation", title: "Kuenstliche Intelligenz", register: "formell", prompt: germanWritingPrompts["write-8"], criteria: ["Problemstellung", "komplexe Argumente", "praeziser Wortschatz"] },
+  "write-9": { typeLabel: "Synthese", title: "Universitaetsleben", register: "formell", prompt: germanWritingPrompts["write-9"], criteria: ["Synthese", "klare Struktur", "konkrete Massnahmen"] },
+  "write-10": { typeLabel: "Fortgeschrittener Aufsatz", title: "Internationale Mobilitaet", register: "formell", prompt: germanWritingPrompts["write-10"], criteria: ["nuancierte These", "sichere Abstraktion", "passende Beispiele"] },
+  "speak-1": { typeLabel: "Bild beschreiben", title: "Alltagsszene", prompt: germanSpeakingPrompts["speak-1"], checklist: ["Ort", "Personen", "Handlungen"] },
+  "speak-2": { typeLabel: "Persoenliche Frage", title: "Sich vorstellen", prompt: germanSpeakingPrompts["speak-2"], checklist: ["Identitaet", "Taetigkeit", "Ziel"] },
+  "speak-3": { typeLabel: "Rollenspiel", title: "Am Empfang", prompt: germanSpeakingPrompts["speak-3"], checklist: ["Begruessung", "drei Bitten", "Dank"] },
+  "speak-4": { typeLabel: "Kurze Meinung", title: "Abends lernen", prompt: germanSpeakingPrompts["speak-4"], checklist: ["Meinung", "zwei Gruende", "Konnektoren"] },
+  "speak-5": { typeLabel: "Erfahrung beschreiben", title: "Eine Reise", prompt: germanSpeakingPrompts["speak-5"], checklist: ["Vergangenheit", "chronologische Ordnung", "Fazit"] },
+  "speak-6": { typeLabel: "Vergleichen", title: "Stadt oder Land", prompt: germanSpeakingPrompts["speak-6"], checklist: ["Vergleich", "Beispiel", "Praeferenz"] },
+  "speak-7": { typeLabel: "Fortgeschrittenes Rollenspiel", title: "Einen Kompromiss finden", prompt: germanSpeakingPrompts["speak-7"], checklist: ["Problem", "hoeflicher Ton", "Loesung"] },
+  "speak-8": { typeLabel: "Abstraktes Thema", title: "Lebenslanges Lernen", prompt: germanSpeakingPrompts["speak-8"], checklist: ["abstraktes Argument", "Beispiel", "Schluss"] },
+  "speak-9": { typeLabel: "Reagieren", title: "Homeoffice", prompt: germanSpeakingPrompts["speak-9"], checklist: ["Position", "Nuance", "Gegenbeispiel"] },
+  "speak-10": { typeLabel: "Muendliche Argumentation", title: "Identitaet und Sprache", prompt: germanSpeakingPrompts["speak-10"], checklist: ["These", "Abstraktion", "Struktur"] },
+};
+
+const withGermanTaskCopy = (tasks) =>
+  tasks.map((task) => {
+    const copy = GERMAN_TASK_COPY[task.id] ?? {};
+    return {
+      ...task,
+      ...copy,
+      options: copy.options ?? task.options,
+      headings: copy.headings ?? task.headings,
+      events: copy.events ?? task.events,
+      criteria: copy.criteria ?? task.criteria,
+      checklist: copy.checklist ?? task.checklist,
+      alternatives: copy.alternatives ?? task.alternatives,
+    };
+  });
+
 const withGermanPrompts = (tasks, promptMap) =>
   tasks.map((task) => ({
     ...task,
@@ -758,6 +984,46 @@ const MODULES = {
     ],
   },
 };
+
+const GERMAN_MODULE_OVERRIDES = {
+  read: {
+    title: "Leseverstehen",
+    eyebrow: "Aktives Lesen",
+    tasks: withGermanTaskCopy(readingTasks),
+    focus: ["Informationen finden", "Richtig/Falsch", "Titel zuordnen", "Wortschatz im Kontext"],
+    advancement: ["Laengere Texte", "Weniger transparenter Wortschatz", "Inferenzfragen", "Kuerzere Lesezeit"],
+  },
+  listen: {
+    title: "Hoerverstehen",
+    eyebrow: "Aktives Hoeren",
+    tasks: withGermanTaskCopy(listeningTasks),
+    audio: {
+      ...MODULES.listen.audio,
+      title: "Ansage im Bahnhof",
+      speaker: "Standarddeutsch, moderates Tempo",
+    },
+    focus: ["Notizen machen", "Zahlenangaben", "Reihenfolge der Ereignisse", "Akzente und Tempo"],
+    advancement: ["Schnelleres Tempo", "Regionale Akzente", "Laengere Audioaufnahmen", "Weniger Wiederholungen"],
+  },
+  write: {
+    title: "Schriftlicher Ausdruck",
+    eyebrow: "Strukturierte Produktion",
+    tasks: withGermanTaskCopy(writingTasks),
+    focus: ["Klarer Plan", "Passendes Register", "Konnektoren", "Grammatische Korrektheit"],
+    advancement: ["Abstraktere Themen", "Hoehere Wortgrenzen", "Formelles Register", "Nuancierte Argumentation"],
+  },
+  speak: {
+    title: "Muendlicher Ausdruck",
+    eyebrow: "Sprechen",
+    tasks: withGermanTaskCopy(speakingTasks),
+    focus: ["Aussprache", "Fluessigkeit", "Interaktion", "Gedanken ordnen"],
+    advancement: ["Laengere Antworten", "Kuerzere Vorbereitungszeit", "Abstraktere Themen", "Spontanere Nachfragen"],
+  },
+};
+
+Object.entries(GERMAN_MODULE_OVERRIDES).forEach(([moduleId, override]) => {
+  MODULES[moduleId] = { ...MODULES[moduleId], ...override };
+});
 
 const TRUE_FALSE_OPTIONS = [
   { value: "true", label: "Richtig" },
@@ -854,7 +1120,36 @@ const formatExamTime = (seconds) => {
 };
 
 const formatClock = (date = new Date()) =>
-  date.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  date.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+
+const extractTime = (value) => String(value ?? "").match(/\d{2}:\d{2}/)?.[0] ?? formatClock();
+
+const toGermanStatus = (value) => {
+  const text = String(value ?? "");
+  if (!text) return "";
+
+  if (text.includes("Mode visiteur")) return "Besuchermodus: Der Fortschritt wird nicht gespeichert.";
+  if (text.includes("Dern")) return `Letzte Speicherung ${extractTime(text)}`;
+  if (text.includes("Auto-sauveg")) return `Automatisch gespeichert um ${extractTime(text)}`;
+  if (text.includes("Sauvegarde locale impossible")) return "Lokale Speicherung nicht moeglich: Der Browserspeicher ist voll.";
+  if (text.includes("Sauvegarde locale pr")) return "Lokale Speicherung bereit.";
+  if (text.includes("Sauvegard")) return `Gespeichert um ${extractTime(text)}`;
+  if (text.includes("Sauvegarde locale pr")) return "Lokale Speicherung bereit.";
+  if (text.includes("Sauvegarde locale impossible")) return "Lokale Speicherung nicht moeglich: Der Browserspeicher ist voll.";
+  if (text.includes("Simulation d")) return "Simulation gestartet: Die Navigation ist gesperrt.";
+  if (text.includes("Limite de 5")) return "Die Grenze von 5 Hoerdurchgaengen ist fuer dieses Modul erreicht.";
+  if (text.includes("synth")) return "Die Sprachausgabe ist in diesem Browser nicht verfuegbar.";
+  if (text.includes("lecture audio")) return "Die Audiowiedergabe ist auf diesem Geraet fehlgeschlagen. Pruefen Sie die Lautstaerke und erlauben Sie die Sprachausgabe im Browser.";
+  if (text.includes("brouillon est vide")) return "Der Entwurf ist leer.";
+  if (text.includes("Brouillon")) return `Entwurf gespeichert um ${extractTime(text)}`;
+  if (text.includes("Micro non disponible")) return "Mikrofon nicht verfuegbar: Stattdessen wird der Trainingstimer verwendet.";
+  if (text.includes("Autorisation micro")) return "Mikrofonberechtigung verweigert: Der Trainingstimer wird verwendet.";
+  if (text.includes("Connectez-vous")) return "Ergebnis lokal gespeichert. Melden Sie sich an, um es dem Dashboard hinzuzufuegen.";
+  if (text.includes("dashboard")) return "Ergebnis im Dashboard gespeichert.";
+  if (text.includes("backend")) return "Ergebnis lokal gespeichert. Das Backend ist im Moment nicht erreichbar.";
+
+  return text;
+};
 
 const countWords = (text) => {
   const words = String(text ?? "").trim().match(/\S+/g);
@@ -1004,7 +1299,7 @@ const buildExamParts = (module) => {
     .map((part, index) => ({
       ...part,
       number: part.number || index + 1,
-      displayTitle: `Part ${part.number || index + 1} - ${String(part.title || "").replace(/^Teil\s+\d+\s*:?\s*/i, "") || "Instructions"}`,
+      displayTitle: `Teil ${part.number || index + 1} - ${String(part.title || "").replace(/^Teil\s+\d+\s*:?\s*/i, "") || "Anweisungen"}`,
       sourceText: stripQuestionMaterial(part.instructions, part.taskIndexes.map((taskIndex) => module.tasks[taskIndex])),
       firstIndex: part.taskIndexes[0],
       lastIndex: part.taskIndexes[part.taskIndexes.length - 1],
@@ -1090,6 +1385,23 @@ const getWritingSuggestions = (task, text) => {
   const words = countWords(text);
   const suggestions = [];
 
+  const germanSuggestions = [];
+  if (words < task.minWords) {
+    germanSuggestions.push(`Fuegen Sie etwa ${task.minWords - words} Woerter hinzu, um das erwartete Minimum zu erreichen.`);
+  }
+  if (!/(weil|deshalb|auÃŸerdem|jedoch|trotzdem|zum beispiel|daher|einerseits|andererseits)/i.test(text)) {
+    germanSuggestions.push("Fuegen Sie mindestens einen deutschen Konnektor ein, damit der Text fluessiger wird.");
+  }
+  if (task.register === "formell" && !/(Sehr geehrte|Mit freundlichen GrÃ¼ÃŸen|bitte|wÃ¼rde)/i.test(text)) {
+    germanSuggestions.push("Staerken Sie das formelle Register mit einer passenden Anrede und Schlussformel.");
+  }
+  if ((text.match(/\bich\b/gi) ?? []).length > 6) {
+    germanSuggestions.push("Variieren Sie die Satzstruktur, damit nicht zu viele Saetze mit ich beginnen.");
+  }
+  if (task?.id) {
+    return germanSuggestions.length ? germanSuggestions : ["Klare Struktur. Pruefen Sie jetzt die konjugierten Verben und die Deklinationen."];
+  }
+
   if (words < task.minWords) {
     suggestions.push(`Ajoutez environ ${task.minWords - words} mots pour atteindre le minimum attendu.`);
   }
@@ -1141,10 +1453,10 @@ const buildSeriesTask = (moduleId, task, index, content, series) => {
     ...task,
     ...override,
     id: `${series.examId}-${series.id}-${moduleId}-${task.id}`,
-    hint: override.hint ?? `Use the ${series.code} context: ${content.theme}.`,
+    hint: override.hint ?? `Nutzen Sie den Kontext der Serie ${series.code}: ${content.theme}.`,
     explanation:
       override.explanation ??
-      `This answer is linked to ${series.examName} ${series.code}, whose theme is ${content.theme}.`,
+      `Diese Antwort gehoert zu ${series.examName} ${series.code}; das Thema ist ${content.theme}.`,
   };
 
   if (moduleId === "write") {
@@ -1170,7 +1482,7 @@ const buildSeriesTask = (moduleId, task, index, content, series) => {
       ...base,
       question:
         override.question ??
-        `In ${series.code}, what is the main topic for this ${content.shortLabel.toLowerCase()} task?`,
+        `Was ist in ${series.code} das Hauptthema dieser Aufgabe?`,
       options: [
         { value: "a", label: "Das zentrale Thema dieser Aufgabe." },
         { value: "b", label: "Ein Rezept fuer den Urlaub." },
@@ -1185,7 +1497,7 @@ const buildSeriesTask = (moduleId, task, index, content, series) => {
       ...base,
       question:
         override.question ??
-        `${series.code} belongs to ${series.examName} and uses the theme ${content.theme}.`,
+        `${series.code} gehoert zu ${series.examName} und nutzt das Thema ${content.theme}.`,
       correct: override.correct ?? "true",
     };
   }
@@ -1195,7 +1507,7 @@ const buildSeriesTask = (moduleId, task, index, content, series) => {
       ...base,
       question:
         override.question ??
-        `Complete the sentence: This exercise set is called ____.`,
+        `Ergaenzen Sie den Satz: Diese Aufgabenserie heisst ____.`,
       correct: override.correct ?? series.code,
       alternatives: override.alternatives ?? [series.id, series.code.toLowerCase()],
     };
@@ -1213,7 +1525,7 @@ const buildSeriesTask = (moduleId, task, index, content, series) => {
       ...base,
       question:
         override.question ??
-        `Match each item to the correct ${series.code} series heading.`,
+        `Ordnen Sie jedes Element der passenden Ueberschrift aus ${series.code} zu.`,
       paragraphs,
       headings,
       correct: Object.fromEntries(paragraphs.map((paragraph, paragraphIndex) => [paragraph, headings[paragraphIndex]])),
@@ -1230,7 +1542,7 @@ const buildSeriesTask = (moduleId, task, index, content, series) => {
       ...base,
       question:
         override.question ??
-        `Put the ${series.code} listening steps in the best order.`,
+        `Bringen Sie die Hoerschritte aus ${series.code} in die passende Reihenfolge.`,
       events,
       correct: events.map((event) => event.value),
     };
@@ -1286,6 +1598,8 @@ const buildSeriesModule = (baseModule, content, series) => {
 };
 
 const stringifyAnswer = (value) => {
+  if (value == null || value === "") return "Keine Antwort";
+  if (Array.isArray(value)) return value.filter(Boolean).join(" > ") || "Keine Antwort";
   if (value == null || value === "") return "Aucune réponse";
   if (Array.isArray(value)) return value.filter(Boolean).join(" > ") || "Aucune réponse";
   if (typeof value === "object") {
@@ -1318,6 +1632,34 @@ const getCorrectLabel = (task) => {
 
 const buildResultSummary = (module, answers) => {
   const rows = module.tasks.map((task, index) => {
+    if (module.id === "write") {
+      const taskScore = evaluateWriting(task, answers[index]);
+      return {
+        id: task.id,
+        number: index + 1,
+        title: task.title ?? task.question,
+        typeLabel: task.typeLabel,
+        isCorrect: taskScore >= PASS_SCORE,
+        userAnswer: `${countWords(answers[index])} Woerter`,
+        correctAnswer: `Ziel: ${task.minWords}-${task.maxWords} Woerter`,
+        explanation: `Geschaetzte Punktzahl: ${taskScore}%`,
+      };
+    }
+
+    if (module.id === "speak") {
+      const taskScore = evaluateSpeaking(task, answers[index]);
+      return {
+        id: task.id,
+        number: index + 1,
+        title: task.title ?? task.question,
+        typeLabel: task.typeLabel,
+        isCorrect: taskScore >= PASS_SCORE,
+        userAnswer: answers[index]?.duration ? `${answers[index].duration}s` : "Keine Antwort",
+        correctAnswer: `Ziel: ${task.responseSeconds}s`,
+        explanation: `Geschaetzte Punktzahl: ${taskScore}%`,
+      };
+    }
+
     if (module.id === "write") {
       const taskScore = evaluateWriting(task, answers[index]);
       return {
@@ -1372,6 +1714,18 @@ function FeedbackBox({ task, answer }) {
 
   const correct = isAnswerCorrect(task, answer);
 
+  if (task?.id) {
+    return (
+      <div className={`${styles.feedbackBox} ${correct ? styles.feedbackCorrect : styles.feedbackWrong}`}>
+        {correct ? <CheckCircle2 size={20} /> : <XCircle size={20} />}
+        <div>
+          <strong>{correct ? "Richtig" : "Noch einmal pruefen"}</strong>
+          <p>{task.explanation}</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={`${styles.feedbackBox} ${correct ? styles.feedbackCorrect : styles.feedbackWrong}`}>
       {correct ? <CheckCircle2 size={20} /> : <XCircle size={20} />}
@@ -1385,7 +1739,7 @@ function FeedbackBox({ task, answer }) {
 
 export default function SimulationModulePage({ moduleIdOverride }) {
   useTestProtection();
-  const t = getTranslations("fr");
+  const t = useSimulationLanguage();
   const navigate = useNavigate();
   const location = useLocation();
   const params = useParams();
@@ -2284,27 +2638,28 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             return <p key={`${part?.id ?? "part"}-${index}`} translate="no">{block}</p>;
           })
         ) : (
-          <p translate="no">Les consignes de cette partie sont disponibles dans la question active.</p>
+          <p translate="no">Die Anweisungen fuer diesen Teil stehen in der aktiven Frage.</p>
         )}
       </div>
     );
   };
 
   const renderQuestionStepper = () => (
-    <div className={styles.stepNavigator} aria-label="Progression des questions">
+    <div className={styles.stepNavigator} aria-label="Fragenfortschritt">
       <div className={styles.stepNavigatorHeader}>
-        <span>Part {currentPart?.number ?? currentPartIndex + 1} of {Math.max(1, examParts.length)}</span>
+        <span>Teil {currentPart?.number ?? currentPartIndex + 1} von {Math.max(1, examParts.length)}</span>
         <strong>
-          Question {currentIndex + 1} of {totalTasks}
-          {currentPartQuestionTotal > 1 ? ` / Part question ${currentPartQuestionIndex + 1} of ${currentPartQuestionTotal}` : ""}
+          Frage {currentIndex + 1} von {totalTasks}
+          {currentPartQuestionTotal > 1 ? ` / Teilfrage ${currentPartQuestionIndex + 1} von ${currentPartQuestionTotal}` : ""}
         </strong>
       </div>
-      <div className={styles.stepDots} role="list" aria-label="Questions">
+      <div className={styles.stepDots} role="list" aria-label="Fragen">
         {module.tasks.map((task, index) => {
           const answered = getTaskAnswered(module, task, answers[index]);
           const isCurrent = index === currentIndex && !partIntroVisible;
           const isPartStart = examParts.some((part) => part.firstIndex === index);
           const state = isCurrent ? "current" : answered ? "completed" : index < currentIndex ? "visited" : "remaining";
+          const stateLabel = isCurrent ? "aktuell" : answered ? "abgeschlossen" : index < currentIndex ? "besucht" : "offen";
           return (
             <span
               key={task.id}
@@ -2313,7 +2668,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               data-state={state}
               data-part-start={isPartStart ? "true" : "false"}
               aria-current={isCurrent ? "step" : undefined}
-              aria-label={`Question ${index + 1}: ${state}`}
+              aria-label={`Frage ${index + 1}: ${stateLabel}`}
             >
               {index + 1}
             </span>
@@ -2327,14 +2682,14 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     <section className={styles.partIntroPanel}>
       <div className={styles.partIntroHeader}>
         <div>
-          <p className={styles.sectionLabel}>Part {currentPart?.number ?? currentPartIndex + 1}</p>
-          <h2>{currentPart?.displayTitle ?? "Part introduction"}</h2>
+          <p className={styles.sectionLabel}>Teil {currentPart?.number ?? currentPartIndex + 1}</p>
+          <h2>{currentPart?.displayTitle ?? "Einleitung zum Teil"}</h2>
           <p>
-            Read the instructions and source material first. When you are ready, start the questions for this part.
+            Lesen Sie zuerst die Anweisungen und das Quellenmaterial. Wenn Sie bereit sind, starten Sie die Fragen dieses Teils.
           </p>
         </div>
         <div className={styles.partMetaStack}>
-          <span><ClipboardCheck size={16} /> {currentPartQuestionTotal} question{currentPartQuestionTotal > 1 ? "s" : ""}</span>
+          <span><ClipboardCheck size={16} /> {currentPartQuestionTotal} Frage{currentPartQuestionTotal > 1 ? "n" : ""}</span>
           {currentPart?.durationMinutes ? <span><Clock3 size={16} /> {currentPart.durationMinutes} min</span> : null}
           {currentPart?.points ? <span><ShieldCheck size={16} /> {currentPart.points} pts</span> : null}
         </div>
@@ -2346,7 +2701,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
       <div className={styles.partIntroActions}>
         <button type="button" className={styles.primaryButton} onClick={startCurrentPart}>
-          Start Questions
+          Fragen starten
           <ChevronRight size={16} />
         </button>
       </div>
@@ -2381,6 +2736,92 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               </button>
             );
           })}
+        </div>
+      );
+    }
+
+    if (task.type === "blank") {
+      return (
+        <label className={styles.fieldLabel}>
+          Antwort
+          <input
+            className={styles.textInput}
+            value={answer ?? ""}
+            onChange={(event) => setAnswerForCurrent(event.target.value)}
+            placeholder="Geben Sie das Wort oder den Ausdruck ein"
+          />
+        </label>
+      );
+    }
+
+    if (task.type === "select") {
+      return (
+        <label className={styles.fieldLabel}>
+          Antwort
+          <select
+            className={styles.selectInput}
+            value={answer ?? ""}
+            onChange={(event) => setAnswerForCurrent(event.target.value)}
+          >
+            <option value="">Option waehlen</option>
+            {(task.options ?? []).map((option) => (
+              <option key={option.value} value={option.value} translate="no">
+                {getProtectedChoiceLabel(task, option)}
+              </option>
+            ))}
+          </select>
+        </label>
+      );
+    }
+
+    if (task.type === "match") {
+      const answerObject = answer ?? {};
+      return (
+        <div className={styles.matchGrid}>
+          {task.paragraphs.map((paragraphId) => (
+            <label key={paragraphId} className={styles.matchRow}>
+              <span>Abschnitt {paragraphId}</span>
+              <select
+                value={answerObject[paragraphId] ?? ""}
+                onChange={(event) => setAnswerForCurrent({ ...answerObject, [paragraphId]: event.target.value })}
+              >
+                <option value="">Titel waehlen</option>
+                {task.headings.map((heading, index) => (
+                  <option key={heading} value={heading} translate="no">
+                    {getProtectedChoiceLabel(task, heading, index)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ))}
+        </div>
+      );
+    }
+
+    if (task.type === "order") {
+      const orderedAnswer = Array.isArray(answer) ? answer : [];
+      return (
+        <div className={styles.orderGrid}>
+          {task.correct.map((_, index) => (
+            <label key={index} className={styles.matchRow}>
+              <span>Position {index + 1}</span>
+              <select
+                value={orderedAnswer[index] ?? ""}
+                onChange={(event) => {
+                  const nextAnswer = [...orderedAnswer];
+                  nextAnswer[index] = event.target.value;
+                  setAnswerForCurrent(nextAnswer);
+                }}
+              >
+                <option value="">Ereignis waehlen</option>
+                {task.events.map((event) => (
+                  <option key={event.value} value={event.value} translate="no">
+                    {getProtectedChoiceLabel(task, event)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ))}
         </div>
       );
     }
@@ -2479,7 +2920,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       <section className={styles.passagePane}>
         <div className={styles.sectionLabel}>
           <BookOpen size={18} />
-          Part {currentPart?.number ?? currentPartIndex + 1} source
+          Quelle Teil {currentPart?.number ?? currentPartIndex + 1}
         </div>
         <h2 translate="no">{currentPart?.displayTitle ?? module.passage.title}</h2>
         <p className={styles.introText} translate="no">{module.passage.intro}</p>
@@ -2488,7 +2929,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
       <section key={currentTask.id} className={styles.questionPane}>
         <div className={styles.questionTopline}>
-          <span className={styles.questionStep}>Question {currentIndex + 1} of {totalTasks}</span>
+          <span className={styles.questionStep}>Frage {currentIndex + 1} von {totalTasks}</span>
           <span>{currentTask.typeLabel}</span>
         </div>
         <h2>{currentTask.question}</h2>
@@ -2509,6 +2950,82 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     const audioProgressPercent = currentAudioDuration
       ? Math.min(100, (audioTimestamp / currentAudioDuration) * 100)
       : 0;
+
+    if (module.id === "listen") {
+      return (
+        <div className={styles.listeningLayout}>
+          <section className={styles.audioPanel}>
+            <div className={styles.audioHeader}>
+              <div>
+                <div className={styles.sectionLabel}>
+                  <Headphones size={18} />
+                  {module.audio.title}
+                </div>
+                <h2>{module.audio.speaker}</h2>
+              </div>
+              <div className={styles.replayBadge} data-blocked={audioReplayBlocked ? "true" : "false"}>
+                <Volume2 size={16} />
+                {replaysLeft} Hoerdurchgang{replaysLeft !== 1 ? "e" : ""} uebrig
+              </div>
+            </div>
+
+            <div className={styles.playerControls}>
+              <button
+                type="button"
+                className={styles.audioPlayButton}
+                data-playing={audioPlaying ? "true" : "false"}
+                data-blocked={audioReplayBlocked ? "true" : "false"}
+                style={{ "--audio-progress": `${audioProgressPercent}%` }}
+                onClick={audioPlaying ? pauseListeningAudio : playListeningAudio}
+                disabled={!audioPlaying && audioReplayBlocked}
+                aria-label={audioPlaying ? "Pause" : "Abspielen"}
+              >
+                {audioPlaying ? <Pause size={34} /> : <Play size={34} />}
+              </button>
+              <div className={styles.audioTimeline}>
+                <div className={styles.timelineMeta}>
+                  <span>{formatTime(audioTimestamp)}</span>
+                  <span>{formatTime(currentAudioDuration)}</span>
+                </div>
+                <div className={styles.timelineTrack}>
+                  <span style={{ width: `${audioProgressPercent}%` }} />
+                </div>
+              </div>
+              <button type="button" className={styles.iconButton} onClick={resetListeningAudio} disabled={audioReplayBlocked} aria-label="Zum Anfang zurueck">
+                <RotateCcw size={20} />
+                Noch einmal hoeren
+              </button>
+            </div>
+
+            <div className={styles.lockedNote}>
+              <Lock size={18} />
+              Transkript zum Schutz des Tests ausgeblendet.
+            </div>
+            {audioError ? (
+              <p className={styles.warningText}>
+                <AlertCircle size={16} /> {toGermanStatus(audioError)}
+              </p>
+            ) : null}
+          </section>
+
+          <section className={styles.questionPane}>
+            <div className={styles.questionTopline}>
+              <span className={styles.questionStep}>Frage {currentIndex + 1} von {totalTasks}</span>
+              <span>{level}</span>
+            </div>
+            <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
+            <h2>{currentTask.question}</h2>
+            {renderQuestionControl(currentTask, currentAnswer)}
+            {!simulationMode ? (
+              <>
+                {!currentAnswered ? <p className={styles.hintLine}><WandSparkles size={16} /> {currentTask.hint}</p> : null}
+                <FeedbackBox task={currentTask} answer={currentAnswer} />
+              </>
+            ) : null}
+          </section>
+        </div>
+      );
+    }
 
     return (
       <div className={styles.listeningLayout}>
@@ -2561,7 +3078,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           </div>
           {audioError ? (
             <p className={styles.warningText}>
-              <AlertCircle size={16} /> {audioError}
+              <AlertCircle size={16} /> {toGermanStatus(audioError)}
             </p>
           ) : null}
         </section>
@@ -2589,6 +3106,85 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     const text = String(currentAnswer ?? "");
     const words = countWords(text);
     const suggestions = getWritingSuggestions(currentTask, text);
+
+    if (module.id === "write") {
+      return (
+        <div className={styles.writingLayout}>
+          <section className={styles.promptPanel}>
+            <div className={styles.questionTopline}>
+              <span className={styles.questionStep}>Frage {currentIndex + 1} von {totalTasks}</span>
+              <span>{level}</span>
+            </div>
+            <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
+            <h2>{currentTask.title}</h2>
+            <p translate="no">{currentTask.prompt}</p>
+            <div className={styles.promptMeta}>
+              <span><FileText size={16} /> {currentTask.minWords}-{currentTask.maxWords} Woerter</span>
+              <span><ShieldCheck size={16} /> Register {currentTask.register}</span>
+            </div>
+          </section>
+
+          <section className={styles.editorPanel}>
+            <div className={styles.editorToolbar}>
+              <span>{words} Wort{words !== 1 ? "er" : ""}</span>
+              <span>Ziel {currentTask.targetWords}</span>
+              <button type="button" onClick={saveWritingVersion}>
+                <Save size={16} />
+                Entwurf speichern
+              </button>
+            </div>
+            <textarea
+              value={text}
+              onChange={(event) => setAnswerForCurrent(event.target.value)}
+              placeholder="Schreiben Sie Ihre Antwort auf Deutsch..."
+              className={styles.editor}
+            />
+          </section>
+
+          <div className={styles.writingSupportGrid}>
+            {!simulationMode ? (
+              <section className={styles.supportPanel}>
+                <div className={styles.sectionLabel}>
+                  <WandSparkles size={18} />
+                  Vorschlaege
+                </div>
+                <ul>
+                  {suggestions.map((suggestion) => (
+                    <li key={suggestion}>{suggestion}</li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
+
+            <section className={styles.supportPanel}>
+              <div className={styles.sectionLabel}>
+                <History size={18} />
+                Verlauf
+              </div>
+              {writingVersions.length ? (
+                <div className={styles.versionList}>
+                  {writingVersions.slice(0, 5).map((version) => (
+                    <button
+                      type="button"
+                      key={version.id}
+                      onClick={() => {
+                        setCurrentIndex(version.taskIndex);
+                        setAnswers((previous) => ({ ...previous, [version.taskIndex]: version.text }));
+                      }}
+                    >
+                      <span>{version.taskTitle}</span>
+                      <small>{formatClock(new Date(version.createdAt))} - {version.words} Woerter</small>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className={styles.mutedText}>Versionen erscheinen nach einigen Sekunden Schreibzeit.</p>
+              )}
+            </section>
+          </div>
+        </div>
+      );
+    }
 
     return (
       <div className={styles.writingLayout}>
@@ -2672,6 +3268,104 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     const answer = currentAnswer ?? {};
     const playbackSrc = answer.audioDataUrl || answer.audioUrl;
 
+    if (module.id === "speak") {
+      return (
+        <div className={styles.speakingLayout}>
+          <section className={styles.promptPanel}>
+            <div className={styles.questionTopline}>
+              <span className={styles.questionStep}>Frage {currentIndex + 1} von {totalTasks}</span>
+              <span>{level}</span>
+            </div>
+            <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
+            <h2>{currentTask.title}</h2>
+            <p translate="no">{currentTask.prompt}</p>
+            {currentTask.visual ? (
+              <img className={styles.speakingImage} src={speakingImage} alt="Aktive Personen in einer Alltagssituation" />
+            ) : null}
+            <div className={styles.promptMeta}>
+              <span><Clock3 size={16} /> Vorbereitung {currentTask.prepSeconds}s</span>
+              <span><Mic size={16} /> Zielantwort {currentTask.responseSeconds}s</span>
+            </div>
+          </section>
+
+          <section className={styles.recorderPanel}>
+            <div className={styles.timerGrid}>
+              <div className={styles.timerBlock}>
+                <Clock3 size={20} />
+                <strong>{formatTime(prepRemaining)}</strong>
+                <span>{speakingPhase === "prep" ? "Verbleibende Vorbereitungszeit" : "Verbleibende Zeit"}</span>
+              </div>
+              <div className={styles.timerBlock}>
+                <Mic size={20} />
+                <strong>{formatTime(recordingSeconds || answer.duration || 0)}</strong>
+                <span>Sprechzeit</span>
+              </div>
+            </div>
+
+            <div className={styles.micStage} data-recording={isRecording ? "true" : "false"}>
+              <div className={styles.waveform} aria-hidden="true">
+                <span />
+                <span />
+                <span />
+                <span />
+                <span />
+              </div>
+              <button
+                type="button"
+                className={isRecording ? styles.stopButton : styles.recordButton}
+                onClick={isRecording ? stopRecording : startRecording}
+                aria-label={isRecording ? "Aufnahme stoppen" : "Aufnahme starten"}
+              >
+                {isRecording ? <Square size={34} /> : <Mic size={38} />}
+              </button>
+              <div className={styles.waveform} aria-hidden="true">
+                <span />
+                <span />
+                <span />
+                <span />
+                <span />
+              </div>
+            </div>
+
+            <div className={styles.recordActions}>
+              <button type="button" className={styles.secondaryButton} onClick={beginPrep} disabled={prepActive || simulationMode}>
+                <TimerReset size={16} />
+                Vorbereitung neu starten
+              </button>
+              <button type="button" className={styles.secondaryButton} onClick={rerecord} disabled={isRecording}>
+                <RotateCcw size={16} />
+                Erneut aufnehmen
+              </button>
+            </div>
+
+            {recordError ? <p className={styles.warningText}><AlertCircle size={16} /> {toGermanStatus(recordError)}</p> : null}
+
+            {playbackSrc ? (
+              <SmoothedAudioPlayer key={playbackSrc} src={playbackSrc} label="Wiedergabe Ihrer muendlichen Antwort" />
+            ) : answer.simulated ? (
+              <p className={styles.mutedText}>Zeitgesteuerte Antwort ohne Audiodatei gespeichert.</p>
+            ) : (
+              <p className={styles.mutedText}>Ihre Wiedergabe erscheint hier nach der Aufnahme.</p>
+            )}
+          </section>
+
+          {!simulationMode ? (
+            <section className={styles.supportPanel}>
+              <div className={styles.sectionLabel}>
+                <ClipboardCheck size={18} />
+                Antwortschema
+              </div>
+              <ul>
+                {currentTask.checklist.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+        </div>
+      );
+    }
+
     return (
       <div className={styles.speakingLayout}>
         <section className={styles.promptPanel}>
@@ -2741,7 +3435,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             </button>
           </div>
 
-          {recordError ? <p className={styles.warningText}><AlertCircle size={16} /> {recordError}</p> : null}
+          {recordError ? <p className={styles.warningText}><AlertCircle size={16} /> {toGermanStatus(recordError)}</p> : null}
 
           {playbackSrc ? (
             <SmoothedAudioPlayer key={playbackSrc} src={playbackSrc} label="Lecture de votre reponse orale" />
@@ -2773,6 +3467,60 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     if (completed) {
       const unlocked = score >= PASS_SCORE;
       const resultSummary = buildResultSummary(module, answers);
+      if (module?.id) {
+        return (
+          <section className={styles.resultPanel}>
+            <Trophy size={44} />
+            <p className={styles.sectionLabel}>{t.modulePage.result}</p>
+            <h2>{score}%</h2>
+            <p>
+              {unlocked
+                ? `Gut gemacht. Das naechste empfohlene Niveau ist ${getNextLevel(level)}.`
+                : `Arbeiten Sie weiter auf ${level}, bevor Sie die Schwierigkeit erhoehen.`}
+            </p>
+            <div className={styles.resultStats}>
+              <span><CheckCircle2 size={16} /> {answeredCount}/{totalTasks} Aufgaben bearbeitet</span>
+              <span><CheckCircle2 size={16} /> {resultSummary.correctCount} richtig</span>
+              <span><XCircle size={16} /> {resultSummary.wrongCount} falsch</span>
+              <span><Flag size={16} /> {Object.values(flagged).filter(Boolean).length} markiert</span>
+              <span><Clock3 size={16} /> {formatTime(elapsedSeconds)} Arbeitszeit</span>
+            </div>
+            <div className={styles.finalReviewList}>
+              {resultSummary.rows.map((row) => (
+                <article key={row.id} className={styles.finalReviewItem} data-correct={row.isCorrect ? "true" : "false"}>
+                  <div className={styles.finalReviewHeader}>
+                    <span>Frage {row.number}</span>
+                    <strong>{row.isCorrect ? "Richtig" : "Noch einmal pruefen"}</strong>
+                  </div>
+                  <h3>{row.title}</h3>
+                  <p><b>Ihre Antwort:</b> {row.userAnswer}</p>
+                  <p><b>Erwartete Antwort:</b> <span translate="no">{row.correctAnswer}</span></p>
+                  {row.explanation ? <p className={styles.finalExplanation}>{row.explanation}</p> : null}
+                </article>
+              ))}
+            </div>
+            {resultStatus ? <p className={styles.statusLine}>{toGermanStatus(resultStatus)}</p> : null}
+            <div className={styles.resultActions}>
+              <button type="button" className={styles.secondaryButton} onClick={() => navigate(loggedIn ? "/dashboard" : "/")}>
+                <ChevronLeft size={16} />
+                Zurueck
+              </button>
+              <button type="button" className={styles.secondaryButton} onClick={startSimulation}>
+                <RotateCcw size={16} />
+                Neu starten
+              </button>
+              <button type="button" className={styles.secondaryButton} onClick={() => navigate(selectedSeries ? `/simulations/${selectedSeries.examId}` : "/simulations", { state: { fromResults: true } })}>
+                <ClipboardCheck size={16} />
+                Neue Serie waehlen
+              </button>
+              <button type="button" className={styles.primaryButton} onClick={() => navigate(seriesRoute)}>
+                {t.modulePage.chooseModule}
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          </section>
+        );
+      }
       return (
         <section className={styles.resultPanel}>
           <Trophy size={44} />
@@ -2804,7 +3552,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               </article>
             ))}
           </div>
-          {resultStatus ? <p className={styles.statusLine}>{resultStatus}</p> : null}
+          {resultStatus ? <p className={styles.statusLine}>{toGermanStatus(resultStatus)}</p> : null}
           <div className={styles.resultActions}>
             <button type="button" className={styles.secondaryButton} onClick={() => navigate(loggedIn ? "/dashboard" : "/")}>
               <ChevronLeft size={16} />
@@ -2839,6 +3587,17 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     return (
       <div className={styles.page} style={{ "--module-accent": module.accent, "--module-soft": module.soft }}>
         <section className={styles.resultPanel}>
+          <p className={styles.sectionLabel}>Serie</p>
+          <h2>Importierte Aufgaben werden geladen...</h2>
+        </section>
+      </div>
+    );
+  }
+
+  if (false) {
+    return (
+      <div className={styles.page} style={{ "--module-accent": module.accent, "--module-soft": module.soft }}>
+        <section className={styles.resultPanel}>
           <p className={styles.sectionLabel}>Series</p>
           <h2>Chargement des exercices importés...</h2>
         </section>
@@ -2847,22 +3606,22 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   }
 
   if (!params.seriesId && !importedModuleState.loading) {
-    return <ComingSoonPage title="This exercise flow is not yet available" />;
+    return <ComingSoonPage title="Dieser Uebungsablauf ist noch nicht verfuegbar" />;
   }
 
   if (params.seriesId && !selectedSeries && !importedModuleState.loading) {
-    return <ComingSoonPage examId={params.examId} title="This test series is not yet available" />;
+    return <ComingSoonPage examId={params.examId} title="Diese Testserie ist noch nicht verfuegbar" />;
   }
 
   if (selectedSeries?.isImported && !selectedSeriesContent && !importedModuleState.loading) {
-    return <ComingSoonPage examId={params.examId} title="This module is not yet available" />;
+    return <ComingSoonPage examId={params.examId} title="Dieses Modul ist noch nicht verfuegbar" />;
   }
 
   if (blockedSeriesAccess || blockedVisitorRefresh) {
     return (
       <NotFoundPage
-        title="404 error"
-        message="This test session is not available. Open a free series from the series listing to start a visitor test."
+        title="404-Fehler"
+        message="Diese Testsitzung ist nicht verfuegbar. Oeffnen Sie eine kostenlose Serie aus der Serienliste, um einen Besuchertest zu starten."
       />
     );
   }
@@ -2874,7 +3633,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           type="button"
           className={styles.logoButton}
           onClick={() => navigate(loggedIn ? "/dashboard" : "/")}
-          aria-label="Retour"
+          aria-label="Zurueck"
         >
           <img src={logo} alt="Deutsch Lernen" />
         </button>
@@ -2905,7 +3664,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               <h1>Simulation: {examHeading}</h1>
               <p>
                 <ModuleIcon size={18} />
-                Module: {moduleTitle} ({module.examPart})
+                Modul: {moduleTitle} ({module.examPart})
               </p>
             </div>
             <div
@@ -2913,7 +3672,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
                 styles.examTimer,
                 simulationMode && timerSeconds <= 15 ? styles.timerUrgent : "",
               ].join(" ")}
-              aria-label="Temps restant"
+              aria-label="Verbleibende Zeit"
             >
               <Clock3 size={22} />
               {formatExamTime(simulationMode ? timerSeconds : currentTaskDuration)}
@@ -2931,7 +3690,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             </span>
             <span className={styles.moduleBadge}>
               <Clock3 size={16} />
-              {simulationMode ? "Mode examen" : t.modulePage.freeTraining}
+              {simulationMode ? "Pruefungsmodus" : t.modulePage.freeTraining}
             </span>
             {simulationMode ? (
               <span className={styles.moduleBadge}>
@@ -2941,8 +3700,12 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             ) : null}
           </div>
 
-          <div className={styles.progressWrap} aria-label={`Question ${currentIndex + 1} sur ${totalTasks}`}>
+          <div className={styles.progressWrap} aria-label={`Frage ${currentIndex + 1} von ${totalTasks}`}>
             <div className={styles.progressText}>
+              <span>{answeredCount}/{totalTasks} Antworten</span>
+              <span>{remainingCount} uebrig - {completedPartCount}/{Math.max(1, examParts.length)} Abschnitte</span>
+            </div>
+            <div className={styles.progressText} hidden>
               <span>{answeredCount}/{totalTasks} réponses</span>
               <span>{remainingCount} restantes · {completedPartCount}/{Math.max(1, examParts.length)} sections</span>
             </div>
@@ -2980,7 +3743,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
                     ].join(" ")}
                     data-static="true"
                     aria-current={index === currentIndex ? "step" : undefined}
-                    aria-label={`Question ${index + 1}`}
+                    aria-label={`Frage ${index + 1}`}
                   >
                     <span>{index + 1}</span>
                     {answered ? <CheckCircle2 size={14} /> : isSkipped ? <SkipForward size={14} /> : <Circle size={14} />}
@@ -2992,14 +3755,14 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
             <div className={styles.legend}>
               <span><i className={styles.legendAnswered} /> {t.modulePage.answered}</span>
-              <span><i className={styles.legendCurrent} /> En cours</span>
+              <span><i className={styles.legendCurrent} /> Aktuell</span>
               <span><i className={styles.legendFlagged} /> {t.modulePage.flagged}</span>
             </div>
 
             <div className={styles.notesBox}>
               <label htmlFor={`notes-${module.id}-${currentIndex}`}>
                 <PencilLine size={16} />
-                Notes
+                Notizen
               </label>
               <textarea
                 id={`notes-${module.id}-${currentIndex}`}
@@ -3007,7 +3770,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
                 onChange={(event) =>
                   setNotes((previous) => ({ ...previous, [currentIndex]: event.target.value }))
                 }
-                placeholder="Vos notes rapides..."
+                placeholder="Ihre kurzen Notizen..."
                 rows={4}
               />
             </div>
@@ -3025,7 +3788,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               </ul>
             </div>
 
-            <p className={styles.saveStatus}>{saveStatus}</p>
+            <p className={styles.saveStatus}>{toGermanStatus(saveStatus)}</p>
           </aside>
           ) : null}
         </div>
@@ -3033,7 +3796,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
         {!completed && !partIntroVisible ? (
           <section
             className={`${styles.actionPanel} ${styles.stepActionPanel}`}
-            aria-label="Navigation des exercices"
+            aria-label="Aufgabennavigation"
           >
             <button
               type="button"
@@ -3042,7 +3805,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               disabled={currentIndex === 0 || isRecording}
             >
               <ChevronLeft size={16} />
-              Retour
+              Zurueck
             </button>
             {partIntroVisible ? (
             <button type="button" className={styles.secondaryButton} onClick={() => persistProgress(`Sauvegardé à ${formatClock()}`)}>

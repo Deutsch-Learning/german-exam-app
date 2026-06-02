@@ -10,7 +10,7 @@ import API from "../services/api";
 import { clearDashboardCache } from "../services/dashboard";
 import { canOpenSeries, clearAuthSession, isVisitorSeriesAttempt } from "../utils/access";
 import BackButton from "../components/BackButton";
-import { useLanguage } from "../context/LanguageContext";
+import { useSimulationLanguage } from "../utils/simulationLanguage";
 import iconListen from "../assets/images/icon-audio.png";
 import iconWrite from "../assets/images/icon-write.png";
 import iconSpeak from "../assets/images/icon-speak.png";
@@ -33,7 +33,7 @@ export default function SeriesSimulationPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { examId, seriesId } = useParams();
-  const { t } = useLanguage();
+  const t = useSimulationLanguage();
   const [pendingModuleId, setPendingModuleId] = useState(null);
   const [startingModuleId, setStartingModuleId] = useState(null);
   const [remoteSeriesState, setRemoteSeriesState] = useState({
@@ -72,8 +72,8 @@ export default function SeriesSimulationPage() {
       <div className="simple-page">
         <main className="simple-shell">
           <section className="simple-card status-panel">
-            <p className="simple-eyebrow">Series</p>
-            <h1>Loading imported series...</h1>
+            <p className="simple-eyebrow">Serie</p>
+            <h1>Importierte Serie wird geladen...</h1>
           </section>
         </main>
       </div>
@@ -81,7 +81,7 @@ export default function SeriesSimulationPage() {
   }
 
   if (!series) {
-    return <ComingSoonPage examId={examId} title="This series is not yet available" />;
+    return <ComingSoonPage examId={examId} title="Diese Serie ist noch nicht verfuegbar" />;
   }
 
   if (!canOpenSeries(series)) {
@@ -94,17 +94,17 @@ export default function SeriesSimulationPage() {
               Deutsch Learning
             </Link>
             <Link className="simple-home-link" to={`/simulations/${examId}`}>
-              Back to series
+              Zurueck zu den Serien
             </Link>
           </div>
           <section className="simple-card status-panel">
-            <p className="simple-eyebrow">Premium series</p>
-            <h1>{series.code} is locked</h1>
-            <p>This series is reserved for paid users.</p>
+            <p className="simple-eyebrow">Premium-Serie</p>
+            <h1>{series.code} ist gesperrt</h1>
+            <p>Diese Serie ist fuer zahlende Nutzer reserviert.</p>
             <div className="simple-actions">
               <Link className="simple-button" to="/offers">
                 <Lock size={16} />
-                View offers
+                Angebote ansehen
               </Link>
             </div>
           </section>
@@ -162,7 +162,7 @@ export default function SeriesSimulationPage() {
       (Number(content.simulationSeconds) ? Math.round(Number(content.simulationSeconds) / 60) : 60);
 
     return {
-      moduleType: content.label ?? t.modules?.[moduleId] ?? baseModule?.label ?? "Module",
+      moduleType: t.modules?.[moduleId] ?? content.label ?? baseModule?.label ?? "Modul",
       examType: series.examName ?? examId,
       questionCount,
       durationMinutes,
@@ -193,7 +193,7 @@ export default function SeriesSimulationPage() {
             {series.examName} - {series.code}
           </h1>
           <p className={styles.subtitle}>
-            Choose a module for this selected series. The layout stays the same; the exercises use {series.code} content.
+            Waehlen Sie ein Modul fuer diese Serie. Der Aufbau bleibt gleich; die Aufgaben nutzen Inhalte aus {series.code}.
           </p>
         </header>
 
@@ -206,7 +206,7 @@ export default function SeriesSimulationPage() {
                   key={module.id}
                   iconPath={moduleAssets[module.id]?.iconPath}
                   iconNode={moduleAssets[module.id]?.iconNode}
-                  title={content.label ?? module.label}
+                  title={t.modules?.[module.id] ?? content.label ?? module.label}
                   time={content.durationMinutes ?? 60}
                   questions={content.questionCount ?? 39}
                   accent={content.accent ?? module.accent ?? series.accent}

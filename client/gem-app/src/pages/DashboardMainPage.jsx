@@ -10,6 +10,7 @@ import userIcon from "../assets/images/icon-profile.png";
 import { languageOptions } from "../utils/language";
 import { useLanguage } from "../context/LanguageContext";
 import { clearAuthSession, getAuthUser, isAdmin, updateStoredUser } from "../utils/access";
+import { useStartSimulationLanguage } from "../utils/simulationLanguage";
 
 const formatDateTimeFr = (iso) => {
   try {
@@ -311,6 +312,7 @@ export default function DashboardMainPage() {
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { language, setLanguage, t } = useLanguage();
+  const startSimulationLanguage = useStartSimulationLanguage();
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -384,6 +386,16 @@ export default function DashboardMainPage() {
     navigate("/", { replace: true });
   }, [navigate]);
 
+  const goToSimulations = useCallback(() => {
+    startSimulationLanguage();
+    navigate("/simulations");
+  }, [navigate, startSimulationLanguage]);
+
+  const goToSimulationModule = useCallback((moduleId) => {
+    startSimulationLanguage();
+    navigate(`/simulation/${moduleId}`);
+  }, [navigate, startSimulationLanguage]);
+
   const labels = useMemo(() => {
     const common = t.common;
     return {
@@ -409,7 +421,7 @@ export default function DashboardMainPage() {
         onGoActualites={() => navigate("/actualites")}
         onGoAbout={() => navigate("/about")}
         onGoContact={() => navigate("/contact")}
-        onGoModule={(moduleId) => navigate(`/simulation/${moduleId}`)}
+        onGoModule={goToSimulationModule}
         onGoLessons={() => navigate("/lessons")}
         onSwitchAdmin={() => navigate("/admin/dashboard")}
         onLogout={onLogout}
@@ -424,7 +436,7 @@ export default function DashboardMainPage() {
           isOpen={sidebarOpen}
           onClose={() => setSidebarOpen(false)}
           onGoProfile={() => navigate("/profile")}
-          onGoSimulations={() => navigate("/simulations")}
+          onGoSimulations={goToSimulations}
           onGoProgress={() => navigate("/progress")}
           onLogout={onLogout}
           labels={labels}
@@ -446,7 +458,10 @@ export default function DashboardMainPage() {
               <RecentSimulationsCard
                 simulations={dashboardSimulations}
                 labels={t.dashboard}
-                onResume={(simulation) => navigate(simulation.route)}
+                onResume={(simulation) => {
+                  startSimulationLanguage();
+                  navigate(simulation.route);
+                }}
                 onMore={() => navigate("/recent-simulations")}
               />
             </div>
@@ -455,7 +470,7 @@ export default function DashboardMainPage() {
         </main>
       </div>
 
-      <button className={styles.floatingCta} onClick={() => navigate("/simulations")}>{t.dashboard.newSimulation}</button>
+      <button className={styles.floatingCta} onClick={goToSimulations}>{t.dashboard.newSimulation}</button>
     </div>
   );
 }
