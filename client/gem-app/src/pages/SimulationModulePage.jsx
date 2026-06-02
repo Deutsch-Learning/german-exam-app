@@ -1885,8 +1885,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const progressPercent = totalTasks ? ((answeredCount / totalTasks) * 100).toFixed(1) : "0";
   const score = calculateModuleScore(module, answers);
   const currentAnswered = getTaskAnswered(module, currentTask, currentAnswer);
-  const currentSkipped = Boolean(skipped[currentIndex]);
-  const nextDisabled = !completed && module.id !== "write" && !currentAnswered;
   const level = currentTask?.level ?? "A1";
   const audioAtSessionEnd = module.id === "listen" && audioTimestamp >= currentAudioDuration;
   const audioReplayBlocked = module.id === "listen" && replaysUsed >= AUDIO_REPLAY_LIMIT && (!audioSessionActive || audioAtSessionEnd);
@@ -3784,7 +3782,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               type="button"
               className={`${styles.primaryButton} ${styles.mobileNavButton}`}
               onClick={goToNext}
-              disabled={(nextDisabled && !currentSkipped) || isRecording}
+              disabled={isRecording}
             >
               {currentIndex >= totalTasks - 1 ? t.common.submit : t.common.next}
               <Send size={16} />
