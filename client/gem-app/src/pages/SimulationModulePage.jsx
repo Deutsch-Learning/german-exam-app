@@ -3757,18 +3757,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               <span><i className={styles.legendFlagged} /> {t.modulePage.flagged}</span>
             </div>
 
-            <div className={styles.adaptiveBox}>
-              <div className={styles.sectionLabel}>
-                <Gauge size={18} />
-                {t.modulePage.progression}
-              </div>
-              <p>{t.modulePage.passText}</p>
-              <ul>
-                {module.advancement.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            </div>
           </aside>
           ) : null}
         </div>
