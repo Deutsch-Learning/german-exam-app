@@ -599,6 +599,60 @@
   margin-top: 18px;
 }
 
+.examTextSectionTitle,
+.examTextSubtitle,
+.examTextInstruction,
+.examTextIntroInstruction,
+.examTextNotice {
+  margin: 0;
+  color: #111827;
+  font-weight: 900;
+}
+
+.examTextSectionTitle {
+  font-size: clamp(1.08rem, 1.6vw, 1.28rem);
+  line-height: 1.35;
+}
+
+.examTextSubtitle {
+  color: #1f2937;
+  font-size: 1rem;
+  line-height: 1.45;
+}
+
+.examTextInstruction {
+  color: #26354b;
+  font-size: 0.98rem;
+  line-height: 1.65;
+}
+
+.examTextIntroInstruction {
+  color: #1f2937;
+  font-size: 1rem;
+  font-style: italic;
+  line-height: 1.65;
+}
+
+.examTextGroup {
+  display: grid;
+  gap: 12px;
+}
+
+.examTextNotice {
+  border-left: 4px solid var(--module-accent);
+  border-radius: 8px;
+  background: var(--module-soft);
+  color: #1f2937;
+  padding: 10px 12px;
+  line-height: 1.55;
+}
+
+.examTextBody {
+  color: #374151;
+  font-weight: 400;
+  line-height: 1.75;
+}
+
 .sectionLabel {
   color: var(--module-accent);
   font-size: 0.82rem;
@@ -607,20 +661,35 @@
 }
 
 .passagePane h2,
-.questionPane h2,
 .audioPanel h2,
 .promptPanel h2 {
   margin: 12px 0 10px;
   font-size: clamp(1.25rem, 2vw, 1.75rem);
+  font-weight: 900;
   line-height: 1.2;
 }
 
+.questionPane .questionText {
+  margin: 12px 0 10px;
+  color: #111827;
+  font-size: clamp(1.08rem, 1.7vw, 1.35rem);
+  font-weight: 400;
+  line-height: 1.5;
+}
+
 .introText,
+.instructionText,
 .promptPanel p,
 .questionPane p,
 .transcriptBox p {
   color: #4b5563;
   line-height: 1.7;
+}
+
+.introText,
+.instructionText {
+  display: grid;
+  gap: 10px;
 }
 
 .paragraphList {
@@ -696,6 +765,7 @@
   gap: 12px;
   padding: 12px 14px;
   text-align: left;
+  font-weight: 400;
   cursor: pointer;
 }
 
@@ -1500,7 +1570,6 @@
 }
 
 .passagePane h2,
-.questionPane h2,
 .audioPanel h2,
 .promptPanel h2 {
   color: #1f2937;
@@ -1508,11 +1577,17 @@
 }
 
 .introText,
+.instructionText,
 .promptPanel p,
 .questionPane p,
 .transcriptBox p {
   color: #333333;
   line-height: 1.65;
+}
+
+.questionPane .questionText {
+  color: #111827;
+  font-weight: 400;
 }
 
 .paragraphList {
@@ -1545,6 +1620,7 @@
   border-radius: 12px;
   padding: 15px 16px;
   background: #ffffff;
+  font-weight: 400;
   transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
 }
 
@@ -1930,6 +2006,301 @@
 
 .legendFlagged {
   background: #111827;
+}
+
+.navPanelToggle {
+  min-height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.13);
+  color: #ffffff;
+  padding: 0 12px;
+  display: none;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.examNavPanel {
+  align-self: start;
+  display: grid;
+  gap: 14px;
+}
+
+.examNavPanelHeader {
+  display: none;
+}
+
+.examNavPanelHeader p,
+.navStatusText,
+.navSectionCurrent {
+  margin: 0;
+}
+
+.examNavPanelHeader p {
+  color: #667085;
+  font-size: 0.76rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.examNavPanelHeader h2 {
+  margin: 2px 0 0;
+  color: #101828;
+  font-size: 1.15rem;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.navPanelClose {
+  width: 38px;
+  height: 38px;
+  border: 1px solid #d0d5dd;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #344054;
+  display: inline-grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.navPanelBackdrop {
+  display: none;
+}
+
+.navCard {
+  border: 1px solid var(--exam-border);
+  border-radius: 14px;
+  background: #ffffff;
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+  box-shadow: var(--exam-shadow-soft);
+}
+
+.navCardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #344054;
+  font-size: 0.82rem;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.navCardHeader span,
+.navStatusBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.navCardHeader strong {
+  color: var(--exam-red);
+  font-variant-numeric: tabular-nums;
+}
+
+.navTimer {
+  color: #101828;
+  font-size: clamp(1.65rem, 3vw, 2.15rem);
+  font-weight: 950;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.navStatusText {
+  color: #667085;
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.navStatusBadge {
+  width: fit-content;
+  min-height: 28px;
+  border-radius: 999px;
+  background: #fff7ed;
+  color: #9a3412;
+  padding: 0 10px;
+  font-size: 0.74rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.navMetricGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.navMetricGrid span {
+  min-height: 54px;
+  border: 1px solid #eaecf0;
+  border-radius: 10px;
+  background: #f9fafb;
+  color: #667085;
+  padding: 10px;
+  display: grid;
+  gap: 3px;
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.navMetricGrid strong {
+  color: #101828;
+  font-size: 1rem;
+  font-weight: 950;
+}
+
+.navSectionCurrent {
+  color: #101828;
+  font-size: 0.92rem;
+  font-weight: 950;
+  line-height: 1.35;
+}
+
+.sectionProgressList {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.sectionProgressButton {
+  min-height: 46px;
+  border: 1px solid #d0d5dd;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #344054;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 900;
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
+}
+
+.sectionProgressButton:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: var(--exam-red);
+  box-shadow: 0 8px 18px rgba(16, 24, 40, 0.1);
+}
+
+.sectionProgressButton[data-active="true"] {
+  background: var(--exam-yellow);
+  border-color: var(--exam-yellow);
+  color: #2b2100;
+  box-shadow: 0 0 0 3px rgba(244, 180, 0, 0.22);
+}
+
+.sectionProgressButton[data-complete="true"]:not([data-active="true"]) {
+  background: var(--exam-red);
+  border-color: var(--exam-red);
+  color: #ffffff;
+}
+
+.sectionProgressButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+@media (min-width: 1120px) {
+  .workArea {
+    grid-template-columns: minmax(0, 1fr) 340px;
+    align-items: start;
+  }
+
+  .workArea.readingWorkArea {
+    max-width: none;
+  }
+
+  .examNavPanel {
+    position: sticky;
+    top: 96px;
+  }
+}
+
+@media (max-width: 1119px) {
+  .workArea {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .navPanelToggle {
+    display: inline-flex;
+  }
+
+  .examNavPanel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 80;
+    width: min(390px, calc(100vw - 28px));
+    padding: 18px;
+    overflow: auto;
+    background: #f5f5f5;
+    box-shadow: -18px 0 42px rgba(16, 24, 40, 0.22);
+    transform: translateX(105%);
+    transition: transform 0.26s ease;
+  }
+
+  .examNavPanelOpen {
+    transform: translateX(0);
+  }
+
+  .examNavPanelHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+  }
+
+  .navPanelBackdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    border: 0;
+    background: rgba(16, 24, 40, 0.42);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.22s ease;
+  }
+
+  .navPanelBackdropOpen {
+    display: block;
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+@media (max-width: 620px) {
+  .examNavPanel {
+    top: auto;
+    left: 0;
+    right: 0;
+    width: 100%;
+    max-height: min(82vh, 720px);
+    border-radius: 20px 20px 0 0;
+    padding: 18px 16px calc(22px + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -18px 42px rgba(16, 24, 40, 0.22);
+    transform: translateY(105%);
+  }
+
+  .examNavPanelOpen {
+    transform: translateY(0);
+  }
+
+  .navMetricGrid,
+  .sectionProgressList {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .notesBox {

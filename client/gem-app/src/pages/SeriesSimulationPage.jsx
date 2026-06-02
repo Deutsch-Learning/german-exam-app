@@ -73,7 +73,13 @@ export default function SeriesSimulationPage() {
         <main className="simple-shell">
           <section className="simple-card status-panel">
             <p className="simple-eyebrow">Serie</p>
-            <h1>Importierte Serie wird geladen...</h1>
+            <h1>
+              <span className="simple-loading-dots" aria-label="Importierte Serie wird geladen">
+                <span />
+                <span />
+                <span />
+              </span>
+            </h1>
           </section>
         </main>
       </div>

@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Activity,
@@ -75,10 +76,73 @@ const trustedCountries = [
   { code: "IT", name: "Italy", flag: italyFlag },
 ];
 
+const TYPE_SPEED_MS = 58;
+const DELETE_SPEED_MS = 34;
+const HOLD_MS = 1500;
+const BETWEEN_TEXT_MS = 260;
+
+const useHeroTypingText = (phrases) => {
+  const [phraseIndex, setPhraseIndex] = useState(0);
+  const [letterCount, setLetterCount] = useState(0);
+  const [phase, setPhase] = useState("typing");
+
+  useEffect(() => {
+    if (!phrases.length) return undefined;
+
+    const phrase = phrases[phraseIndex] ?? "";
+    let delay = TYPE_SPEED_MS;
+
+    if (phase === "typing") {
+      if (letterCount < phrase.length) {
+        delay = TYPE_SPEED_MS + (letterCount % 4 === 0 ? 18 : 0);
+      } else {
+        delay = HOLD_MS;
+      }
+    } else if (phase === "deleting") {
+      delay = letterCount > 0 ? DELETE_SPEED_MS : BETWEEN_TEXT_MS;
+    }
+
+    const timer = window.setTimeout(() => {
+      if (phase === "typing") {
+        if (letterCount < phrase.length) {
+          setLetterCount((value) => value + 1);
+        } else {
+          setPhase("deleting");
+        }
+        return;
+      }
+
+      if (letterCount > 0) {
+        setLetterCount((value) => Math.max(0, value - 1));
+        return;
+      }
+
+      setPhraseIndex((value) => (value + 1) % phrases.length);
+      setPhase("typing");
+    }, delay);
+
+    return () => window.clearTimeout(timer);
+  }, [letterCount, phase, phraseIndex, phrases]);
+
+  const phrase = phrases[phraseIndex] ?? "";
+
+  return {
+    text: phrase.slice(0, letterCount),
+    phase,
+    fullText: phrase,
+  };
+};
+
 export default function LandingPage() {
   const { language, setLanguage, t } = useLanguage();
   const startSimulationLanguage = useStartSimulationLanguage();
   const copy = t.landing;
+  const heroPhrases = useMemo(
+    () => [copy.heroTitleA, copy.heroTitleB].filter(Boolean),
+    [copy.heroTitleA, copy.heroTitleB]
+  );
+  const typedHeadline = useHeroTypingText(heroPhrases);
+  const longestHeroPhrase = heroPhrases.reduce((longest, phrase) => Math.max(longest, phrase.length), 0);
 
   const services = [
     {
@@ -161,10 +225,15 @@ export default function LandingPage() {
       <section className="hero-section">
         <div className="container hero-container">
           <div className="hero-content">
-            <h1 className="hero-title">
-              {copy.heroTitleA}
-              <br />
-              {copy.heroTitleB}
+            <h1 className="hero-title" aria-label={`${copy.heroTitleA} ${copy.heroTitleB}`}>
+              <span
+                className={`hero-title-typing is-${typedHeadline.phase}`}
+                style={{ "--hero-title-chars": longestHeroPhrase }}
+              >
+                <span className="hero-title-text">{typedHeadline.text || "\u00a0"}</span>
+                <span className="hero-title-cursor" aria-hidden="true" />
+                <span className="sr-only">{typedHeadline.fullText}</span>
+              </span>
             </h1>
             <p className="hero-subtitle">{copy.heroSubtitle}</p>
             <div className="hero-sim-actions" aria-label="Choose a simulation">

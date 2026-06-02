@@ -19,6 +19,7 @@ import {
   Lock,
   Mic,
   Pause,
+  PanelRightOpen,
   PencilLine,
   Play,
   RotateCcw,
@@ -31,6 +32,7 @@ import {
   Trophy,
   Volume2,
   WandSparkles,
+  X,
   XCircle,
 } from "lucide-react";
 import API from "../services/api";
@@ -1314,6 +1316,34 @@ const buildExamParts = (module) => {
     }));
 };
 
+const classifyExamTextLine = (line, index = 0, total = 1) => {
+  const text = String(line ?? "").trim();
+  if (!text) return "body";
+
+  if (/^(achtung|warning|warnung|important|wichtig|note|notiz|hinweis|remarque|attention)\b\s*:?\s*/i.test(text)) {
+    return "notice";
+  }
+
+  if (/lesen sie zuerst die anweisungen/i.test(text)) return "introInstruction";
+  if (/^(teil|part|section|abschnitt)\s*\d+\s*(\||-|:)/i.test(text)) return "sectionTitle";
+
+  if (/^(anweisung|instructions?|directions?|aufgabe|consigne)\b/i.test(text)) {
+    return "instruction";
+  }
+
+  if (/^(lisez|lesen sie|hoeren sie|horen sie|schreiben sie|waehlen sie|wahlen sie|kreuzen sie|ordnen sie|markieren sie|completez|choisissez|associez|ecoutez)\b/i.test(text)) {
+    return "body";
+  }
+
+  if (/^(teil|part|section|abschnitt)\s*\d+\b/i.test(text)) return "sectionTitle";
+  if (/^(quelle|source|text|texte|transkript|transcript|situation|scenario|szenario)\b\s*:?\s*/i.test(text)) return "subtitle";
+  if (/^[A-Z][\p{L}\p{N}\s'().,:-]{2,72}:$/u.test(text)) return "subtitle";
+  if (total > 1 && index === 0 && text.length <= 90 && !/[.!?]$/.test(text)) return "sectionTitle";
+  if (text.length <= 56 && !/[.!?]$/.test(text)) return "subtitle";
+
+  return "body";
+};
+
 const getStoredProgress = (key) => {
   try {
     return JSON.parse(localStorage.getItem(key) ?? "null");
@@ -1565,6 +1595,7 @@ const buildSeriesModule = (baseModule, content, series) => {
   if (content.isImported) {
     return {
       ...baseModule,
+      isImported: true,
       eyebrow: `${series.code} / ${baseModule.eyebrow}`,
       examPart: `${series.examName} ${series.code} - ${baseModule.examPart}`,
       tasks: content.tasks?.length ? content.tasks : baseModule.tasks,
@@ -1833,7 +1864,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const [simulationMode, setSimulationMode] = useState(true);
   const [completed, setCompleted] = useState(false);
   const [partIntroVisible, setPartIntroVisible] = useState(true);
-  const [saveStatus, setSaveStatus] = useState("");
+  const [navPanelOpen, setNavPanelOpen] = useState(false);
+  const [, setSaveStatus] = useState("");
   const [resultStatus, setResultStatus] = useState("");
   const [writingVersions, setWritingVersions] = useState([]);
   const [audioTimestamp, setAudioTimestamp] = useState(0);
@@ -1878,14 +1910,13 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const currentAudioDuration = module.id === "listen" ? getEstimatedAudioDuration(module.audio) : 0;
   const answeredCount = module.tasks.filter((task, index) => getTaskAnswered(module, task, answers[index])).length;
   const remainingCount = Math.max(0, totalTasks - answeredCount);
+  const flaggedCount = Object.values(flagged).filter(Boolean).length;
   const completedPartCount = examParts.filter((part) =>
     part.taskIndexes.every((taskIndex) => getTaskAnswered(module, module.tasks[taskIndex], answers[taskIndex]))
   ).length;
   const progressPercent = totalTasks ? ((answeredCount / totalTasks) * 100).toFixed(1) : "0";
   const score = calculateModuleScore(module, answers);
   const currentAnswered = getTaskAnswered(module, currentTask, currentAnswer);
-  const currentSkipped = Boolean(skipped[currentIndex]);
-  const nextDisabled = !completed && !currentAnswered;
   const level = currentTask?.level ?? "A1";
   const audioAtSessionEnd = module.id === "listen" && audioTimestamp >= currentAudioDuration;
   const audioReplayBlocked = module.id === "listen" && replaysUsed >= AUDIO_REPLAY_LIMIT && (!audioSessionActive || audioAtSessionEnd);
@@ -2240,6 +2271,14 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setCurrentIndex(previousIndex);
     setPartIntroVisible(false);
   }, [currentIndex]);
+
+  const jumpToQuestion = useCallback((targetIndex) => {
+    if (isRecording) return;
+    const safeIndex = Math.min(Math.max(0, targetIndex), totalTasks - 1);
+    setCurrentIndex(safeIndex);
+    setPartIntroVisible(false);
+    setNavPanelOpen(false);
+  }, [isRecording, totalTasks]);
 
   const clearSpeechTimers = useCallback(() => {
     if (speechStartTimerRef.current) {
@@ -2638,52 +2677,196 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               return (
                 <ul key={`${part?.id ?? "part"}-${index}`}>
                   {lines.map((line) => (
-                    <li key={line} translate="no">{line.replace(/^[-*]\s*/, "")}</li>
+                    <li key={line} className={styles.examTextBody} translate="no">{line.replace(/^[-*]\s*/, "")}</li>
                   ))}
                 </ul>
               );
             }
-            return <p key={`${part?.id ?? "part"}-${index}`} translate="no">{block}</p>;
+            const blockType = lines.length === 1
+              ? classifyExamTextLine(lines[0], index, blocks.length)
+              : null;
+            if (!blockType) {
+              return (
+                <div key={`${part?.id ?? "part"}-${index}`} className={styles.examTextGroup}>
+                  {lines.map((line, lineIndex) => {
+                    const lineType = classifyExamTextLine(line, lineIndex, lines.length);
+                    return (
+                      <p key={`${line}-${lineIndex}`} className={styles[`examText${lineType[0].toUpperCase()}${lineType.slice(1)}`]} translate="no">
+                        {line}
+                      </p>
+                    );
+                  })}
+                </div>
+              );
+            }
+            return (
+              <p key={`${part?.id ?? "part"}-${index}`} className={styles[`examText${blockType[0].toUpperCase()}${blockType.slice(1)}`]} translate="no">
+                {block}
+              </p>
+            );
           })
         ) : (
-          <p translate="no">Die Anweisungen fuer diesen Teil stehen in der aktiven Frage.</p>
+          <p className={styles.examTextInstruction} translate="no">Die Anweisungen fuer diesen Teil stehen in der aktiven Frage.</p>
         )}
       </div>
     );
   };
 
-  const renderQuestionStepper = () => (
-    <div className={styles.stepNavigator} aria-label="Fragenfortschritt">
-      <div className={styles.stepNavigatorHeader}>
-        <span>Teil {currentPart?.number ?? currentPartIndex + 1} von {Math.max(1, examParts.length)}</span>
-        <strong>
-          Frage {currentIndex + 1} von {totalTasks}
-          {currentPartQuestionTotal > 1 ? ` / Teilfrage ${currentPartQuestionIndex + 1} von ${currentPartQuestionTotal}` : ""}
-        </strong>
-      </div>
-      <div className={styles.stepDots} role="list" aria-label="Fragen">
-        {module.tasks.map((task, index) => {
-          const answered = getTaskAnswered(module, task, answers[index]);
-          const isCurrent = index === currentIndex && !partIntroVisible;
-          const isPartStart = examParts.some((part) => part.firstIndex === index);
-          const state = isCurrent ? "current" : answered ? "completed" : index < currentIndex ? "visited" : "remaining";
-          const stateLabel = isCurrent ? "aktuell" : answered ? "abgeschlossen" : index < currentIndex ? "besucht" : "offen";
-          return (
-            <span
-              key={task.id}
-              role="listitem"
-              className={styles.stepDot}
-              data-state={state}
-              data-part-start={isPartStart ? "true" : "false"}
-              aria-current={isCurrent ? "step" : undefined}
-              aria-label={`Frage ${index + 1}: ${stateLabel}`}
-            >
-              {index + 1}
-            </span>
-          );
-        })}
-      </div>
-    </div>
+  const renderStructuredExamText = (text, keyPrefix = "exam-text") => {
+    const lines = String(text ?? "")
+      .replace(/\r/g, "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    if (!lines.length) return null;
+
+    return lines.map((line, index) => {
+      const lineType = classifyExamTextLine(line, index, lines.length);
+      const className = styles[`examText${lineType[0].toUpperCase()}${lineType.slice(1)}`];
+      return (
+        <p key={`${keyPrefix}-${index}`} className={className} translate="no">
+          {line}
+        </p>
+      );
+    });
+  };
+
+  const renderExamSidebar = () => (
+    <>
+      <button
+        type="button"
+        className={`${styles.navPanelBackdrop} ${navPanelOpen ? styles.navPanelBackdropOpen : ""}`}
+        onClick={() => setNavPanelOpen(false)}
+        aria-label="Navigation schliessen"
+      />
+      <aside
+        id="exam-navigation-panel"
+        className={`${styles.examNavPanel} ${navPanelOpen ? styles.examNavPanelOpen : ""}`}
+        aria-label="Pruefungsnavigation"
+      >
+        <div className={styles.examNavPanelHeader}>
+          <div>
+            <p>Pruefungssteuerung</p>
+            <h2>Navigation</h2>
+          </div>
+          <button
+            type="button"
+            className={styles.navPanelClose}
+            onClick={() => setNavPanelOpen(false)}
+            aria-label="Navigation schliessen"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <section className={styles.navCard} aria-label="Timer und Status">
+          <div className={styles.navCardHeader}>
+            <span><Clock3 size={16} /> Timer/Status</span>
+          </div>
+          <div className={styles.navTimer}>
+            {formatExamTime(simulationMode ? timerSeconds : currentTaskDuration)}
+          </div>
+          <p className={styles.navStatusText}>
+            {simulationMode ? "Pruefungsmodus aktiv" : t.modulePage.freeTraining}
+          </p>
+          {simulationMode ? <span className={styles.navStatusBadge}><Lock size={14} /> Navigation kontrolliert</span> : null}
+        </section>
+
+        <section className={styles.navCard} aria-label="Pruefungsfortschritt">
+          <div className={styles.navCardHeader}>
+            <span><Gauge size={16} /> Exam Progress</span>
+            <strong>{Math.round(Number(progressPercent))}%</strong>
+          </div>
+          <div className={styles.navMetricGrid}>
+            <span><strong>{answeredCount}</strong> beantwortet</span>
+            <span><strong>{remainingCount}</strong> offen</span>
+            <span><strong>{flaggedCount}</strong> markiert</span>
+            <span><strong>{completedPartCount}/{Math.max(1, examParts.length)}</strong> Teile</span>
+          </div>
+          <div className={styles.progressTrack}>
+            <span style={{ width: `${progressPercent}%` }} />
+          </div>
+        </section>
+
+        <section className={styles.navCard} aria-label="Abschnittsfortschritt">
+          <div className={styles.navCardHeader}>
+            <span><ClipboardCheck size={16} /> Section Progress</span>
+          </div>
+          <p className={styles.navSectionCurrent}>
+            Teil {currentPart?.number ?? currentPartIndex + 1}: {currentPart?.displayTitle ?? moduleTitle}
+          </p>
+          <p className={styles.navStatusText}>
+            Frage {currentPartQuestionIndex + 1} von {currentPartQuestionTotal} in diesem Teil
+          </p>
+          <div className={styles.sectionProgressList}>
+            {examParts.map((part, index) => {
+              const partAnsweredCount = part.taskIndexes.filter((taskIndex) =>
+                getTaskAnswered(module, module.tasks[taskIndex], answers[taskIndex])
+              ).length;
+              const partComplete = partAnsweredCount === part.taskIndexes.length;
+              const partActive = index === currentPartIndex;
+              const targetIndex = part.taskIndexes.find((taskIndex) =>
+                !getTaskAnswered(module, module.tasks[taskIndex], answers[taskIndex])
+              ) ?? part.firstIndex;
+              return (
+                <button
+                  key={part.id}
+                  type="button"
+                  className={styles.sectionProgressButton}
+                  data-active={partActive ? "true" : "false"}
+                  data-complete={partComplete ? "true" : "false"}
+                  onClick={() => jumpToQuestion(targetIndex)}
+                  disabled={isRecording}
+                >
+                  <span>Teil {part.number}</span>
+                  <strong>{partAnsweredCount}/{part.taskIndexes.length}</strong>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className={styles.navCard} aria-label="Fragen-Navigator">
+          <div className={styles.navCardHeader}>
+            <span><ClipboardCheck size={16} /> Question Navigator</span>
+          </div>
+          <div className={styles.questionNav}>
+            {module.tasks.map((task, index) => {
+              const answered = getTaskAnswered(module, task, answers[index]);
+              const isSkipped = Boolean(skipped[index]);
+              const isFlagged = Boolean(flagged[index]);
+              const isCurrent = index === currentIndex && !partIntroVisible;
+              return (
+                <button
+                  key={task.id}
+                  type="button"
+                  className={[
+                    styles.questionButton,
+                    isCurrent ? styles.questionCurrent : "",
+                    answered ? styles.questionAnswered : "",
+                    isSkipped ? styles.questionSkipped : "",
+                  ].join(" ")}
+                  onClick={() => jumpToQuestion(index)}
+                  disabled={isRecording}
+                  aria-current={isCurrent ? "step" : undefined}
+                  aria-label={`Frage ${index + 1}${answered ? ", beantwortet" : ", offen"}${isFlagged ? ", markiert" : ""}`}
+                >
+                  <span>{index + 1}</span>
+                  {answered ? <CheckCircle2 size={14} /> : isSkipped ? <SkipForward size={14} /> : <Circle size={14} />}
+                  {isFlagged ? <Flag size={12} className={styles.flagMini} /> : null}
+                </button>
+              );
+            })}
+          </div>
+          <div className={styles.legend}>
+            <span><i className={styles.legendAnswered} /> {t.modulePage.answered}</span>
+            <span><i className={styles.legendCurrent} /> Aktuell</span>
+            <span><i className={styles.legendFlagged} /> {t.modulePage.flagged}</span>
+          </div>
+        </section>
+      </aside>
+    </>
   );
 
   const renderPartIntro = () => (
@@ -2692,7 +2875,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
         <div>
           <p className={styles.sectionLabel}>Teil {currentPart?.number ?? currentPartIndex + 1}</p>
           <h2>{currentPart?.displayTitle ?? "Einleitung zum Teil"}</h2>
-          <p>
+          <p className={styles.examTextIntroInstruction}>
             Lesen Sie zuerst die Anweisungen und das Quellenmaterial. Wenn Sie bereit sind, starten Sie die Fragen dieses Teils.
           </p>
         </div>
@@ -2931,7 +3114,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           Quelle Teil {currentPart?.number ?? currentPartIndex + 1}
         </div>
         <h2 translate="no">{currentPart?.displayTitle ?? module.passage.title}</h2>
-        <p className={styles.introText} translate="no">{module.passage.intro}</p>
+        <div className={styles.introText}>{renderStructuredExamText(module.passage.intro, "reading-intro")}</div>
         {renderPartMaterial(currentPart, { compact: true })}
       </section>
 
@@ -2940,7 +3123,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           <span className={styles.questionStep}>Frage {currentIndex + 1} von {totalTasks}</span>
           <span>{currentTask.typeLabel}</span>
         </div>
-        <h2>{currentTask.question}</h2>
+        <h2 className={styles.questionText}>{currentTask.question}</h2>
         {renderQuestionControl(currentTask, currentAnswer)}
         {!simulationMode ? (
           <>
@@ -3022,7 +3205,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               <span>{level}</span>
             </div>
             <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
-            <h2>{currentTask.question}</h2>
+            <h2 className={styles.questionText}>{currentTask.question}</h2>
             {renderQuestionControl(currentTask, currentAnswer)}
             {!simulationMode ? (
               <>
@@ -3097,7 +3280,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             <span>{level}</span>
           </div>
           <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
-          <h2>{currentTask.question}</h2>
+          <h2 className={styles.questionText}>{currentTask.question}</h2>
           {renderQuestionControl(currentTask, currentAnswer)}
           {!simulationMode ? (
             <>
@@ -3125,7 +3308,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             </div>
             <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
             <h2>{currentTask.title}</h2>
-            <p translate="no">{currentTask.prompt}</p>
+            <div className={styles.instructionText}>{renderStructuredExamText(currentTask.prompt, `write-prompt-${currentTask.id}`)}</div>
             <div className={styles.promptMeta}>
               <span><FileText size={16} /> {currentTask.minWords}-{currentTask.maxWords} Woerter</span>
               <span><ShieldCheck size={16} /> Register {currentTask.register}</span>
@@ -3203,7 +3386,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           </div>
           <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
           <h2>{currentTask.title}</h2>
-          <p translate="no">{currentTask.prompt}</p>
+          <div className={styles.instructionText}>{renderStructuredExamText(currentTask.prompt, `write-prompt-${currentTask.id}`)}</div>
           <div className={styles.promptMeta}>
             <span><FileText size={16} /> {currentTask.minWords}-{currentTask.maxWords} mots</span>
             <span><ShieldCheck size={16} /> Registre {currentTask.register}</span>
@@ -3286,7 +3469,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             </div>
             <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
             <h2>{currentTask.title}</h2>
-            <p translate="no">{currentTask.prompt}</p>
+            <div className={styles.instructionText}>{renderStructuredExamText(currentTask.prompt, `speak-prompt-${currentTask.id}`)}</div>
             {currentTask.visual ? (
               <img className={styles.speakingImage} src={speakingImage} alt="Aktive Personen in einer Alltagssituation" />
             ) : null}
@@ -3383,7 +3566,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           </div>
           <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
           <h2>{currentTask.title}</h2>
-          <p translate="no">{currentTask.prompt}</p>
+          <div className={styles.instructionText}>{renderStructuredExamText(currentTask.prompt, `speak-prompt-${currentTask.id}`)}</div>
           {currentTask.visual ? (
             <img className={styles.speakingImage} src={speakingImage} alt="Personnes actives dans un contexte quotidien" />
           ) : null}
@@ -3502,8 +3685,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
                   </div>
                   <h3>{row.title}</h3>
                   <p><b>Ihre Antwort:</b> {row.userAnswer}</p>
-                  <p><b>Erwartete Antwort:</b> <span translate="no">{row.correctAnswer}</span></p>
-                  {row.explanation ? <p className={styles.finalExplanation}>{row.explanation}</p> : null}
+                  {!module.isImported ? <p><b>Erwartete Antwort:</b> <span translate="no">{row.correctAnswer}</span></p> : null}
+                  {!module.isImported && row.explanation ? <p className={styles.finalExplanation}>{row.explanation}</p> : null}
                 </article>
               ))}
             </div>
@@ -3555,8 +3738,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
                 </div>
                 <h3>{row.title}</h3>
                 <p><b>Votre réponse:</b> {row.userAnswer}</p>
-                <p><b>Réponse attendue:</b> <span translate="no">{row.correctAnswer}</span></p>
-                {row.explanation ? <p className={styles.finalExplanation}>{row.explanation}</p> : null}
+                {!module.isImported ? <p><b>Réponse attendue:</b> <span translate="no">{row.correctAnswer}</span></p> : null}
+                {!module.isImported && row.explanation ? <p className={styles.finalExplanation}>{row.explanation}</p> : null}
               </article>
             ))}
           </div>
@@ -3696,99 +3879,24 @@ export default function SimulationModulePage({ moduleIdOverride }) {
                 {t.modulePage.locked}
               </span>
             ) : null}
+            <button
+              type="button"
+              className={styles.navPanelToggle}
+              onClick={() => setNavPanelOpen(true)}
+              aria-controls="exam-navigation-panel"
+              aria-expanded={navPanelOpen}
+            >
+              <PanelRightOpen size={16} />
+              Navigation
+            </button>
           </div>
 
-          <div className={styles.progressWrap} aria-label={`Frage ${currentIndex + 1} von ${totalTasks}`}>
-            <div className={styles.progressText}>
-              <span>{answeredCount}/{totalTasks} Antworten</span>
-              <span>{remainingCount} uebrig - {completedPartCount}/{Math.max(1, examParts.length)} Abschnitte</span>
-            </div>
-            <div className={styles.progressText} hidden>
-              <span>{answeredCount}/{totalTasks} réponses</span>
-              <span>{remainingCount} restantes · {completedPartCount}/{Math.max(1, examParts.length)} sections</span>
-            </div>
-            <div className={styles.progressTrack}>
-              <span style={{ width: `${progressPercent}%` }} />
-            </div>
-          </div>
-
-          {!completed ? renderQuestionStepper() : null}
         </header>
 
         <div className={`${styles.workArea} ${module.id === "read" ? styles.readingWorkArea : ""}`}>
           <section className={styles.mainContent}>{renderModuleContent()}</section>
 
-          {module.id !== "read" ? (
-          <aside className={styles.sidebar}>
-            <div className={styles.sidebarHeader}>
-              <h2>Tests</h2>
-              <p>{simulationMode ? t.modulePage.navigationLocked : t.modulePage.navigationFree}</p>
-            </div>
-
-            <div className={styles.questionNav}>
-              {module.tasks.map((task, index) => {
-                const answered = getTaskAnswered(module, task, answers[index]);
-                const isSkipped = Boolean(skipped[index]);
-                const isFlagged = Boolean(flagged[index]);
-                return (
-                  <span
-                    key={task.id}
-                    className={[
-                      styles.questionButton,
-                      index === currentIndex ? styles.questionCurrent : "",
-                      answered ? styles.questionAnswered : "",
-                      isSkipped ? styles.questionSkipped : "",
-                    ].join(" ")}
-                    data-static="true"
-                    aria-current={index === currentIndex ? "step" : undefined}
-                    aria-label={`Frage ${index + 1}`}
-                  >
-                    <span>{index + 1}</span>
-                    {answered ? <CheckCircle2 size={14} /> : isSkipped ? <SkipForward size={14} /> : <Circle size={14} />}
-                    {isFlagged ? <Flag size={12} className={styles.flagMini} /> : null}
-                  </span>
-                );
-              })}
-            </div>
-
-            <div className={styles.legend}>
-              <span><i className={styles.legendAnswered} /> {t.modulePage.answered}</span>
-              <span><i className={styles.legendCurrent} /> Aktuell</span>
-              <span><i className={styles.legendFlagged} /> {t.modulePage.flagged}</span>
-            </div>
-
-            <div className={styles.notesBox}>
-              <label htmlFor={`notes-${module.id}-${currentIndex}`}>
-                <PencilLine size={16} />
-                Notizen
-              </label>
-              <textarea
-                id={`notes-${module.id}-${currentIndex}`}
-                value={notes[currentIndex] ?? ""}
-                onChange={(event) =>
-                  setNotes((previous) => ({ ...previous, [currentIndex]: event.target.value }))
-                }
-                placeholder="Ihre kurzen Notizen..."
-                rows={4}
-              />
-            </div>
-
-            <div className={styles.adaptiveBox}>
-              <div className={styles.sectionLabel}>
-                <Gauge size={18} />
-                {t.modulePage.progression}
-              </div>
-              <p>{t.modulePage.passText}</p>
-              <ul>
-                {module.advancement.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            </div>
-
-            <p className={styles.saveStatus}>{toGermanStatus(saveStatus)}</p>
-          </aside>
-          ) : null}
+          {!completed ? renderExamSidebar() : null}
         </div>
 
         {!completed && !partIntroVisible ? (
@@ -3813,7 +3921,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               type="button"
               className={`${styles.primaryButton} ${styles.mobileNavButton}`}
               onClick={goToNext}
-              disabled={(nextDisabled && !currentSkipped) || isRecording}
+              disabled={isRecording}
             >
               {currentIndex >= totalTasks - 1 ? t.common.submit : t.common.next}
               <Send size={16} />
