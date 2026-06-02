@@ -3757,22 +3757,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               <span><i className={styles.legendFlagged} /> {t.modulePage.flagged}</span>
             </div>
 
-            <div className={styles.notesBox}>
-              <label htmlFor={`notes-${module.id}-${currentIndex}`}>
-                <PencilLine size={16} />
-                Notizen
-              </label>
-              <textarea
-                id={`notes-${module.id}-${currentIndex}`}
-                value={notes[currentIndex] ?? ""}
-                onChange={(event) =>
-                  setNotes((previous) => ({ ...previous, [currentIndex]: event.target.value }))
-                }
-                placeholder="Ihre kurzen Notizen..."
-                rows={4}
-              />
-            </div>
-
             <div className={styles.adaptiveBox}>
               <div className={styles.sectionLabel}>
                 <Gauge size={18} />
@@ -3785,8 +3769,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
                 ))}
               </ul>
             </div>
-
-            <p className={styles.saveStatus}>{toGermanStatus(saveStatus)}</p>
           </aside>
           ) : null}
         </div>
