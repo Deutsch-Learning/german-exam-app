@@ -333,10 +333,10 @@ export default function DashboardMainPage() {
     } catch (err) {
       const status = err?.response?.status;
       const apiError = err?.response?.data?.error;
-      setError(status ? apiError ?? "Impossible de charger le dashboard." : "Impossible de joindre le backend.");
+      setError(status ? apiError ?? "Impossible charger le dashboard." : "Impossible de joindre le backend.");
       setData(null);
     } finally {
-      setLoading(false);
+      setLoading(false); 
     }
   }, [auth?.id]);
 
