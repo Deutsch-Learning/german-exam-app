@@ -19,6 +19,7 @@ import {
   Lock,
   Mic,
   Pause,
+  PanelRightOpen,
   PencilLine,
   Play,
   RotateCcw,
@@ -31,6 +32,7 @@ import {
   Trophy,
   Volume2,
   WandSparkles,
+  X,
   XCircle,
 } from "lucide-react";
 import API from "../services/api";
@@ -1862,7 +1864,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const [simulationMode, setSimulationMode] = useState(true);
   const [completed, setCompleted] = useState(false);
   const [partIntroVisible, setPartIntroVisible] = useState(true);
-  const [saveStatus, setSaveStatus] = useState("");
+  const [navPanelOpen, setNavPanelOpen] = useState(false);
+  const [, setSaveStatus] = useState("");
   const [resultStatus, setResultStatus] = useState("");
   const [writingVersions, setWritingVersions] = useState([]);
   const [audioTimestamp, setAudioTimestamp] = useState(0);
@@ -1907,6 +1910,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const currentAudioDuration = module.id === "listen" ? getEstimatedAudioDuration(module.audio) : 0;
   const answeredCount = module.tasks.filter((task, index) => getTaskAnswered(module, task, answers[index])).length;
   const remainingCount = Math.max(0, totalTasks - answeredCount);
+  const flaggedCount = Object.values(flagged).filter(Boolean).length;
   const completedPartCount = examParts.filter((part) =>
     part.taskIndexes.every((taskIndex) => getTaskAnswered(module, module.tasks[taskIndex], answers[taskIndex]))
   ).length;
@@ -2267,6 +2271,14 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setCurrentIndex(previousIndex);
     setPartIntroVisible(false);
   }, [currentIndex]);
+
+  const jumpToQuestion = useCallback((targetIndex) => {
+    if (isRecording) return;
+    const safeIndex = Math.min(Math.max(0, targetIndex), totalTasks - 1);
+    setCurrentIndex(safeIndex);
+    setPartIntroVisible(false);
+    setNavPanelOpen(false);
+  }, [isRecording, totalTasks]);
 
   const clearSpeechTimers = useCallback(() => {
     if (speechStartTimerRef.current) {
@@ -2720,38 +2732,141 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     });
   };
 
-  const renderQuestionStepper = () => (
-    <div className={styles.stepNavigator} aria-label="Fragenfortschritt">
-      <div className={styles.stepNavigatorHeader}>
-        <span>Teil {currentPart?.number ?? currentPartIndex + 1} von {Math.max(1, examParts.length)}</span>
-        <strong>
-          Frage {currentIndex + 1} von {totalTasks}
-          {currentPartQuestionTotal > 1 ? ` / Teilfrage ${currentPartQuestionIndex + 1} von ${currentPartQuestionTotal}` : ""}
-        </strong>
-      </div>
-      <div className={styles.stepDots} role="list" aria-label="Fragen">
-        {module.tasks.map((task, index) => {
-          const answered = getTaskAnswered(module, task, answers[index]);
-          const isCurrent = index === currentIndex && !partIntroVisible;
-          const isPartStart = examParts.some((part) => part.firstIndex === index);
-          const state = isCurrent ? "current" : answered ? "completed" : index < currentIndex ? "visited" : "remaining";
-          const stateLabel = isCurrent ? "aktuell" : answered ? "abgeschlossen" : index < currentIndex ? "besucht" : "offen";
-          return (
-            <span
-              key={task.id}
-              role="listitem"
-              className={styles.stepDot}
-              data-state={state}
-              data-part-start={isPartStart ? "true" : "false"}
-              aria-current={isCurrent ? "step" : undefined}
-              aria-label={`Frage ${index + 1}: ${stateLabel}`}
-            >
-              {index + 1}
-            </span>
-          );
-        })}
-      </div>
-    </div>
+  const renderExamSidebar = () => (
+    <>
+      <button
+        type="button"
+        className={`${styles.navPanelBackdrop} ${navPanelOpen ? styles.navPanelBackdropOpen : ""}`}
+        onClick={() => setNavPanelOpen(false)}
+        aria-label="Navigation schliessen"
+      />
+      <aside
+        id="exam-navigation-panel"
+        className={`${styles.examNavPanel} ${navPanelOpen ? styles.examNavPanelOpen : ""}`}
+        aria-label="Pruefungsnavigation"
+      >
+        <div className={styles.examNavPanelHeader}>
+          <div>
+            <p>Pruefungssteuerung</p>
+            <h2>Navigation</h2>
+          </div>
+          <button
+            type="button"
+            className={styles.navPanelClose}
+            onClick={() => setNavPanelOpen(false)}
+            aria-label="Navigation schliessen"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <section className={styles.navCard} aria-label="Timer und Status">
+          <div className={styles.navCardHeader}>
+            <span><Clock3 size={16} /> Timer/Status</span>
+          </div>
+          <div className={styles.navTimer}>
+            {formatExamTime(simulationMode ? timerSeconds : currentTaskDuration)}
+          </div>
+          <p className={styles.navStatusText}>
+            {simulationMode ? "Pruefungsmodus aktiv" : t.modulePage.freeTraining}
+          </p>
+          {simulationMode ? <span className={styles.navStatusBadge}><Lock size={14} /> Navigation kontrolliert</span> : null}
+        </section>
+
+        <section className={styles.navCard} aria-label="Pruefungsfortschritt">
+          <div className={styles.navCardHeader}>
+            <span><Gauge size={16} /> Exam Progress</span>
+            <strong>{Math.round(Number(progressPercent))}%</strong>
+          </div>
+          <div className={styles.navMetricGrid}>
+            <span><strong>{answeredCount}</strong> beantwortet</span>
+            <span><strong>{remainingCount}</strong> offen</span>
+            <span><strong>{flaggedCount}</strong> markiert</span>
+            <span><strong>{completedPartCount}/{Math.max(1, examParts.length)}</strong> Teile</span>
+          </div>
+          <div className={styles.progressTrack}>
+            <span style={{ width: `${progressPercent}%` }} />
+          </div>
+        </section>
+
+        <section className={styles.navCard} aria-label="Abschnittsfortschritt">
+          <div className={styles.navCardHeader}>
+            <span><ClipboardCheck size={16} /> Section Progress</span>
+          </div>
+          <p className={styles.navSectionCurrent}>
+            Teil {currentPart?.number ?? currentPartIndex + 1}: {currentPart?.displayTitle ?? moduleTitle}
+          </p>
+          <p className={styles.navStatusText}>
+            Frage {currentPartQuestionIndex + 1} von {currentPartQuestionTotal} in diesem Teil
+          </p>
+          <div className={styles.sectionProgressList}>
+            {examParts.map((part, index) => {
+              const partAnsweredCount = part.taskIndexes.filter((taskIndex) =>
+                getTaskAnswered(module, module.tasks[taskIndex], answers[taskIndex])
+              ).length;
+              const partComplete = partAnsweredCount === part.taskIndexes.length;
+              const partActive = index === currentPartIndex;
+              const targetIndex = part.taskIndexes.find((taskIndex) =>
+                !getTaskAnswered(module, module.tasks[taskIndex], answers[taskIndex])
+              ) ?? part.firstIndex;
+              return (
+                <button
+                  key={part.id}
+                  type="button"
+                  className={styles.sectionProgressButton}
+                  data-active={partActive ? "true" : "false"}
+                  data-complete={partComplete ? "true" : "false"}
+                  onClick={() => jumpToQuestion(targetIndex)}
+                  disabled={isRecording}
+                >
+                  <span>Teil {part.number}</span>
+                  <strong>{partAnsweredCount}/{part.taskIndexes.length}</strong>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className={styles.navCard} aria-label="Fragen-Navigator">
+          <div className={styles.navCardHeader}>
+            <span><ClipboardCheck size={16} /> Question Navigator</span>
+          </div>
+          <div className={styles.questionNav}>
+            {module.tasks.map((task, index) => {
+              const answered = getTaskAnswered(module, task, answers[index]);
+              const isSkipped = Boolean(skipped[index]);
+              const isFlagged = Boolean(flagged[index]);
+              const isCurrent = index === currentIndex && !partIntroVisible;
+              return (
+                <button
+                  key={task.id}
+                  type="button"
+                  className={[
+                    styles.questionButton,
+                    isCurrent ? styles.questionCurrent : "",
+                    answered ? styles.questionAnswered : "",
+                    isSkipped ? styles.questionSkipped : "",
+                  ].join(" ")}
+                  onClick={() => jumpToQuestion(index)}
+                  disabled={isRecording}
+                  aria-current={isCurrent ? "step" : undefined}
+                  aria-label={`Frage ${index + 1}${answered ? ", beantwortet" : ", offen"}${isFlagged ? ", markiert" : ""}`}
+                >
+                  <span>{index + 1}</span>
+                  {answered ? <CheckCircle2 size={14} /> : isSkipped ? <SkipForward size={14} /> : <Circle size={14} />}
+                  {isFlagged ? <Flag size={12} className={styles.flagMini} /> : null}
+                </button>
+              );
+            })}
+          </div>
+          <div className={styles.legend}>
+            <span><i className={styles.legendAnswered} /> {t.modulePage.answered}</span>
+            <span><i className={styles.legendCurrent} /> Aktuell</span>
+            <span><i className={styles.legendFlagged} /> {t.modulePage.flagged}</span>
+          </div>
+        </section>
+      </aside>
+    </>
   );
 
   const renderPartIntro = () => (
@@ -3764,69 +3879,24 @@ export default function SimulationModulePage({ moduleIdOverride }) {
                 {t.modulePage.locked}
               </span>
             ) : null}
+            <button
+              type="button"
+              className={styles.navPanelToggle}
+              onClick={() => setNavPanelOpen(true)}
+              aria-controls="exam-navigation-panel"
+              aria-expanded={navPanelOpen}
+            >
+              <PanelRightOpen size={16} />
+              Navigation
+            </button>
           </div>
 
-          <div className={styles.progressWrap} aria-label={`Frage ${currentIndex + 1} von ${totalTasks}`}>
-            <div className={styles.progressText}>
-              <span>{answeredCount}/{totalTasks} Antworten</span>
-              <span>{remainingCount} uebrig - {completedPartCount}/{Math.max(1, examParts.length)} Abschnitte</span>
-            </div>
-            <div className={styles.progressText} hidden>
-              <span>{answeredCount}/{totalTasks} réponses</span>
-              <span>{remainingCount} restantes · {completedPartCount}/{Math.max(1, examParts.length)} sections</span>
-            </div>
-            <div className={styles.progressTrack}>
-              <span style={{ width: `${progressPercent}%` }} />
-            </div>
-          </div>
-
-          {!completed ? renderQuestionStepper() : null}
         </header>
 
         <div className={`${styles.workArea} ${module.id === "read" ? styles.readingWorkArea : ""}`}>
           <section className={styles.mainContent}>{renderModuleContent()}</section>
 
-          {module.id !== "read" ? (
-          <aside className={styles.sidebar}>
-            <div className={styles.sidebarHeader}>
-              <h2>Tests</h2>
-              <p>{simulationMode ? t.modulePage.navigationLocked : t.modulePage.navigationFree}</p>
-            </div>
-
-            <div className={styles.questionNav}>
-              {module.tasks.map((task, index) => {
-                const answered = getTaskAnswered(module, task, answers[index]);
-                const isSkipped = Boolean(skipped[index]);
-                const isFlagged = Boolean(flagged[index]);
-                return (
-                  <span
-                    key={task.id}
-                    className={[
-                      styles.questionButton,
-                      index === currentIndex ? styles.questionCurrent : "",
-                      answered ? styles.questionAnswered : "",
-                      isSkipped ? styles.questionSkipped : "",
-                    ].join(" ")}
-                    data-static="true"
-                    aria-current={index === currentIndex ? "step" : undefined}
-                    aria-label={`Frage ${index + 1}`}
-                  >
-                    <span>{index + 1}</span>
-                    {answered ? <CheckCircle2 size={14} /> : isSkipped ? <SkipForward size={14} /> : <Circle size={14} />}
-                    {isFlagged ? <Flag size={12} className={styles.flagMini} /> : null}
-                  </span>
-                );
-              })}
-            </div>
-
-            <div className={styles.legend}>
-              <span><i className={styles.legendAnswered} /> {t.modulePage.answered}</span>
-              <span><i className={styles.legendCurrent} /> Aktuell</span>
-              <span><i className={styles.legendFlagged} /> {t.modulePage.flagged}</span>
-            </div>
-
-          </aside>
-          ) : null}
+          {!completed ? renderExamSidebar() : null}
         </div>
 
         {!completed && !partIntroVisible ? (
