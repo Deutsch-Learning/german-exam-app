@@ -4,7 +4,7 @@ const getBearerToken = (req) => {
   return type === "Bearer" && token ? token : "";
 };
 
-const createAuthMiddleware = ({ pool, jwt, jwtSecret, issuer, audience }) => {
+const createAuthMiddleware = ({ pool, jwt, jwtSecret, issuer, audience, emailVerificationRequired = true }) => {
   return async function authMiddleware(req, res, next) {
     try {
       const token = getBearerToken(req);
@@ -43,7 +43,7 @@ const createAuthMiddleware = ({ pool, jwt, jwtSecret, issuer, audience }) => {
       if (user.status !== "active") {
         return res.status(403).json({ ok: false, error: "Account is suspended" });
       }
-      if (!user.email_verified) {
+      if (emailVerificationRequired && !user.email_verified) {
         return res.status(403).json({
           ok: false,
           error: "Email verification required",

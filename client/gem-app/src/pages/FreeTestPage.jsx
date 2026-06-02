@@ -4,23 +4,24 @@ import "./SimplePages.css";
 import logo from "../assets/images/logo.png";
 import NotFoundPage from "./NotFoundPage";
 import { useTestProtection } from "../utils/testProtection";
+import { useSimulationLanguage } from "../utils/simulationLanguage";
 
 const questions = [
   {
     id: "q1",
-    prompt: "Which German article is used with 'Universitaet'?",
+    prompt: "Welcher deutsche Artikel gehoert zu 'Universitaet'?",
     options: ["der", "die", "das"],
     correct: "die",
   },
   {
     id: "q2",
-    prompt: "Choose the best meaning of 'Bewerbung'.",
-    options: ["application", "library", "timetable"],
-    correct: "application",
+    prompt: "Waehlen Sie die beste Bedeutung von 'Bewerbung'.",
+    options: ["Bewerbung", "Bibliothek", "Stundenplan"],
+    correct: "Bewerbung",
   },
   {
     id: "q3",
-    prompt: "Which phrase is a formal greeting?",
+    prompt: "Welche Formulierung ist eine formelle Begruessung?",
     options: ["Hallo Tom", "Sehr geehrte Damen und Herren", "Bis spaeter"],
     correct: "Sehr geehrte Damen und Herren",
   },
@@ -28,6 +29,7 @@ const questions = [
 
 export default function FreeTestPage() {
   useTestProtection();
+  useSimulationLanguage();
   const { state } = useLocation();
   const { seriesId } = useParams();
   const [answers, setAnswers] = useState({});
@@ -47,8 +49,8 @@ export default function FreeTestPage() {
   if (!allowed) {
     return (
       <NotFoundPage
-        title="404 error"
-        message="This free visitor test is not safeguarded. Return to Home and open the free series again."
+        title="404-Fehler"
+        message="Dieser kostenlose Besuchertest ist nicht abgesichert. Kehren Sie zur Startseite zurueck und oeffnen Sie die kostenlose Serie erneut."
       />
     );
   }
@@ -62,17 +64,17 @@ export default function FreeTestPage() {
             Deutsch Learning
           </Link>
           <Link className="simple-home-link" to="/">
-            Home
+            Startseite
           </Link>
         </div>
 
         <header className="simple-hero">
-          <p className="simple-eyebrow">Visitor free test</p>
-          <h1>{seriesId} practice</h1>
+          <p className="simple-eyebrow">Kostenloser Besuchertest</p>
+          <h1>{seriesId} Uebung</h1>
           <p>
-            You can take this free test without creating an account. Your answers are not
-            saved, and a page reload will return a 404 error because visitor progress is
-            not safeguarded.
+            Sie koennen diesen kostenlosen Test ohne Konto bearbeiten. Ihre Antworten werden nicht
+            gespeichert. Nach dem Neuladen erscheint ein 404-Fehler, weil Besucherfortschritt
+            nicht abgesichert ist.
           </p>
         </header>
 
@@ -108,17 +110,17 @@ export default function FreeTestPage() {
 
             {submitted ? (
               <p>
-                Score: {score}/{questions.length}. Create an account to save future
-                preparation results.
+                Punktzahl: {score}/{questions.length}. Erstellen Sie ein Konto, um kuenftige
+                Vorbereitungsergebnisse zu speichern.
               </p>
             ) : null}
 
             <div className="simple-actions">
               <button className="simple-button" type="submit">
-                Submit free test
+                Kostenlosen Test abgeben
               </button>
               <Link className="simple-secondary-button" to="/register">
-                Create an account
+                Konto erstellen
               </Link>
             </div>
           </form>

@@ -2,6 +2,7 @@ require("dotenv").config();
 const crypto = require("crypto");
 const path = require("path");
 const express = require("express");
+const multer = require("multer");
 const pool = require("./db");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
@@ -12,14 +13,23 @@ const jwt = require("jsonwebtoken");
 const nodemailer = require("nodemailer");
 const { createAuthMiddleware } = require("./middleware/auth");
 const adminMiddleware = require("./middleware/admin");
+const {
+  analyzeExamDocument,
+  ensureDocumentImportSchema,
+  importParsedExamDocument,
+  summarizeOutline,
+} = require("./services/documentImport");
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
-const CLIENT_DIST_DIR = process.env.CLIENT_DIST_DIR
-  ? path.resolve(process.env.CLIENT_DIST_DIR)
-  : path.join(__dirname, "..", "client", "gem-app", "dist");
-const CLIENT_INDEX_FILE = path.join(CLIENT_DIST_DIR, "index.html");
+const SERVE_CLIENT = process.env.SERVE_CLIENT === "true";
+const CLIENT_DIST_DIR = SERVE_CLIENT
+  ? process.env.CLIENT_DIST_DIR
+    ? path.resolve(process.env.CLIENT_DIST_DIR)
+    : path.join(__dirname, "..", "client", "gem-app", "dist")
+  : "";
+const CLIENT_INDEX_FILE = CLIENT_DIST_DIR ? path.join(CLIENT_DIST_DIR, "index.html") : "";
 const isProduction = process.env.NODE_ENV === "production";
 
 const normalizeOrigin = (value) =>
@@ -70,6 +80,7 @@ const REFRESH_DAYS = 7;
 const REFRESH_MAX_AGE_MS = REFRESH_DAYS * 24 * 60 * 60 * 1000;
 const COOKIE_SECURE = isProduction;
 const DEFAULT_TOTAL_AVAILABLE_EXAMS = Number(process.env.TOTAL_AVAILABLE_EXAMS || 20);
+const EMAIL_VERIFICATION_REQUIRED = process.env.EMAIL_VERIFICATION_REQUIRED === "true";
 
 if (!process.env.JWT_SECRET && isProduction) {
   throw new Error("JWT_SECRET is required in production");
@@ -92,6 +103,14 @@ app.use(
   })
 );
 app.use(express.json({ limit: "1mb" }));
+
+const documentUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 30 * 1024 * 1024,
+    files: 1,
+  },
+});
 
 const authRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -591,6 +610,8 @@ async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS exam_content_type_level_idx
       ON exam_content(type, level, created_at DESC);
   `);
+
+  await ensureDocumentImportSchema(pool);
 }
 
 const getFeature = (req) => {
@@ -639,6 +660,7 @@ const requireAuth = createAuthMiddleware({
   jwtSecret: JWT_SECRET,
   issuer: JWT_ISSUER,
   audience: JWT_AUDIENCE,
+  emailVerificationRequired: EMAIL_VERIFICATION_REQUIRED,
 });
 const requireAdmin = [requireAuth, adminMiddleware];
 
@@ -676,6 +698,494 @@ app.get("/test-db", async (req, res) => {
   }
 });
 
+const PUBLIC_EXAM_META = {
+  goethe: {
+    examId: "goethe",
+    examName: "Goethe-Zertifikat",
+    accent: "#c10016",
+  },
+  telc: {
+    examId: "telc",
+    examName: "TELC Deutsch",
+    accent: "#0f766e",
+  },
+  testdaf: {
+    examId: "testdaf",
+    examName: "TestDaF",
+    accent: "#2563eb",
+  },
+  dsh: {
+    examId: "dsh",
+    examName: "DSH",
+    accent: "#7c3aed",
+  },
+};
+
+const PUBLIC_MODULE_META = {
+  read: {
+    id: "read",
+    label: "Compréhension Écrite",
+    shortLabel: "Written comprehension",
+    description: "Imported reading tasks from the original exam document.",
+    defaultMinutes: 65,
+  },
+  listen: {
+    id: "listen",
+    label: "Compréhension Orale",
+    shortLabel: "Oral comprehension",
+    description: "Imported listening tasks from the original exam document.",
+    defaultMinutes: 40,
+  },
+  write: {
+    id: "write",
+    label: "Expression Écrite",
+    shortLabel: "Written expression",
+    description: "Imported writing prompts from the original exam document.",
+    defaultMinutes: 60,
+  },
+  speak: {
+    id: "speak",
+    label: "Expression Orale",
+    shortLabel: "Oral expression",
+    description: "Imported speaking prompts from the original exam document.",
+    defaultMinutes: 15,
+  },
+};
+
+const MODULE_ORDER = ["read", "listen", "write", "speak"];
+
+const normalizeProviderId = (value) => {
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  if (normalized.includes("goethe")) return "goethe";
+  if (normalized.includes("testdaf")) return "testdaf";
+  if (normalized.includes("telc")) return "telc";
+  if (normalized === "dsh" || normalized.includes("deutsche-sprachpruefung")) return "dsh";
+  return normalized;
+};
+
+const toImportedSeriesId = (provider, level, seriesNumber) =>
+  `imported-${provider}-${String(level || "level").toLowerCase()}-series-${String(seriesNumber).padStart(2, "0")}`;
+
+const parseSeriesNumber = (seriesId) => {
+  const raw = String(seriesId ?? "").trim();
+  if (/^\d+$/.test(raw)) return Number(raw);
+  const match = raw.match(/series-(\d+)/i);
+  return match ? Number(match[1]) : null;
+};
+
+const asJsonObject = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {};
+
+const cleanText = (value) =>
+  String(value ?? "")
+    .replace(/\r/g, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+
+const clipText = (value, max = 1200) => {
+  const text = cleanText(value);
+  if (text.length <= max) return text;
+  return `${text.slice(0, Math.max(0, max - 1)).trim()}…`;
+};
+
+const extractCorrectValue = (correctAnswer) => {
+  const correct = asJsonObject(correctAnswer);
+  const value = correct.value ?? correct.answer ?? correct.correct ?? correct.correctAnswer;
+  return value == null ? "" : String(value).trim();
+};
+
+const normalizeChoiceOptions = (options) => {
+  if (!Array.isArray(options)) return [];
+  return options
+    .map((option, index) => {
+      const value = option?.value ?? option?.id ?? String.fromCharCode(97 + index);
+      const label = option?.label ?? option?.text ?? option?.title ?? value;
+      return {
+        value: String(value),
+        label: clipText(label, 280),
+      };
+    })
+    .filter((option) => option.value && option.label);
+};
+
+const toPublicSeriesList = (rows) => {
+  const groups = new Map();
+
+  for (const row of rows) {
+    const provider = normalizeProviderId(row.provider);
+    const meta = PUBLIC_EXAM_META[provider] ?? {
+      examId: provider,
+      examName: row.exam_type || provider,
+      accent: "#111827",
+    };
+    const seriesNumber = Number(row.series_number);
+    if (!Number.isFinite(seriesNumber)) continue;
+
+    if (!groups.has(seriesNumber)) {
+      groups.set(seriesNumber, {
+        id: toImportedSeriesId(provider, row.level, seriesNumber),
+        code: `Series ${String(seriesNumber).padStart(2, "0")}`,
+        title: "",
+        level: row.level || "B1",
+        duration: "Imported modules",
+        theme: "",
+        setting: row.exam_type || meta.examName,
+        examId: meta.examId,
+        examName: row.exam_type || meta.examName,
+        accent: meta.accent,
+        isFree: seriesNumber === 1,
+        isImported: true,
+        source: "database",
+        seriesNumber,
+        modules: {},
+      });
+    }
+
+    const series = groups.get(seriesNumber);
+    const metadata = asJsonObject(row.metadata);
+    const moduleId = row.section_type;
+    const moduleMeta = PUBLIC_MODULE_META[moduleId];
+    if (!moduleMeta) continue;
+
+    const title = cleanText(metadata.title || metadata.sourceLabel || row.name);
+    if (!series.title && title) series.title = title;
+    if (!series.theme && title) series.theme = title;
+
+    series.modules[moduleId] = {
+      ...moduleMeta,
+      available: true,
+      sourceExamId: row.id,
+      sourceCode: row.code,
+      sourceLabel: metadata.sourceLabel || row.name,
+      title: title || moduleMeta.label,
+      questionCount: Number(row.question_count) || 0,
+      sectionCount: Number(row.section_count) || 0,
+      durationMinutes: Number(row.duration_minutes) || moduleMeta.defaultMinutes,
+    };
+  }
+
+  return Array.from(groups.values()).map((series) => {
+    const moduleIds = MODULE_ORDER.filter((moduleId) => series.modules[moduleId]);
+    return {
+      ...series,
+      title: series.title || `${series.examName} ${series.code}`,
+      theme: series.theme || series.examName,
+      duration: `${moduleIds.length} module${moduleIds.length > 1 ? "s" : ""}`,
+    };
+  });
+};
+
+const queryImportedExamRows = async (provider, seriesNumber = null) => {
+  const params = [provider];
+  const seriesClause = seriesNumber == null ? "" : "AND e.series_number = $2";
+  if (seriesNumber != null) params.push(seriesNumber);
+
+  return pool.query(
+    `
+      SELECT e.id, e.code, e.name, e.provider, e.exam_type, e.level, e.section_type,
+             e.series_number, e.metadata,
+             COALESCE(q.question_count, 0)::int AS question_count,
+             COALESCE(s.section_count, 0)::int AS section_count,
+             COALESCE(s.duration_minutes, 0)::int AS duration_minutes
+      FROM exams e
+      LEFT JOIN (
+        SELECT exam_id, COUNT(*) AS question_count
+        FROM exam_questions
+        GROUP BY exam_id
+      ) q ON q.exam_id = e.id
+      LEFT JOIN (
+        SELECT exam_id, COUNT(*) AS section_count, SUM(COALESCE(duration_minutes, 0)) AS duration_minutes
+        FROM exam_sections
+        GROUP BY exam_id
+      ) s ON s.exam_id = e.id
+      WHERE LOWER(e.provider) = LOWER($1)
+        AND e.is_active = TRUE
+        AND e.source_import_id IS NOT NULL
+        AND e.series_number IS NOT NULL
+        ${seriesClause}
+      ORDER BY e.series_number,
+               CASE e.section_type
+                 WHEN 'read' THEN 1
+                 WHEN 'listen' THEN 2
+                 WHEN 'write' THEN 3
+                 WHEN 'speak' THEN 4
+                 ELSE 9
+               END,
+               e.id
+    `,
+    params
+  );
+};
+
+const buildTaskPartMeta = (question, index = 0) => {
+  const metadata = asJsonObject(question.source_metadata);
+  const partNumber = Number(question.part_number) || Number(question.section_position) || index + 1;
+  const partTitle = question.section_title || (partNumber ? `Teil ${partNumber}` : "Part");
+  return {
+    partKey: `part-${partNumber || index + 1}`,
+    partNumber,
+    partTitle,
+    partInstructions: clipText(question.section_instructions || "", 5200),
+    partDurationMinutes: Number(question.section_duration_minutes) || null,
+    partPoints: Number(question.section_points) || null,
+    sourceQuestionNumber: metadata.sourceQuestionNumber ?? question.position ?? index + 1,
+  };
+};
+
+const buildReadingTask = (question, index = 0) => {
+  const questionType = String(question.question_type || "").toLowerCase();
+  const correctValue = extractCorrectValue(question.correct_answer);
+  const options = normalizeChoiceOptions(question.options);
+  const base = {
+    id: `db-question-${question.id}`,
+    level: question.level || "B1",
+    typeLabel: question.section_title || "Lesen",
+    question: clipText(question.prompt, 900),
+    hint: question.section_title ? `Relisez ${question.section_title}.` : "Relisez le texte source.",
+    explanation: question.explanation || "Réponse issue du document importé.",
+    sourceQuestionId: question.id,
+    ...buildTaskPartMeta(question, index),
+  };
+
+  if (questionType.includes("true_false")) {
+    return {
+      ...base,
+      type: "trueFalse",
+      correct: /^(richtig|true|vrai|ja|yes)$/i.test(correctValue) ? "true" : "false",
+    };
+  }
+
+  if (questionType.includes("yes_no")) {
+    return {
+      ...base,
+      type: "multiple",
+      options: [
+        { value: "ja", label: "Ja" },
+        { value: "nein", label: "Nein" },
+      ],
+      correct: /^ja$/i.test(correctValue) ? "ja" : "nein",
+    };
+  }
+
+  if (questionType.includes("multiple") && options.length >= 2) {
+    return {
+      ...base,
+      type: "multiple",
+      options,
+      correct: correctValue || options[0].value,
+    };
+  }
+
+  if (questionType.includes("matching")) {
+    const correct = correctValue || "x";
+    return {
+      ...base,
+      type: "select",
+      typeLabel: `${base.typeLabel} - Zuordnung`,
+      question: `${base.question}\n\nWählen Sie die passende Anzeige. X = keine passende Anzeige.`,
+      options: "abcdefghijx".split("").map((value) => ({
+        value,
+        label: value === "x" ? "X - Keine passende Anzeige" : value.toUpperCase(),
+      })),
+      correct,
+      alternatives: [correct.toUpperCase(), correct.toLowerCase()],
+    };
+  }
+
+  return {
+    ...base,
+    type: options.length >= 2 ? "multiple" : "blank",
+    options: options.length >= 2 ? options : undefined,
+    correct: options.length >= 2 ? correctValue || options[0].value : correctValue,
+    alternatives: correctValue ? [correctValue.toLowerCase(), correctValue.toUpperCase()] : [],
+  };
+};
+
+const buildWritingTask = (question, index) => {
+  const metadata = asJsonObject(question.source_metadata);
+  const scoring = asJsonObject(question.scoring);
+  const correct = asJsonObject(question.correct_answer);
+  const wordTarget = Number(metadata.wordTarget) || (question.part_number === 3 ? 40 : 80);
+  const minWords = Math.max(30, Math.round(wordTarget * 0.75));
+  const maxWords = Math.max(wordTarget + 20, Math.round(wordTarget * 1.45));
+
+  return {
+    id: `db-question-${question.id}`,
+    level: question.level || "B1",
+    typeLabel: question.section_title || `Schreiben Teil ${question.part_number || index + 1}`,
+    title: question.section_title || `Aufgabe ${index + 1}`,
+    register: question.part_number === 1 ? "informell" : question.part_number === 3 ? "halbformell" : "neutral",
+    minWords,
+    targetWords: wordTarget,
+    maxWords,
+    prompt: clipText(question.prompt || question.section_instructions, 2200),
+    criteria: [
+      "Alle Inhaltspunkte behandeln",
+      "Klare Struktur",
+      "Passender B1-Wortschatz",
+      `${Number(scoring.points) || 0} Punkte`,
+    ].filter(Boolean),
+    sampleAnswer: correct.sampleAnswer ? clipText(correct.sampleAnswer, 1600) : undefined,
+    sourceQuestionId: question.id,
+    ...buildTaskPartMeta(question, index),
+  };
+};
+
+const buildSpeakingTask = (question, index) => {
+  const scoring = asJsonObject(question.scoring);
+  const durationMinutes = Number(scoring.durationMinutes) || Number(question.section_duration_minutes) || 2;
+  const points = Number(scoring.points) || Number(question.section_points) || 0;
+
+  return {
+    id: `db-question-${question.id}`,
+    level: question.level || "B1",
+    typeLabel: question.section_title || `Sprechen Teil ${question.part_number || index + 1}`,
+    title: question.section_title || `Aufgabe ${index + 1}`,
+    prepSeconds: question.part_number === 1 ? 60 : 45,
+    responseSeconds: Math.max(60, Math.round(durationMinutes * 60)),
+    prompt: clipText(question.prompt || question.section_instructions, 2200),
+    checklist: [
+      "Aufgabe vollständig bearbeiten",
+      "Natürlich reagieren",
+      "Beispiele nennen",
+      points ? `${points} Punkte` : null,
+    ].filter(Boolean),
+    sourceQuestionId: question.id,
+    ...buildTaskPartMeta(question, index),
+  };
+};
+
+const buildImportedModuleContent = ({ exam, sections, questions }) => {
+  const moduleId = exam.section_type;
+  const moduleMeta = PUBLIC_MODULE_META[moduleId] ?? PUBLIC_MODULE_META.read;
+  const metadata = asJsonObject(exam.metadata);
+  const sourceLabel = metadata.sourceLabel || `Series ${String(exam.series_number).padStart(2, "0")}`;
+  const title = metadata.title || sourceLabel || exam.name;
+  const sectionSummaries = sections.map((section) => ({
+    id: `part-${section.part_number || section.position}`,
+    label: `Teil ${section.part_number || section.position}`,
+    number: Number(section.part_number) || Number(section.position) || null,
+    heading: section.title,
+    text: clipText(section.instructions || section.title, 2600),
+    instructions: clipText(section.instructions || section.title, 5200),
+    durationMinutes: Number(section.duration_minutes) || null,
+    points: Number(section.points) || null,
+  }));
+
+  let tasks;
+  if (moduleId === "write") {
+    tasks = questions.map((question, index) => buildWritingTask(question, index));
+  } else if (moduleId === "speak") {
+    tasks = questions.map((question, index) => buildSpeakingTask(question, index));
+  } else {
+    tasks = questions.map((question, index) => buildReadingTask(question, index));
+  }
+
+  return {
+    id: moduleId,
+    isImported: true,
+    label: moduleMeta.label,
+    shortLabel: moduleMeta.shortLabel,
+    theme: title,
+    focus: [
+      exam.exam_type || "Goethe-Zertifikat",
+      sourceLabel,
+      moduleMeta.label,
+      `${tasks.length} question${tasks.length > 1 ? "s" : ""}`,
+    ],
+    advancement: [
+      "Contenu importé depuis les documents originaux",
+      "Structure conservée par parties",
+      "Questions reliées à leur série",
+      "Correction basée sur les réponses extraites",
+    ],
+    parts: sectionSummaries,
+    passage:
+      moduleId === "read"
+        ? {
+            title: `${sourceLabel}: ${title}`,
+            intro: metadata.instructions || "Lisez les textes et répondez aux questions.",
+            paragraphs: sectionSummaries.length
+              ? sectionSummaries
+              : [{ id: "A", text: "Texte importé depuis le document source." }],
+          }
+        : undefined,
+    audio: moduleId === "listen" ? asJsonObject(questions[0]?.audio) : undefined,
+    tasks,
+    sourceExamId: exam.id,
+  };
+};
+
+app.get("/api/exams/:provider/series", async (req, res) => {
+  try {
+    const provider = normalizeProviderId(req.params.provider);
+    if (!provider) return res.status(400).json({ ok: false, error: "Invalid exam provider" });
+
+    const importedRows = await queryImportedExamRows(provider);
+    const series = toPublicSeriesList(importedRows.rows);
+    return res.json({ ok: true, source: "database", series });
+  } catch (err) {
+    console.error("Imported series lookup failed", err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.get("/api/exams/:provider/series/:seriesId/:moduleId", async (req, res) => {
+  try {
+    const provider = normalizeProviderId(req.params.provider);
+    const seriesNumber = parseSeriesNumber(req.params.seriesId);
+    const moduleId = String(req.params.moduleId || "").trim().toLowerCase();
+    if (!provider || !seriesNumber || !PUBLIC_MODULE_META[moduleId]) {
+      return res.status(400).json({ ok: false, error: "Invalid imported module request" });
+    }
+
+    const importedRows = await queryImportedExamRows(provider, seriesNumber);
+    const series = toPublicSeriesList(importedRows.rows)[0];
+    const exam = importedRows.rows.find((row) => row.section_type === moduleId);
+    if (!series || !exam) {
+      return res.status(404).json({ ok: false, error: "Imported module not found" });
+    }
+
+    const sections = await pool.query(
+      `SELECT *
+       FROM exam_sections
+       WHERE exam_id = $1
+       ORDER BY position, id`,
+      [exam.id]
+    );
+    const questions = await pool.query(
+      `SELECT q.*, e.level, s.title AS section_title, s.part_number,
+              s.instructions AS section_instructions,
+              s.duration_minutes AS section_duration_minutes,
+              s.points AS section_points,
+              s.scoring AS section_scoring,
+              s.metadata AS section_metadata,
+              s.position AS section_position
+       FROM exam_questions q
+       JOIN exams e ON e.id = q.exam_id
+       LEFT JOIN exam_sections s ON s.id = q.section_id
+       WHERE q.exam_id = $1
+       ORDER BY COALESCE(s.position, 0), q.position, q.id`,
+      [exam.id]
+    );
+
+    const content = buildImportedModuleContent({
+      exam,
+      sections: sections.rows,
+      questions: questions.rows,
+    });
+    return res.json({ ok: true, source: "database", series, content });
+  } catch (err) {
+    console.error("Imported module lookup failed", err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
 const registerHandler = async (req, res) => {
   try {
     const { email, password, username, firstName, lastName } = req.body ?? {};
@@ -696,29 +1206,34 @@ const registerHandler = async (req, res) => {
     const safeFirst = typeof firstName === "string" ? firstName.trim().slice(0, 80) : null;
     const safeLast = typeof lastName === "string" ? lastName.trim().slice(0, 80) : null;
     const passwordHash = await bcrypt.hash(password, 12);
-    const verificationToken = makeToken();
+    const verificationToken = EMAIL_VERIFICATION_REQUIRED ? makeToken() : null;
 
     const insert = await pool.query(
       `INSERT INTO users (
          email, username, first_name, last_name, password_hash, role, status,
          email_verified, verification_token_hash, verification_expires_at
        )
-       VALUES ($1, $2, $3, $4, $5, 'user', 'active', FALSE, $6, $7)
-       RETURNING id, email, username, first_name, last_name`,
+       VALUES ($1, $2, $3, $4, $5, 'user', 'active', $6, $7, $8)
+       RETURNING id, email, username, first_name, last_name, email_verified`,
       [
         normalizedEmail,
         safeUsername,
         safeFirst,
         safeLast,
         passwordHash,
-        tokenHash(verificationToken),
-        expiresFromNow(VERIFICATION_HOURS, "hours"),
+        !EMAIL_VERIFICATION_REQUIRED,
+        verificationToken ? tokenHash(verificationToken) : null,
+        verificationToken ? expiresFromNow(VERIFICATION_HOURS, "hours") : null,
       ]
     );
-    const verificationUrl = await sendVerificationEmail(insert.rows[0], verificationToken);
+    const verificationUrl = verificationToken
+      ? await sendVerificationEmail(insert.rows[0], verificationToken)
+      : null;
     return res.status(201).json({
       ok: true,
-      message: "Account created. Please confirm your email before logging in.",
+      message: EMAIL_VERIFICATION_REQUIRED
+        ? "Account created. Please confirm your email before logging in."
+        : "Account created. You can now log in.",
       devVerificationUrl: process.env.NODE_ENV === "production" ? undefined : verificationUrl,
     });
   } catch (err) {
@@ -738,6 +1253,10 @@ app.post("/api/auth/register", registerHandler);
 
 app.post("/resend-verification", async (req, res) => {
   try {
+    if (!EMAIL_VERIFICATION_REQUIRED) {
+      return res.json({ ok: true, message: "Email verification is currently disabled." });
+    }
+
     const email = normalizeEmail(req.body?.email);
     if (!isEmail(email)) {
       return res.status(400).json({ ok: false, error: "A valid email is required" });
@@ -1238,7 +1757,9 @@ const updateProfileHandler = async (req, res) => {
     }
 
     const emailChanged = safeEmail !== req.user.email;
-    const verificationToken = emailChanged ? makeToken() : null;
+    const shouldVerifyEmail = EMAIL_VERIFICATION_REQUIRED && emailChanged;
+    const shouldTrustEmail = !EMAIL_VERIFICATION_REQUIRED && emailChanged;
+    const verificationToken = shouldVerifyEmail ? makeToken() : null;
 
     const updated = await pool.query(
       `UPDATE users
@@ -1247,8 +1768,8 @@ const updateProfileHandler = async (req, res) => {
            last_name = $3,
            email = $4,
            date_of_birth = COALESCE($5::date, date_of_birth),
-           email_verified = CASE WHEN $6 THEN FALSE ELSE email_verified END,
-           email_verified_at = CASE WHEN $6 THEN NULL ELSE email_verified_at END,
+           email_verified = CASE WHEN $6 THEN FALSE WHEN $10 THEN TRUE ELSE email_verified END,
+           email_verified_at = CASE WHEN $6 THEN NULL WHEN $10 THEN NOW() ELSE email_verified_at END,
            verification_token_hash = CASE WHEN $6 THEN $7 ELSE verification_token_hash END,
            verification_expires_at = CASE WHEN $6 THEN $8 ELSE verification_expires_at END
        WHERE id = $9
@@ -1260,16 +1781,17 @@ const updateProfileHandler = async (req, res) => {
         safeLast,
         safeEmail,
         safeDob || null,
-        emailChanged,
+        shouldVerifyEmail,
         verificationToken ? tokenHash(verificationToken) : null,
         verificationToken ? expiresFromNow(VERIFICATION_HOURS, "hours") : null,
         req.user.id,
+        shouldTrustEmail,
       ]
     );
 
     if (!updated.rows[0]) return res.status(404).json({ ok: false, error: "User not found" });
     let verificationUrl;
-    if (emailChanged) {
+    if (shouldVerifyEmail) {
       verificationUrl = await sendVerificationEmail(updated.rows[0], verificationToken);
     }
     return res.json({
@@ -1717,6 +2239,93 @@ app.post("/api/admin/exams/upload-json", requireAdmin, async (req, res) => {
   }
 });
 
+app.post("/api/admin/exams/analyze-document", requireAdmin, documentUpload.single("document"), async (req, res) => {
+  try {
+    if (!req.file?.buffer) {
+      return res.status(400).json({ ok: false, error: "Document file is required" });
+    }
+    const parsed = await analyzeExamDocument({
+      buffer: req.file.buffer,
+      filename: req.file.originalname,
+      mimetype: req.file.mimetype,
+    });
+    await auditAdminAction(req, "exam.document_analyze", "document", parsed.documentHash, {
+      filename: parsed.filename,
+      provider: parsed.metadata.provider,
+      sectionType: parsed.metadata.sectionType,
+      series: parsed.series.length,
+      questions: parsed.validation.questionCount,
+    });
+    return res.json({
+      ok: true,
+      analysis: {
+        documentHash: parsed.documentHash,
+        filename: parsed.filename,
+        sizeBytes: parsed.sizeBytes,
+        extraction: parsed.extraction,
+        metadata: parsed.metadata,
+        validation: parsed.validation,
+        outline: summarizeOutline(parsed),
+      },
+    });
+  } catch (err) {
+    console.error("Document analysis failed", err);
+    return res.status(400).json({ ok: false, error: err.message || "Document analysis failed" });
+  }
+});
+
+app.post("/api/admin/exams/import-document", requireAdmin, documentUpload.single("document"), async (req, res) => {
+  try {
+    if (!req.file?.buffer) {
+      return res.status(400).json({ ok: false, error: "Document file is required" });
+    }
+    const parsed = await analyzeExamDocument({
+      buffer: req.file.buffer,
+      filename: req.file.originalname,
+      mimetype: req.file.mimetype,
+    });
+    const result = await importParsedExamDocument({
+      pool,
+      parsed,
+      adminId: req.user.id,
+    });
+    await auditAdminAction(
+      req,
+      result.duplicate ? "exam.document_duplicate" : "exam.document_import",
+      "document",
+      parsed.documentHash,
+      {
+        filename: parsed.filename,
+        importId: result.import?.id,
+        duplicate: result.duplicate,
+        exams: result.exams.length,
+        provider: parsed.metadata.provider,
+        sectionType: parsed.metadata.sectionType,
+        series: parsed.series.length,
+        questions: parsed.validation.questionCount,
+      }
+    );
+    return res.status(result.duplicate ? 200 : 201).json({
+      ok: true,
+      duplicate: result.duplicate,
+      import: result.import,
+      exams: result.exams,
+      analysis: {
+        documentHash: parsed.documentHash,
+        filename: parsed.filename,
+        sizeBytes: parsed.sizeBytes,
+        extraction: parsed.extraction,
+        metadata: parsed.metadata,
+        validation: parsed.validation,
+        outline: summarizeOutline(parsed),
+      },
+    });
+  } catch (err) {
+    console.error("Document import failed", err);
+    return res.status(400).json({ ok: false, error: err.message || "Document import failed" });
+  }
+});
+
 app.put("/api/admin/exams/:id", requireAdmin, async (req, res) => {
   try {
     const examId = Number(req.params.id);
@@ -1931,7 +2540,7 @@ if (!isProduction) {
   });
 }
 
-if (isProduction) {
+if (isProduction && SERVE_CLIENT) {
   app.use(express.static(CLIENT_DIST_DIR, { index: "index.html" }));
   app.use((req, res, next) => {
     const acceptsHtml = req.accepts(["html", "json"]) === "html";
@@ -1940,6 +2549,12 @@ if (isProduction) {
       if (err) return next(err);
       return undefined;
     });
+  });
+}
+
+if (isProduction && !SERVE_CLIENT) {
+  app.get("/", (req, res) => {
+    res.json({ ok: true, service: "german-exam-app-api" });
   });
 }
 

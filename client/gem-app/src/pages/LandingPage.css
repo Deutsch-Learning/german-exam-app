@@ -1552,8 +1552,309 @@ h4 {
   }
 }
 
+/* --- Premium motion and mobile navigation polish --- */
+:root {
+  --landing-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --landing-ease-in-out: cubic-bezier(0.76, 0, 0.24, 1);
+  --landing-nav-height: 72px;
+}
+
+.landing-page {
+  scroll-padding-top: calc(var(--landing-nav-height) + 20px);
+}
+
+.top-nav {
+  border-bottom: 1px solid rgba(226, 232, 240, 0.72);
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(18px) saturate(150%);
+  box-shadow: 0 12px 34px rgba(15, 23, 42, 0.08);
+  transition:
+    background-color 220ms var(--landing-ease),
+    box-shadow 220ms var(--landing-ease),
+    border-color 220ms var(--landing-ease);
+  z-index: 900;
+}
+
+.top-nav.menu-open {
+  background: rgba(255, 255, 255, 0.96);
+  border-color: rgba(226, 232, 240, 0.92);
+  box-shadow: 0 18px 46px rgba(15, 23, 42, 0.14);
+}
+
+.nav-container {
+  z-index: 2;
+}
+
+.logo img {
+  transition: transform 260ms var(--landing-ease), filter 260ms var(--landing-ease);
+}
+
+.logo:hover img {
+  transform: translate3d(0, -1px, 0) scale(1.02);
+  filter: saturate(1.08);
+}
+
+.mobile-menu-button {
+  position: relative;
+  z-index: 930;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+  transition:
+    transform 220ms var(--landing-ease),
+    box-shadow 220ms var(--landing-ease),
+    background-color 220ms var(--landing-ease),
+    border-color 220ms var(--landing-ease);
+}
+
+.mobile-menu-button:hover {
+  transform: translate3d(0, -1px, 0);
+  border-color: rgba(249, 196, 21, 0.6);
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.12);
+}
+
+.mobile-nav-scrim {
+  display: none;
+}
+
+.hero-section::before {
+  transform: scale(1.015);
+  transform-origin: 52% 16%;
+  animation: landingHeroDrift 18s var(--landing-ease-in-out) infinite alternate;
+  will-change: transform;
+}
+
+.hero-content {
+  animation: landingFadeUp 620ms var(--landing-ease) both;
+}
+
+.hero-title {
+  animation: landingFadeUp 680ms var(--landing-ease) 80ms both;
+}
+
+.hero-subtitle {
+  animation: landingFadeUp 680ms var(--landing-ease) 150ms both;
+}
+
+.hero-sim-actions {
+  animation: landingFadeUp 680ms var(--landing-ease) 220ms both;
+}
+
+.sim-start-button {
+  transform: translate3d(0, 0, 0);
+  transition:
+    transform 260ms var(--landing-ease),
+    box-shadow 260ms var(--landing-ease),
+    filter 260ms var(--landing-ease),
+    border-color 260ms var(--landing-ease);
+  will-change: transform;
+}
+
+.sim-start-button::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 20%, rgba(255, 255, 255, 0.28) 48%, transparent 72%);
+  transform: translate3d(-120%, 0, 0);
+  transition: transform 720ms var(--landing-ease);
+  pointer-events: none;
+}
+
+.sim-start-button:hover::after {
+  transform: translate3d(120%, 0, 0);
+}
+
+.stats-container .stat-card {
+  animation: landingFadeUp 620ms var(--landing-ease) both;
+}
+
+.stats-container .stat-card:nth-child(2) {
+  animation-delay: 90ms;
+}
+
+.stats-container .stat-card:nth-child(3) {
+  animation-delay: 180ms;
+}
+
+.stat-card,
+.service-card,
+.subscription-panel,
+.subscription-feature,
+.testimonial-card,
+.partners-grid img,
+.flag-chip {
+  transform: translate3d(0, 0, 0);
+  transition:
+    transform 300ms var(--landing-ease),
+    box-shadow 300ms var(--landing-ease),
+    border-color 300ms var(--landing-ease),
+    filter 300ms var(--landing-ease),
+    background-color 300ms var(--landing-ease);
+  will-change: transform;
+}
+
+.stat-card:hover,
+.service-card:hover,
+.testimonial-card:hover,
+.subscription-feature:hover,
+.flag-chip:hover {
+  transform: translate3d(0, -4px, 0);
+}
+
+.service-card:hover .service-icon-wrapper,
+.subscription-feature:hover .subscription-icon {
+  transform: scale(1.04);
+}
+
+.service-icon-wrapper,
+.subscription-icon {
+  transition: transform 300ms var(--landing-ease), background-color 300ms var(--landing-ease), color 300ms var(--landing-ease);
+}
+
+.partners-grid img:hover {
+  transform: translate3d(0, -3px, 0) scale(1.02);
+}
+
+.flag-track {
+  animation-duration: 38s;
+}
+
+.btn,
+.nav-link,
+.nav-dropdown-trigger,
+.language-button {
+  transition:
+    transform 220ms var(--landing-ease),
+    box-shadow 260ms var(--landing-ease),
+    background-color 220ms var(--landing-ease),
+    color 220ms var(--landing-ease),
+    border-color 220ms var(--landing-ease);
+}
+
+.btn:hover,
+.nav-link:hover,
+.nav-dropdown-trigger:hover,
+.language-button:hover {
+  transform: translate3d(0, -1px, 0);
+}
+
+@media (max-width: 1179px) {
+  .mobile-nav-scrim {
+    display: block;
+    position: fixed;
+    inset: var(--landing-nav-height) 0 0;
+    z-index: 880;
+    border: 0;
+    background: rgba(15, 23, 42, 0.38);
+    backdrop-filter: blur(6px);
+    cursor: pointer;
+    animation: landingFadeIn 180ms ease both;
+  }
+
+  .desktop-nav.mobile-open {
+    position: fixed;
+    top: calc(var(--landing-nav-height) + env(safe-area-inset-top, 0px));
+    left: clamp(12px, 4vw, 24px);
+    right: clamp(12px, 4vw, 24px);
+    z-index: 920;
+    max-height: calc(100dvh - var(--landing-nav-height) - 18px);
+    padding: 16px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid rgba(226, 232, 240, 0.92);
+    border-radius: 18px;
+    box-shadow: 0 26px 80px rgba(15, 23, 42, 0.24);
+    backdrop-filter: blur(18px) saturate(150%);
+    animation: landingMobileNavIn 260ms var(--landing-ease) both;
+  }
+
+  .top-nav.menu-open ~ .hero-section .hero-sim-actions {
+    pointer-events: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .hero-section::before {
+    animation-duration: 24s;
+    transform: scale(1.01);
+  }
+
+  .stat-card:hover,
+  .service-card:hover,
+  .testimonial-card:hover,
+  .subscription-feature:hover,
+  .flag-chip:hover,
+  .partners-grid img:hover {
+    transform: translate3d(0, -2px, 0);
+  }
+}
+
+@keyframes landingFadeIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes landingFadeUp {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 18px, 0) scale(0.99);
+    filter: blur(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes landingMobileNavIn {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -12px, 0) scale(0.98);
+    filter: blur(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes landingHeroDrift {
+  from {
+    transform: translate3d(-0.4%, 0, 0) scale(1.015);
+  }
+
+  to {
+    transform: translate3d(0.4%, -0.5%, 0) scale(1.03);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .hero-section::before,
+  .hero-content,
+  .hero-title,
+  .hero-subtitle,
+  .hero-sim-actions,
+  .stats-container .stat-card,
+  .desktop-nav.mobile-open,
+  .mobile-nav-scrim {
+    animation: none;
+    transform: none;
+    filter: none;
+  }
+
+  .sim-start-button::after {
+    display: none;
+  }
+
   .flag-track {
-    animation-duration: 80s;
+    animation: none;
   }
 }

@@ -1,15 +1,39 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Lock } from "lucide-react";
 import "./SimplePages.css";
 import logo from "../assets/images/logo.png";
 import { examSimulations } from "../data/siteContent";
-import { getSeriesForExam } from "../data/testSeries";
+import { fetchImportedSeries, hasPlayableImportedSeries } from "../services/importedExams";
 import { canOpenSeries, isVisitorSeriesAttempt } from "../utils/access";
+import { useSimulationLanguage } from "../utils/simulationLanguage";
 
 export default function StartPreparationPage() {
+  useSimulationLanguage();
+  const [importedByExam, setImportedByExam] = useState({});
+
+  useEffect(() => {
+    let cancelled = false;
+
+    Promise.all(
+      examSimulations.map((exam) =>
+        fetchImportedSeries(exam.id)
+          .then((series) => [exam.id, series])
+          .catch(() => [exam.id, []])
+      )
+    ).then((entries) => {
+      if (!cancelled) setImportedByExam(Object.fromEntries(entries));
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const groupedSeries = examSimulations.map((exam) => ({
     exam,
-    series: getSeriesForExam(exam.id),
+    checked: Object.prototype.hasOwnProperty.call(importedByExam, exam.id),
+    series: importedByExam[exam.id] ?? [],
   }));
 
   return (
@@ -21,22 +45,31 @@ export default function StartPreparationPage() {
             Deutsch Learning
           </Link>
           <Link className="simple-home-link" to="/">
-            Home
+            Startseite
           </Link>
         </div>
 
         <header className="simple-hero compact">
-          <p className="simple-eyebrow">Try for free</p>
-          <h1>Choose a series</h1>
-          <p>Free series are open to visitors. Paid series are locked until an offer is selected.</p>
+          <p className="simple-eyebrow">Kostenlos testen</p>
+          <h1>Serie waehlen</h1>
+          <p>Kostenlose Serien sind fuer Besucher offen. Bezahlte Serien bleiben gesperrt, bis ein Angebot ausgewaehlt wurde.</p>
         </header>
 
         <div className="free-series-groups">
-          {groupedSeries.map(({ exam, series }) => (
+          {groupedSeries.map(({ exam, checked, series }) => (
             <section className="free-series-group" key={exam.id}>
               <h2>{exam.name}</h2>
               <div className="series-minimal-grid">
-                {series.map((item) => {
+                {!checked ? (
+                  <span className="series-box locked">
+                    <span className="series-box-name">Pruefung laeuft...</span>
+                  </span>
+                ) : !hasPlayableImportedSeries(series) ? (
+                  <Link className="series-box locked" to={`/coming-soon/${exam.id}`}>
+                    <span className="series-box-name">Demnaechst</span>
+                    <Lock className="series-lock-icon" size={17} />
+                  </Link>
+                ) : series.map((item) => {
                   const canOpen = canOpenSeries(item);
 
                   return (

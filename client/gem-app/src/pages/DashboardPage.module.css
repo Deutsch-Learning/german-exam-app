@@ -37,7 +37,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 0 24px;
-  z-index: 40;
+  z-index: 120;
 }
 
 .navLeft {
@@ -130,6 +130,35 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.logoutTopBtn {
+  min-height: 40px;
+  border: 1px solid #fee2e2;
+  border-radius: 999px;
+  background: #fff5f5;
+  color: #b91c1c;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 850;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: transform 0.18s ease, background-color 0.18s ease, border-color 0.18s ease;
+}
+
+.logoutTopBtn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.logoutTopBtn:hover {
+  transform: translateY(-1px);
+  border-color: #fecaca;
+  background: #fee2e2;
 }
 
 .switchButton {
@@ -294,6 +323,12 @@
   padding: 24px;
   box-shadow: var(--shadow-sm);
   border: 1px solid rgba(0, 0, 0, 0.02);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
 }
 
 .cardTitle {
@@ -713,6 +748,54 @@
   gap: 4px;
 }
 
+.skeletonCard {
+  min-height: 260px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background:
+    linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.72), transparent),
+    #eef2f7;
+  background-size: 220% 100%, 100% 100%;
+  padding: 24px;
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  animation: skeletonSweep 1.2s ease-in-out infinite;
+}
+
+.skeletonCard span,
+.skeletonCard strong,
+.skeletonCard i {
+  display: block;
+  border-radius: 999px;
+  background: #dbe3ef;
+}
+
+.skeletonCard span {
+  width: 46%;
+  height: 16px;
+}
+
+.skeletonCard strong {
+  width: 72%;
+  height: 72px;
+  border-radius: 18px;
+}
+
+.skeletonCard i {
+  width: 88%;
+  height: 12px;
+}
+
+@keyframes skeletonSweep {
+  from {
+    background-position: 180% 0, 0 0;
+  }
+  to {
+    background-position: -80% 0, 0 0;
+  }
+}
+
 /* --- Floating CTA --- */
 .floatingCta {
   position: absolute;
@@ -727,8 +810,8 @@
   border-radius: 9999px;
   cursor: pointer;
   box-shadow: var(--shadow-cta);
-  transition: transform 0.2s, background-color 0.2s;
-  z-index: 50;
+  transition: transform 0.24s ease, background-color 0.2s ease, opacity 0.2s ease;
+  z-index: 24;
 }
 
 .floatingCta:hover {
@@ -754,19 +837,44 @@
     display: block;
   }
 
+  .topNav {
+    position: sticky;
+    top: 0;
+  }
+
+  .navRight {
+    gap: 8px;
+  }
+
+  .logoutTopBtn {
+    min-width: 42px;
+    padding: 0 10px;
+    position: relative;
+    z-index: 80;
+  }
+
+  .logoutTopBtn span {
+    display: none;
+  }
+
   .sidebar {
     position: fixed;
     top: 80px;
     bottom: 0;
     left: 0;
-    transform: translateX(-100%);
+    transform: translate3d(-100%, 0, 0);
     width: 240px;
+    height: calc(100dvh - 80px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
     border-right: none;
     box-shadow: var(--shadow-lg);
+    z-index: 110;
+    will-change: transform;
   }
 
   .sidebarOpen {
-    transform: translateX(0);
+    transform: translate3d(0, 0, 0);
   }
 
   .sidebarOverlay {
@@ -774,8 +882,11 @@
     position: fixed;
     inset: 0;
     top: 80px;
-    background-color: rgba(0, 0, 0, 0.4);
-    z-index: 20;
+    min-height: calc(100dvh - 80px);
+    background: rgba(15, 23, 42, 0.48);
+    backdrop-filter: blur(5px);
+    z-index: 100;
+    animation: drawerScrimIn 180ms ease both;
   }
 
   .menuItem {
@@ -784,9 +895,30 @@
     padding: 16px 32px;
     gap: 16px;
   }
+
+  .menuOpen .floatingCta {
+    opacity: 0;
+    transform: translate3d(0, 12px, 0);
+    pointer-events: none;
+  }
 }
 
 @media (max-width: 768px) {
+  .topNav {
+    height: auto;
+    min-height: 72px;
+    padding: 10px 14px;
+  }
+
+  .logo {
+    height: 42px;
+  }
+
+  .profileBtn {
+    width: 36px;
+    height: 36px;
+  }
+
   .contentArea {
     padding: 24px 16px;
   }
@@ -802,5 +934,45 @@
     padding: 16px;
     font-size: 0.9rem;
     text-align: center;
+  }
+}
+
+@media (max-width: 430px) {
+  .navRight {
+    gap: 6px;
+  }
+
+  .langBtn {
+    padding: 7px 9px;
+  }
+
+  .langBtn span {
+    display: none;
+  }
+
+  .logoutTopBtn {
+    min-width: 38px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .logoutTopBtn,
+  .floatingCta,
+  .resumeCard,
+  .skeletonCard,
+  .sidebarOverlay {
+    animation: none;
+    transition: none;
+  }
+}
+
+@keyframes drawerScrimIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
   }
 }

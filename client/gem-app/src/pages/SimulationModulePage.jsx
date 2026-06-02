@@ -37,12 +37,23 @@ import API from "../services/api";
 import styles from "./SimulationModulePage.module.css";
 import logo from "../assets/images/logo.png";
 import speakingImage from "../assets/images/active_people.png";
-import { getTranslations } from "../context/LanguageContext";
-import { getSeriesById, getSeriesModuleContent } from "../data/testSeries";
+import { fetchImportedSeriesModule } from "../services/importedExams";
 import { getProgressKey, upsertSimulationHistoryEntry } from "../utils/simulationHistory";
 import { canOpenSeries, getAuthUser, isVisitorSeriesAttempt } from "../utils/access";
 import { useTestProtection } from "../utils/testProtection";
+import { useSimulationLanguage } from "../utils/simulationLanguage";
+import SmoothedAudioPlayer from "../components/SmoothedAudioPlayer";
+import {
+  SPEECH_START_DELAY_MS,
+  createListeningUtterance,
+  createRecordingBlob,
+  getMicrophoneConstraints,
+  getPreferredRecorderOptions,
+  gracefulStopSpeech,
+  startSpeechWatchdog,
+} from "../utils/audio";
 import NotFoundPage from "./NotFoundPage";
+import ComingSoonPage from "./ComingSoonPage";
 
 const LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"];
 const PASS_SCORE = 70;
@@ -656,6 +667,232 @@ const germanSpeakingPrompts = {
   "speak-10": "Inwiefern veraendert eine neue Sprache die Art zu denken und zu handeln? Entwickeln Sie eine strukturierte Antwort.",
 };
 
+const GERMAN_TASK_COPY = {
+  "read-1": {
+    typeLabel: "Mehrfachauswahl",
+    question: "Welche wichtigste Aenderung wird im Text angekuendigt?",
+    options: [
+      { value: "a", label: "Die Bibliothek schliesst waehrend der Pruefungen." },
+      { value: "b", label: "Die Bibliothek bleibt an einigen Tagen laenger geoeffnet." },
+      { value: "c", label: "Die Bibliothek wird kostenpflichtig." },
+    ],
+    hint: "Achten Sie auf die Oeffnungszeiten in Absatz A.",
+    explanation: "Absatz A kuendigt Oeffnungszeiten bis 22 Uhr von Montag bis Donnerstag an.",
+  },
+  "read-2": {
+    typeLabel: "Richtig / Falsch",
+    question: "Das Erdgeschoss ist fuer ruhiges Arbeiten reserviert.",
+    hint: "Vergleichen Sie die beiden Bereiche in Absatz B.",
+    explanation: "Ruhiges Arbeiten findet im ersten Stock statt. Das Erdgeschoss ist fuer Gruppen vorgesehen.",
+  },
+  "read-3": {
+    typeLabel: "Lueckentext",
+    question: "Ergaenzen Sie: Die Anmeldung zu den Workshops erfolgt ueber die Plattform ____.",
+    hint: "Die Antwort steht am Ende von Absatz C.",
+    explanation: "Die genannte Plattform heisst Bibliothek Plus.",
+  },
+  "read-4": {
+    typeLabel: "Titel zuordnen",
+    question: "Ordnen Sie jedem Absatz seine Hauptidee zu.",
+    headings: ["Angepasste Arbeitsbereiche", "Laengerer Zugang", "Ein Unterstuetzungsprogramm"],
+    correct: {
+      A: "Laengerer Zugang",
+      B: "Angepasste Arbeitsbereiche",
+      C: "Ein Unterstuetzungsprogramm",
+    },
+    hint: "Suchen Sie zuerst das Schluesselwort jedes Absatzes.",
+    explanation: "Die Abschnitte behandeln nacheinander Oeffnungszeiten, Arbeitsbereiche und Workshops.",
+  },
+  "read-5": {
+    typeLabel: "Mehrfachauswahl",
+    question: "Warum aendert die Universitaet die Oeffnungszeiten?",
+    options: [
+      { value: "a", label: "Um auf die Beduerfnisse der Studierenden zu reagieren." },
+      { value: "b", label: "Um Personalkosten zu senken." },
+      { value: "c", label: "Um Abendkurse zu ersetzen." },
+    ],
+    hint: "Die Begruendung steht im zweiten Satz von Absatz A.",
+    explanation: "Der Text nennt eine haeufige Bitte von Studierenden als Grund.",
+  },
+  "read-6": {
+    typeLabel: "Richtig / Falsch",
+    question: "Gruppenraeume koennen online reserviert werden.",
+    hint: "Lesen Sie Absatz B noch einmal.",
+    explanation: "Der Text sagt, dass Raeume online fuer zwei Stunden gebucht werden koennen.",
+  },
+  "read-7": {
+    typeLabel: "Lueckentext",
+    question: "Nach 19 Uhr koennen Studierende Buecher in eine ____ Rueckgabebox legen.",
+    correct: "automatische",
+    alternatives: ["automatische", "automatisch"],
+    hint: "Die Einschraenkung und die Alternative stehen in Absatz D.",
+    explanation: "Die Rueckgabebox ist automatisch und befindet sich nahe am Haupteingang.",
+  },
+  "read-8": {
+    typeLabel: "Mehrfachauswahl",
+    question: "Welche wichtige Einschraenkung gibt es bei der Ausleihe?",
+    options: [
+      { value: "a", label: "Die Ausleihe laeuft die ganze Nacht weiter." },
+      { value: "b", label: "Die Ausleihe ist nach 19 Uhr geschlossen, Rueckgaben bleiben aber moeglich." },
+      { value: "c", label: "Rueckgaben sind nach 19 Uhr verboten." },
+    ],
+    hint: "Absatz D stellt eine Grenze und eine Moeglichkeit gegenueber.",
+    explanation: "Die Ausleihe schliesst nach 19 Uhr, aber Rueckgaben ueber die Box bleiben moeglich.",
+  },
+  "read-9": {
+    typeLabel: "Titel zuordnen",
+    question: "Welcher Titel passt am besten zu den Absaetzen B, C und D?",
+    headings: ["Organisation der Raeume", "Paedagogische Angebote", "Praktische Einschraenkungen"],
+    correct: {
+      B: "Organisation der Raeume",
+      C: "Paedagogische Angebote",
+      D: "Praktische Einschraenkungen",
+    },
+    hint: "Fassen Sie jeden Absatz zuerst in zwei Woertern zusammen.",
+    explanation: "B beschreibt die Raeume, C die Workshops und D die Grenzen des Services.",
+  },
+  "read-10": {
+    typeLabel: "Mehrfachauswahl",
+    question: "Welcher Ton kennzeichnet die Ankuendigung insgesamt?",
+    options: [
+      { value: "a", label: "Informativ mit einigen praktischen Bedingungen." },
+      { value: "b", label: "Kritisch und ironisch." },
+      { value: "c", label: "Werblich ohne konkrete Details." },
+    ],
+    hint: "Beachten Sie die Struktur: Ankuendigung, Regeln, Grenzen.",
+    explanation: "Die Ankuendigung gibt konkrete Informationen und nennt praktische Einschraenkungen.",
+  },
+  "listen-1": {
+    typeLabel: "Mehrfachauswahl",
+    question: "Wo findet die Ansage statt?",
+    options: [
+      { value: "a", label: "In einem Bahnhof." },
+      { value: "b", label: "In einer Bibliothek." },
+      { value: "c", label: "In einem Restaurant." },
+    ],
+    hint: "Hoeren Sie auf Woerter zum Verkehr.",
+    explanation: "Die Ansage spricht von einem Zug, einem Gleis und Reisenden.",
+  },
+  "listen-2": {
+    typeLabel: "Fehlendes Wort",
+    question: "Der Zug nach Berlin faehrt von Gleis ____ ab.",
+    correct: "7",
+    alternatives: ["sieben"],
+    hint: "Die Zahl wird nach dem Gleiswechsel genannt.",
+    explanation: "Die Ansage nennt Gleis 7.",
+  },
+  "listen-3": {
+    typeLabel: "Richtig / Falsch",
+    question: "Der Zug hat ungefaehr fuenfzehn Minuten Verspaetung.",
+    hint: "Achten Sie auf die Zeitangabe.",
+    explanation: "Die Ansage nennt eine Verspaetung von ungefaehr fuenfzehn Minuten.",
+  },
+  "listen-4": {
+    typeLabel: "In die richtige Reihenfolge bringen",
+    question: "Bringen Sie die Ereignisse in die gehoerte Reihenfolge.",
+    events: [
+      { value: "change", label: "Gleiswechsel" },
+      { value: "delay", label: "Ansage der Verspaetung" },
+      { value: "coffee", label: "Hinweis fuer Reisende" },
+    ],
+    hint: "Achten Sie auf Signalwoerter wie zuerst, danach und schliesslich.",
+    explanation: "Zuerst kommt der Gleiswechsel, dann die Verspaetung, danach der Hinweis zum Warten.",
+  },
+  "listen-5": {
+    typeLabel: "Mehrfachauswahl",
+    question: "Warum sollen die Reisenden aufmerksam bleiben?",
+    options: [
+      { value: "a", label: "Das Gleis koennte sich erneut aendern." },
+      { value: "b", label: "Die Fahrkarten sind nicht mehr gueltig." },
+      { value: "c", label: "Der Zug faellt aus." },
+    ],
+    hint: "Hoeren Sie die letzte Empfehlung.",
+    explanation: "Die Ansage bittet die Reisenden, die Anzeigen weiter zu beobachten.",
+  },
+  "listen-6": {
+    typeLabel: "Fehlendes Wort",
+    question: "Die Reisenden koennen auf der unteren Ebene in der Naehe des ____ warten.",
+    correct: "Cafes",
+    alternatives: ["cafe", "cafes", "café", "cafés"],
+    hint: "Der Ort wird nach dem praktischen Hinweis genannt.",
+    explanation: "Das Cafe auf der unteren Ebene wird als Warteort genannt.",
+  },
+  "listen-7": {
+    typeLabel: "Mehrfachauswahl",
+    question: "Welche Information wird in der Ansage nicht genannt?",
+    options: [
+      { value: "a", label: "Das neue Gleis." },
+      { value: "b", label: "Die genaue Ursache der Verspaetung." },
+      { value: "c", label: "Das Ziel des Zuges." },
+    ],
+    hint: "Unterscheiden Sie genannte Fakten von fehlenden Gruenden.",
+    explanation: "Die Ansage nennt Gleis und Ziel, aber nicht die genaue Ursache der Verspaetung.",
+  },
+  "listen-8": {
+    typeLabel: "Richtig / Falsch",
+    question: "Die Reisenden sollen sofort zu einem Schalter gehen.",
+    hint: "Der Hinweis betrifft vor allem das Warten und die Anzeigen.",
+    explanation: "In der Ansage wird kein Gang zum Schalter verlangt.",
+  },
+  "listen-9": {
+    typeLabel: "In die richtige Reihenfolge bringen",
+    question: "Ordnen Sie diese Informationen nach ihrer Bedeutung in der Ansage.",
+    events: [
+      { value: "platform", label: "Neues Gleis" },
+      { value: "delay", label: "Voraussichtliche Verspaetung" },
+      { value: "screens", label: "Anzeigen beobachten" },
+    ],
+    hint: "Die wichtigste Information hilft, den Zug nicht zu verpassen.",
+    explanation: "Das neue Gleis ist am wichtigsten, danach folgen Verspaetung und Beobachtung der Anzeigen.",
+  },
+  "listen-10": {
+    typeLabel: "Mehrfachauswahl",
+    question: "Welches Register beschreibt die Ansage am besten?",
+    options: [
+      { value: "a", label: "Formal, kurz und funktional." },
+      { value: "b", label: "Umgangssprachlich und humorvoll." },
+      { value: "c", label: "Erzaehlend und persoenlich." },
+    ],
+    hint: "Oeffentliche Ansagen nutzen oft direkte Formulierungen.",
+    explanation: "Die Ansage vermittelt praktische Informationen in einem formalen Register.",
+  },
+  "write-1": { typeLabel: "Kurze E-Mail", title: "Eine Information erfragen", register: "formell", prompt: germanWritingPrompts["write-1"], criteria: ["Anrede", "drei klare Fragen", "Grussformel"] },
+  "write-2": { typeLabel: "Persoenliche Nachricht", title: "Einen Freund einladen", register: "informell", prompt: germanWritingPrompts["write-2"], criteria: ["natuerlicher Ton", "Datum oder Zeitpunkt", "zwei Aktivitaeten"] },
+  "write-3": { typeLabel: "Praktische E-Mail", title: "Einen Termin verschieben", register: "formell", prompt: germanWritingPrompts["write-3"], criteria: ["Entschuldigung", "einfacher Grund", "zwei Vorschlaege"] },
+  "write-4": { typeLabel: "Kurze Stellungnahme", title: "Online lernen", register: "neutral", prompt: germanWritingPrompts["write-4"], criteria: ["klare Meinung", "Konnektoren", "persoenliches Beispiel"] },
+  "write-5": { typeLabel: "Beschwerde-E-Mail", title: "Wohnungsproblem", register: "formell", prompt: germanWritingPrompts["write-5"], criteria: ["praezise Beschreibung", "klare Bitte", "hoefliches Register"] },
+  "write-6": { typeLabel: "Strukturierter Aufsatz", title: "Oeffentliche Verkehrsmittel", register: "neutral", prompt: germanWritingPrompts["write-6"], criteria: ["Einleitung", "ausgewogene Argumente", "Schluss"] },
+  "write-7": { typeLabel: "Meinungsartikel", title: "Arbeit und Studium", register: "neutral", prompt: germanWritingPrompts["write-7"], criteria: ["Nuance", "Beispiele", "Empfehlung"] },
+  "write-8": { typeLabel: "Argumentation", title: "Kuenstliche Intelligenz", register: "formell", prompt: germanWritingPrompts["write-8"], criteria: ["Problemstellung", "komplexe Argumente", "praeziser Wortschatz"] },
+  "write-9": { typeLabel: "Synthese", title: "Universitaetsleben", register: "formell", prompt: germanWritingPrompts["write-9"], criteria: ["Synthese", "klare Struktur", "konkrete Massnahmen"] },
+  "write-10": { typeLabel: "Fortgeschrittener Aufsatz", title: "Internationale Mobilitaet", register: "formell", prompt: germanWritingPrompts["write-10"], criteria: ["nuancierte These", "sichere Abstraktion", "passende Beispiele"] },
+  "speak-1": { typeLabel: "Bild beschreiben", title: "Alltagsszene", prompt: germanSpeakingPrompts["speak-1"], checklist: ["Ort", "Personen", "Handlungen"] },
+  "speak-2": { typeLabel: "Persoenliche Frage", title: "Sich vorstellen", prompt: germanSpeakingPrompts["speak-2"], checklist: ["Identitaet", "Taetigkeit", "Ziel"] },
+  "speak-3": { typeLabel: "Rollenspiel", title: "Am Empfang", prompt: germanSpeakingPrompts["speak-3"], checklist: ["Begruessung", "drei Bitten", "Dank"] },
+  "speak-4": { typeLabel: "Kurze Meinung", title: "Abends lernen", prompt: germanSpeakingPrompts["speak-4"], checklist: ["Meinung", "zwei Gruende", "Konnektoren"] },
+  "speak-5": { typeLabel: "Erfahrung beschreiben", title: "Eine Reise", prompt: germanSpeakingPrompts["speak-5"], checklist: ["Vergangenheit", "chronologische Ordnung", "Fazit"] },
+  "speak-6": { typeLabel: "Vergleichen", title: "Stadt oder Land", prompt: germanSpeakingPrompts["speak-6"], checklist: ["Vergleich", "Beispiel", "Praeferenz"] },
+  "speak-7": { typeLabel: "Fortgeschrittenes Rollenspiel", title: "Einen Kompromiss finden", prompt: germanSpeakingPrompts["speak-7"], checklist: ["Problem", "hoeflicher Ton", "Loesung"] },
+  "speak-8": { typeLabel: "Abstraktes Thema", title: "Lebenslanges Lernen", prompt: germanSpeakingPrompts["speak-8"], checklist: ["abstraktes Argument", "Beispiel", "Schluss"] },
+  "speak-9": { typeLabel: "Reagieren", title: "Homeoffice", prompt: germanSpeakingPrompts["speak-9"], checklist: ["Position", "Nuance", "Gegenbeispiel"] },
+  "speak-10": { typeLabel: "Muendliche Argumentation", title: "Identitaet und Sprache", prompt: germanSpeakingPrompts["speak-10"], checklist: ["These", "Abstraktion", "Struktur"] },
+};
+
+const withGermanTaskCopy = (tasks) =>
+  tasks.map((task) => {
+    const copy = GERMAN_TASK_COPY[task.id] ?? {};
+    return {
+      ...task,
+      ...copy,
+      options: copy.options ?? task.options,
+      headings: copy.headings ?? task.headings,
+      events: copy.events ?? task.events,
+      criteria: copy.criteria ?? task.criteria,
+      checklist: copy.checklist ?? task.checklist,
+      alternatives: copy.alternatives ?? task.alternatives,
+    };
+  });
+
 const withGermanPrompts = (tasks, promptMap) =>
   tasks.map((task) => ({
     ...task,
@@ -747,6 +984,46 @@ const MODULES = {
     ],
   },
 };
+
+const GERMAN_MODULE_OVERRIDES = {
+  read: {
+    title: "Leseverstehen",
+    eyebrow: "Aktives Lesen",
+    tasks: withGermanTaskCopy(readingTasks),
+    focus: ["Informationen finden", "Richtig/Falsch", "Titel zuordnen", "Wortschatz im Kontext"],
+    advancement: ["Laengere Texte", "Weniger transparenter Wortschatz", "Inferenzfragen", "Kuerzere Lesezeit"],
+  },
+  listen: {
+    title: "Hoerverstehen",
+    eyebrow: "Aktives Hoeren",
+    tasks: withGermanTaskCopy(listeningTasks),
+    audio: {
+      ...MODULES.listen.audio,
+      title: "Ansage im Bahnhof",
+      speaker: "Standarddeutsch, moderates Tempo",
+    },
+    focus: ["Notizen machen", "Zahlenangaben", "Reihenfolge der Ereignisse", "Akzente und Tempo"],
+    advancement: ["Schnelleres Tempo", "Regionale Akzente", "Laengere Audioaufnahmen", "Weniger Wiederholungen"],
+  },
+  write: {
+    title: "Schriftlicher Ausdruck",
+    eyebrow: "Strukturierte Produktion",
+    tasks: withGermanTaskCopy(writingTasks),
+    focus: ["Klarer Plan", "Passendes Register", "Konnektoren", "Grammatische Korrektheit"],
+    advancement: ["Abstraktere Themen", "Hoehere Wortgrenzen", "Formelles Register", "Nuancierte Argumentation"],
+  },
+  speak: {
+    title: "Muendlicher Ausdruck",
+    eyebrow: "Sprechen",
+    tasks: withGermanTaskCopy(speakingTasks),
+    focus: ["Aussprache", "Fluessigkeit", "Interaktion", "Gedanken ordnen"],
+    advancement: ["Laengere Antworten", "Kuerzere Vorbereitungszeit", "Abstraktere Themen", "Spontanere Nachfragen"],
+  },
+};
+
+Object.entries(GERMAN_MODULE_OVERRIDES).forEach(([moduleId, override]) => {
+  MODULES[moduleId] = { ...MODULES[moduleId], ...override };
+});
 
 const TRUE_FALSE_OPTIONS = [
   { value: "true", label: "Richtig" },
@@ -843,7 +1120,36 @@ const formatExamTime = (seconds) => {
 };
 
 const formatClock = (date = new Date()) =>
-  date.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  date.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+
+const extractTime = (value) => String(value ?? "").match(/\d{2}:\d{2}/)?.[0] ?? formatClock();
+
+const toGermanStatus = (value) => {
+  const text = String(value ?? "");
+  if (!text) return "";
+
+  if (text.includes("Mode visiteur")) return "Besuchermodus: Der Fortschritt wird nicht gespeichert.";
+  if (text.includes("Dern")) return `Letzte Speicherung ${extractTime(text)}`;
+  if (text.includes("Auto-sauveg")) return `Automatisch gespeichert um ${extractTime(text)}`;
+  if (text.includes("Sauvegarde locale impossible")) return "Lokale Speicherung nicht moeglich: Der Browserspeicher ist voll.";
+  if (text.includes("Sauvegarde locale pr")) return "Lokale Speicherung bereit.";
+  if (text.includes("Sauvegard")) return `Gespeichert um ${extractTime(text)}`;
+  if (text.includes("Sauvegarde locale pr")) return "Lokale Speicherung bereit.";
+  if (text.includes("Sauvegarde locale impossible")) return "Lokale Speicherung nicht moeglich: Der Browserspeicher ist voll.";
+  if (text.includes("Simulation d")) return "Simulation gestartet: Die Navigation ist gesperrt.";
+  if (text.includes("Limite de 5")) return "Die Grenze von 5 Hoerdurchgaengen ist fuer dieses Modul erreicht.";
+  if (text.includes("synth")) return "Die Sprachausgabe ist in diesem Browser nicht verfuegbar.";
+  if (text.includes("lecture audio")) return "Die Audiowiedergabe ist auf diesem Geraet fehlgeschlagen. Pruefen Sie die Lautstaerke und erlauben Sie die Sprachausgabe im Browser.";
+  if (text.includes("brouillon est vide")) return "Der Entwurf ist leer.";
+  if (text.includes("Brouillon")) return `Entwurf gespeichert um ${extractTime(text)}`;
+  if (text.includes("Micro non disponible")) return "Mikrofon nicht verfuegbar: Stattdessen wird der Trainingstimer verwendet.";
+  if (text.includes("Autorisation micro")) return "Mikrofonberechtigung verweigert: Der Trainingstimer wird verwendet.";
+  if (text.includes("Connectez-vous")) return "Ergebnis lokal gespeichert. Melden Sie sich an, um es dem Dashboard hinzuzufuegen.";
+  if (text.includes("dashboard")) return "Ergebnis im Dashboard gespeichert.";
+  if (text.includes("backend")) return "Ergebnis lokal gespeichert. Das Backend ist im Moment nicht erreichbar.";
+
+  return text;
+};
 
 const countWords = (text) => {
   const words = String(text ?? "").trim().match(/\S+/g);
@@ -856,17 +1162,6 @@ const getEstimatedAudioDuration = (audio) => {
   const rate = Math.max(0.6, Number(audio?.rate) || 1);
   const spokenSeconds = (wordCount / (SPEECH_WORDS_PER_MINUTE * rate)) * 60;
   return Math.max(18, Math.ceil(spokenSeconds + punctuationPauses + 6));
-};
-
-const pickGermanVoice = () => {
-  if (!("speechSynthesis" in window)) return null;
-  const voices = window.speechSynthesis.getVoices();
-  if (!voices.length) return null;
-  return (
-    voices.find((voice) => /de[-_]/i.test(voice.lang)) ??
-    voices.find((voice) => /german/i.test(voice.name)) ??
-    null
-  );
 };
 
 const getTaskDuration = (module, task) => {
@@ -890,11 +1185,125 @@ const getTaskDuration = (module, task) => {
   const typeBase = {
     trueFalse: 45,
     multiple: 60,
+    select: 60,
     blank: 75,
     match: 120,
     order: 110,
   }[task.type] ?? 75;
   return typeBase + levelExtra;
+};
+
+const normalizePartKey = (value, fallback = "part-1") => {
+  const text = String(value ?? "").trim().toLowerCase();
+  const partMatch = text.match(/(?:teil|part)\s*(\d+)/i);
+  if (partMatch) return `part-${partMatch[1]}`;
+  const safe = text
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+  return safe ? `part-${safe}` : fallback;
+};
+
+const getTaskPartKey = (task, index = 0) => {
+  if (task?.partKey) return task.partKey;
+  if (task?.partNumber) return `part-${task.partNumber}`;
+  return normalizePartKey(task?.partTitle || task?.typeLabel, `part-${index + 1}`);
+};
+
+const stripQuestionMaterial = (text, tasks = []) => {
+  const lines = String(text ?? "")
+    .replace(/\r/g, "")
+    .replace(/--- PAGE\s+\d+\/\d+\s+---/gi, "")
+    .split("\n");
+  const taskPrompts = tasks
+    .map((task) => String(task.question ?? "").split("\n")[0].trim())
+    .filter((prompt) => prompt.length > 18);
+  const cleaned = [];
+  let skippingTable = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      if (!skippingTable) cleaned.push("");
+      continue;
+    }
+
+    if (/^Anzeigen\s*:/i.test(trimmed)) {
+      skippingTable = false;
+      cleaned.push(trimmed);
+      continue;
+    }
+
+    if (/^Nr\.?\s+(Aussage|Situation|Person|Aufgabe|Frage)/i.test(trimmed)) {
+      skippingTable = true;
+      continue;
+    }
+
+    if (skippingTable) continue;
+    if (/^\d{1,2}\s+.+\s+(?:n\s+n|___)$/i.test(trimmed)) continue;
+    if (/^Aufgabe\s+\d{1,2}\s*:/i.test(trimmed)) continue;
+    if (/^n\s+[a-c]\)/i.test(trimmed)) continue;
+    if (taskPrompts.some((prompt) => trimmed.includes(prompt) || prompt.includes(trimmed))) continue;
+
+    cleaned.push(line.replace(/\s+$/g, ""));
+  }
+
+  const result = cleaned
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return result || String(text ?? "").trim();
+};
+
+const buildExamParts = (module) => {
+  const partMap = new Map();
+  const moduleParts = Array.isArray(module.parts) ? module.parts : [];
+
+  moduleParts.forEach((part, index) => {
+    const partKey = String(part.id ?? "").startsWith("part-")
+      ? part.id
+      : normalizePartKey(part.id || part.label || part.heading || part.title, `part-${index + 1}`);
+    partMap.set(partKey, {
+      id: partKey,
+      number: part.number || index + 1,
+      title: part.heading || part.title || part.label || `Part ${index + 1}`,
+      instructions: part.instructions || part.text || "",
+      durationMinutes: part.durationMinutes,
+      points: part.points,
+      taskIndexes: [],
+    });
+  });
+
+  module.tasks.forEach((task, index) => {
+    const partKey = getTaskPartKey(task, index);
+    if (!partMap.has(partKey)) {
+      partMap.set(partKey, {
+        id: partKey,
+        number: task.partNumber || partMap.size + 1,
+        title: task.partTitle || String(task.typeLabel || `Part ${partMap.size + 1}`).replace(/\s+-\s+.+$/, ""),
+        instructions: task.partInstructions || "",
+        durationMinutes: task.partDurationMinutes,
+        points: task.partPoints,
+        taskIndexes: [],
+      });
+    }
+    const part = partMap.get(partKey);
+    part.taskIndexes.push(index);
+    if (!part.instructions && task.partInstructions) part.instructions = task.partInstructions;
+    if (!part.durationMinutes && task.partDurationMinutes) part.durationMinutes = task.partDurationMinutes;
+    if (!part.points && task.partPoints) part.points = task.partPoints;
+  });
+
+  return [...partMap.values()]
+    .filter((part) => part.taskIndexes.length)
+    .map((part, index) => ({
+      ...part,
+      number: part.number || index + 1,
+      displayTitle: `Teil ${part.number || index + 1} - ${String(part.title || "").replace(/^Teil\s+\d+\s*:?\s*/i, "") || "Anweisungen"}`,
+      sourceText: stripQuestionMaterial(part.instructions, part.taskIndexes.map((taskIndex) => module.tasks[taskIndex])),
+      firstIndex: part.taskIndexes[0],
+      lastIndex: part.taskIndexes[part.taskIndexes.length - 1],
+    }));
 };
 
 const getStoredProgress = (key) => {
@@ -918,6 +1327,10 @@ const isQuestionAnswered = (task, answer) => {
 
   if (task.type === "blank") {
     return String(answer ?? "").trim().length > 0;
+  }
+
+  if (task.type === "select") {
+    return Boolean(answer);
   }
 
   return Boolean(answer);
@@ -972,6 +1385,23 @@ const getWritingSuggestions = (task, text) => {
   const words = countWords(text);
   const suggestions = [];
 
+  const germanSuggestions = [];
+  if (words < task.minWords) {
+    germanSuggestions.push(`Fuegen Sie etwa ${task.minWords - words} Woerter hinzu, um das erwartete Minimum zu erreichen.`);
+  }
+  if (!/(weil|deshalb|auÃŸerdem|jedoch|trotzdem|zum beispiel|daher|einerseits|andererseits)/i.test(text)) {
+    germanSuggestions.push("Fuegen Sie mindestens einen deutschen Konnektor ein, damit der Text fluessiger wird.");
+  }
+  if (task.register === "formell" && !/(Sehr geehrte|Mit freundlichen GrÃ¼ÃŸen|bitte|wÃ¼rde)/i.test(text)) {
+    germanSuggestions.push("Staerken Sie das formelle Register mit einer passenden Anrede und Schlussformel.");
+  }
+  if ((text.match(/\bich\b/gi) ?? []).length > 6) {
+    germanSuggestions.push("Variieren Sie die Satzstruktur, damit nicht zu viele Saetze mit ich beginnen.");
+  }
+  if (task?.id) {
+    return germanSuggestions.length ? germanSuggestions : ["Klare Struktur. Pruefen Sie jetzt die konjugierten Verben und die Deklinationen."];
+  }
+
   if (words < task.minWords) {
     suggestions.push(`Ajoutez environ ${task.minWords - words} mots pour atteindre le minimum attendu.`);
   }
@@ -1023,10 +1453,10 @@ const buildSeriesTask = (moduleId, task, index, content, series) => {
     ...task,
     ...override,
     id: `${series.examId}-${series.id}-${moduleId}-${task.id}`,
-    hint: override.hint ?? `Use the ${series.code} context: ${content.theme}.`,
+    hint: override.hint ?? `Nutzen Sie den Kontext der Serie ${series.code}: ${content.theme}.`,
     explanation:
       override.explanation ??
-      `This answer is linked to ${series.examName} ${series.code}, whose theme is ${content.theme}.`,
+      `Diese Antwort gehoert zu ${series.examName} ${series.code}; das Thema ist ${content.theme}.`,
   };
 
   if (moduleId === "write") {
@@ -1052,7 +1482,7 @@ const buildSeriesTask = (moduleId, task, index, content, series) => {
       ...base,
       question:
         override.question ??
-        `In ${series.code}, what is the main topic for this ${content.shortLabel.toLowerCase()} task?`,
+        `Was ist in ${series.code} das Hauptthema dieser Aufgabe?`,
       options: [
         { value: "a", label: "Das zentrale Thema dieser Aufgabe." },
         { value: "b", label: "Ein Rezept fuer den Urlaub." },
@@ -1067,7 +1497,7 @@ const buildSeriesTask = (moduleId, task, index, content, series) => {
       ...base,
       question:
         override.question ??
-        `${series.code} belongs to ${series.examName} and uses the theme ${content.theme}.`,
+        `${series.code} gehoert zu ${series.examName} und nutzt das Thema ${content.theme}.`,
       correct: override.correct ?? "true",
     };
   }
@@ -1077,7 +1507,7 @@ const buildSeriesTask = (moduleId, task, index, content, series) => {
       ...base,
       question:
         override.question ??
-        `Complete the sentence: This exercise set is called ____.`,
+        `Ergaenzen Sie den Satz: Diese Aufgabenserie heisst ____.`,
       correct: override.correct ?? series.code,
       alternatives: override.alternatives ?? [series.id, series.code.toLowerCase()],
     };
@@ -1095,7 +1525,7 @@ const buildSeriesTask = (moduleId, task, index, content, series) => {
       ...base,
       question:
         override.question ??
-        `Match each item to the correct ${series.code} series heading.`,
+        `Ordnen Sie jedes Element der passenden Ueberschrift aus ${series.code} zu.`,
       paragraphs,
       headings,
       correct: Object.fromEntries(paragraphs.map((paragraph, paragraphIndex) => [paragraph, headings[paragraphIndex]])),
@@ -1112,7 +1542,7 @@ const buildSeriesTask = (moduleId, task, index, content, series) => {
       ...base,
       question:
         override.question ??
-        `Put the ${series.code} listening steps in the best order.`,
+        `Bringen Sie die Hoerschritte aus ${series.code} in die passende Reihenfolge.`,
       events,
       correct: events.map((event) => event.value),
     };
@@ -1124,12 +1554,35 @@ const buildSeriesTask = (moduleId, task, index, content, series) => {
 const buildSeriesModule = (baseModule, content, series) => {
   if (!content || !series) return baseModule;
 
+  if (content.isImported) {
+    return {
+      ...baseModule,
+      eyebrow: `${series.code} / ${baseModule.eyebrow}`,
+      examPart: `${series.examName} ${series.code} - ${baseModule.examPart}`,
+      tasks: content.tasks?.length ? content.tasks : baseModule.tasks,
+      passage: content.passage ?? baseModule.passage,
+      parts: content.parts ?? baseModule.parts,
+      audio: content.audio ?? baseModule.audio,
+      focus: content.focus ?? baseModule.focus,
+      advancement: content.advancement ?? baseModule.advancement,
+      seriesContext: {
+        examId: series.examId,
+        examName: series.examName,
+        seriesId: series.id,
+        seriesCode: series.code,
+        seriesTitle: series.title,
+        theme: content.theme ?? series.theme,
+      },
+    };
+  }
+
   return {
     ...baseModule,
     eyebrow: `${series.code} / ${baseModule.eyebrow}`,
     examPart: `${series.examName} ${series.code} - ${baseModule.examPart}`,
     tasks: baseModule.tasks.map((task, index) => buildSeriesTask(baseModule.id, task, index, content, series)),
     passage: content.passage ?? baseModule.passage,
+    parts: content.parts ?? baseModule.parts,
     audio: content.audio ?? baseModule.audio,
     focus: content.focus ?? baseModule.focus,
     advancement: content.advancement ?? baseModule.advancement,
@@ -1145,6 +1598,8 @@ const buildSeriesModule = (baseModule, content, series) => {
 };
 
 const stringifyAnswer = (value) => {
+  if (value == null || value === "") return "Keine Antwort";
+  if (Array.isArray(value)) return value.filter(Boolean).join(" > ") || "Keine Antwort";
   if (value == null || value === "") return "Aucune réponse";
   if (Array.isArray(value)) return value.filter(Boolean).join(" > ") || "Aucune réponse";
   if (typeof value === "object") {
@@ -1156,7 +1611,7 @@ const stringifyAnswer = (value) => {
 };
 
 const getAnswerLabel = (task, answer) => {
-  if (task.type === "multiple" || task.type === "trueFalse") {
+  if (task.type === "multiple" || task.type === "trueFalse" || task.type === "select") {
     const options = task.type === "trueFalse" ? TRUE_FALSE_OPTIONS : task.options;
     const option = options.find((item) => item.value === answer);
     return option ? getProtectedChoiceLabel(task, option) : stringifyAnswer(answer);
@@ -1167,7 +1622,7 @@ const getAnswerLabel = (task, answer) => {
 };
 
 const getCorrectLabel = (task) => {
-  if (task.type === "multiple" || task.type === "trueFalse") {
+  if (task.type === "multiple" || task.type === "trueFalse" || task.type === "select") {
     const options = task.type === "trueFalse" ? TRUE_FALSE_OPTIONS : task.options;
     const option = options.find((item) => item.value === task.correct);
     return option ? getProtectedChoiceLabel(task, option) : stringifyAnswer(task.correct);
@@ -1177,6 +1632,34 @@ const getCorrectLabel = (task) => {
 
 const buildResultSummary = (module, answers) => {
   const rows = module.tasks.map((task, index) => {
+    if (module.id === "write") {
+      const taskScore = evaluateWriting(task, answers[index]);
+      return {
+        id: task.id,
+        number: index + 1,
+        title: task.title ?? task.question,
+        typeLabel: task.typeLabel,
+        isCorrect: taskScore >= PASS_SCORE,
+        userAnswer: `${countWords(answers[index])} Woerter`,
+        correctAnswer: `Ziel: ${task.minWords}-${task.maxWords} Woerter`,
+        explanation: `Geschaetzte Punktzahl: ${taskScore}%`,
+      };
+    }
+
+    if (module.id === "speak") {
+      const taskScore = evaluateSpeaking(task, answers[index]);
+      return {
+        id: task.id,
+        number: index + 1,
+        title: task.title ?? task.question,
+        typeLabel: task.typeLabel,
+        isCorrect: taskScore >= PASS_SCORE,
+        userAnswer: answers[index]?.duration ? `${answers[index].duration}s` : "Keine Antwort",
+        correctAnswer: `Ziel: ${task.responseSeconds}s`,
+        explanation: `Geschaetzte Punktzahl: ${taskScore}%`,
+      };
+    }
+
     if (module.id === "write") {
       const taskScore = evaluateWriting(task, answers[index]);
       return {
@@ -1231,6 +1714,18 @@ function FeedbackBox({ task, answer }) {
 
   const correct = isAnswerCorrect(task, answer);
 
+  if (task?.id) {
+    return (
+      <div className={`${styles.feedbackBox} ${correct ? styles.feedbackCorrect : styles.feedbackWrong}`}>
+        {correct ? <CheckCircle2 size={20} /> : <XCircle size={20} />}
+        <div>
+          <strong>{correct ? "Richtig" : "Noch einmal pruefen"}</strong>
+          <p>{task.explanation}</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={`${styles.feedbackBox} ${correct ? styles.feedbackCorrect : styles.feedbackWrong}`}>
       {correct ? <CheckCircle2 size={20} /> : <XCircle size={20} />}
@@ -1244,27 +1739,57 @@ function FeedbackBox({ task, answer }) {
 
 export default function SimulationModulePage({ moduleIdOverride }) {
   useTestProtection();
-  const t = getTranslations("fr");
+  const t = useSimulationLanguage();
   const navigate = useNavigate();
   const location = useLocation();
   const params = useParams();
   const routeModuleId = moduleIdOverride ?? params.moduleId ?? "read";
   const baseModule = MODULES[routeModuleId] ?? MODULES.read;
-  const selectedSeries = useMemo(
-    () => getSeriesById(params.examId, params.seriesId),
-    [params.examId, params.seriesId]
-  );
-  const selectedSeriesContent = useMemo(
-    () => getSeriesModuleContent(params.examId, params.seriesId, baseModule.id),
-    [baseModule.id, params.examId, params.seriesId]
-  );
+  const [importedModuleState, setImportedModuleState] = useState({
+    loading: Boolean(params.examId && params.seriesId),
+    series: null,
+    content: null,
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    setImportedModuleState({
+      loading: Boolean(params.examId && params.seriesId),
+      series: null,
+      content: null,
+    });
+
+    fetchImportedSeriesModule(params.examId, params.seriesId, baseModule.id)
+      .then((payload) => {
+        if (cancelled) return;
+        setImportedModuleState({
+          loading: false,
+          series: payload?.series ?? null,
+          content: payload?.content ?? null,
+        });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setImportedModuleState({ loading: false, series: null, content: null });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [baseModule.id, params.examId, params.seriesId]);
+
+  const selectedSeries = importedModuleState.series;
+  const selectedSeriesContent = importedModuleState.content;
   const auth = useMemo(() => getAuthUser(), []);
   const loggedIn = Boolean(auth?.id);
   const visitorSeriesAttempt = isVisitorSeriesAttempt(selectedSeries);
   const visitorAccessAllowed = Boolean(location.state?.visitorFreeAccess);
   const blockedSeriesAccess = Boolean(selectedSeries && !canOpenSeries(selectedSeries));
   const blockedVisitorRefresh = visitorSeriesAttempt && !visitorAccessAllowed;
-  const shouldPersistProgress = Boolean(auth?.id) && !blockedSeriesAccess && !blockedVisitorRefresh;
+  const waitingForImportedSeries = Boolean(params.seriesId && !selectedSeries && importedModuleState.loading);
+  const shouldPersistProgress =
+    !blockedSeriesAccess && !blockedVisitorRefresh && !waitingForImportedSeries;
   const module = useMemo(
     () => buildSeriesModule(baseModule, selectedSeriesContent, selectedSeries),
     [baseModule, selectedSeriesContent, selectedSeries]
@@ -1299,6 +1824,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const [timerSeconds, setTimerSeconds] = useState(totalExamDuration);
   const [simulationMode, setSimulationMode] = useState(true);
   const [completed, setCompleted] = useState(false);
+  const [partIntroVisible, setPartIntroVisible] = useState(true);
   const [saveStatus, setSaveStatus] = useState("");
   const [resultStatus, setResultStatus] = useState("");
   const [writingVersions, setWritingVersions] = useState([]);
@@ -1322,6 +1848,9 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const audioStartedAtRef = useRef(0);
   const audioStartOffsetRef = useRef(0);
   const audioTimestampRef = useRef(0);
+  const speechStartTimerRef = useRef(null);
+  const speechStopTimerRef = useRef(null);
+  const speechWatchdogRef = useRef(null);
   const recordingIntervalRef = useRef(null);
   const recordingSecondsRef = useRef(0);
   const recordingTaskIndexRef = useRef(0);
@@ -1329,10 +1858,22 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
   const currentTask = module.tasks[Math.min(currentIndex, totalTasks - 1)];
   const currentAnswer = answers[currentIndex];
+  const examParts = useMemo(() => buildExamParts(module), [module]);
+  const currentPartIndex = Math.max(
+    0,
+    examParts.findIndex((part) => part.taskIndexes.includes(currentIndex))
+  );
+  const currentPart = examParts[currentPartIndex] ?? examParts[0];
+  const currentPartQuestionIndex = currentPart ? Math.max(0, currentPart.taskIndexes.indexOf(currentIndex)) : 0;
+  const currentPartQuestionTotal = currentPart?.taskIndexes.length ?? totalTasks;
   const currentTaskDuration = getTaskDuration(module, currentTask);
   const currentAudioDuration = module.id === "listen" ? getEstimatedAudioDuration(module.audio) : 0;
   const answeredCount = module.tasks.filter((task, index) => getTaskAnswered(module, task, answers[index])).length;
-  const progressPercent = ((Math.min(currentIndex + 1, totalTasks) / totalTasks) * 100).toFixed(1);
+  const remainingCount = Math.max(0, totalTasks - answeredCount);
+  const completedPartCount = examParts.filter((part) =>
+    part.taskIndexes.every((taskIndex) => getTaskAnswered(module, module.tasks[taskIndex], answers[taskIndex]))
+  ).length;
+  const progressPercent = totalTasks ? ((answeredCount / totalTasks) * 100).toFixed(1) : "0";
   const score = calculateModuleScore(module, answers);
   const currentAnswered = getTaskAnswered(module, currentTask, currentAnswer);
   const currentSkipped = Boolean(skipped[currentIndex]);
@@ -1352,6 +1893,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       setTimerSeconds(totalExamDuration);
       setSimulationMode(true);
       setCompleted(false);
+      setPartIntroVisible(true);
       setWritingVersions([]);
       setSaveStatus("Mode visiteur : la progression n'est pas sauvegardée.");
       setRestoredKey(progressKey);
@@ -1371,6 +1913,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setTimerSeconds(Number(stored?.timerSeconds) || totalExamDuration);
     setSimulationMode(stored?.completed ? Boolean(stored?.simulationMode) : true);
     setCompleted(Boolean(stored?.completed));
+    setPartIntroVisible(stored?.completed ? false : stored?.partIntroVisible ?? restoredIndex === 0);
     setWritingVersions(stored?.writingVersions ?? []);
     const restoredAudioTimestamp = Number(stored?.audioTimestamp) || 0;
     setAudioTimestamp(restoredAudioTimestamp);
@@ -1432,9 +1975,10 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
   const finishModule = useCallback(() => {
     setCompleted(true);
+    setPartIntroVisible(false);
     setAudioPlaying(false);
     if ("speechSynthesis" in window) {
-      window.speechSynthesis.cancel();
+      gracefulStopSpeech(80);
     }
     void saveResultToBackend(score);
   }, [saveResultToBackend, score]);
@@ -1450,6 +1994,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       currentIndex,
       totalTasks,
       answeredCount,
+      remainingCount,
+      completedPartCount,
       progressPercent: Number(progressPercent),
       answers,
       skipped,
@@ -1458,6 +2004,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       elapsedSeconds,
       timerSeconds,
       taskDuration: currentTaskDuration,
+      partIntroVisible,
+      currentPartId: currentPart?.id,
       simulationMode,
       completed,
       audioTimestamp,
@@ -1472,8 +2020,10 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       answers,
       answeredCount,
       audioTimestamp,
+      completedPartCount,
       completed,
       currentIndex,
+      currentPart?.id,
       currentTaskDuration,
       currentRoute,
       elapsedSeconds,
@@ -1481,8 +2031,10 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       module.examPart,
       moduleTitle,
       notes,
+      partIntroVisible,
       prepRemaining,
       progressPercent,
+      remainingCount,
       progressScopeId,
       replaysUsed,
       selectedSeries,
@@ -1506,11 +2058,12 @@ export default function SimulationModulePage({ moduleIdOverride }) {
         const snapshot = buildProgressSnapshot();
         localStorage.setItem(progressKey, JSON.stringify(snapshot));
         if (
-          snapshot.simulationMode ||
+          auth?.id &&
+          (snapshot.simulationMode ||
           snapshot.completed ||
           snapshot.currentIndex > 0 ||
           snapshot.answeredCount > 0 ||
-          Object.values(snapshot.notes ?? {}).some((note) => String(note ?? "").trim())
+          Object.values(snapshot.notes ?? {}).some((note) => String(note ?? "").trim()))
         ) {
           upsertSimulationHistoryEntry(snapshot);
         }
@@ -1519,7 +2072,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
         setSaveStatus("Sauvegarde locale impossible : espace navigateur insuffisant.");
       }
     },
-    [buildProgressSnapshot, progressKey, shouldPersistProgress]
+    [auth?.id, buildProgressSnapshot, progressKey, shouldPersistProgress]
   );
 
   useEffect(() => {
@@ -1572,7 +2125,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
         audioSessionRef.current = false;
         setAudioSessionActive(false);
         if ("speechSynthesis" in window) {
-          window.speechSynthesis.cancel();
+          speechStopTimerRef.current = gracefulStopSpeech();
         }
       }
     }, 250);
@@ -1590,8 +2143,19 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setRecordError("");
   }, [completed, currentIndex, currentTask.prepSeconds, module.id, simulationMode]);
 
+  useEffect(() => {
+    if (!("speechSynthesis" in window)) return undefined;
+    const warmVoices = () => window.speechSynthesis.getVoices();
+    warmVoices();
+    window.speechSynthesis.addEventListener?.("voiceschanged", warmVoices);
+    return () => window.speechSynthesis.removeEventListener?.("voiceschanged", warmVoices);
+  }, []);
+
   useEffect(
     () => () => {
+      if (speechStartTimerRef.current) window.clearTimeout(speechStartTimerRef.current);
+      if (speechStopTimerRef.current) window.clearTimeout(speechStopTimerRef.current);
+      if (speechWatchdogRef.current) window.clearInterval(speechWatchdogRef.current);
       if ("speechSynthesis" in window) {
         window.speechSynthesis.cancel();
       }
@@ -1626,6 +2190,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setTimerSeconds(totalExamDuration);
     setSimulationMode(true);
     setCompleted(false);
+    setPartIntroVisible(true);
     setWritingVersions([]);
     setAudioTimestamp(0);
     audioTimestampRef.current = 0;
@@ -1642,45 +2207,56 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setResultStatus("");
     setSaveStatus("Simulation démarrée : navigation verrouillée.");
     if ("speechSynthesis" in window) {
-      window.speechSynthesis.cancel();
+      gracefulStopSpeech(80);
     }
   }, [module.id, module.tasks, totalExamDuration]);
-
-  const toggleFlag = useCallback(() => {
-    setFlagged((previous) => ({ ...previous, [currentIndex]: !previous[currentIndex] }));
-  }, [currentIndex]);
 
   const goToNext = useCallback(() => {
     if (currentIndex >= totalTasks - 1) {
       finishModule();
       return;
     }
-    const nextIndex = Math.min(totalTasks - 1, currentIndex + 1);
+    const nextPart = currentPart && currentIndex >= currentPart.lastIndex ? examParts[currentPartIndex + 1] : null;
+    const nextIndex = nextPart ? nextPart.firstIndex : Math.min(totalTasks - 1, currentIndex + 1);
     setCurrentIndex(nextIndex);
+    setPartIntroVisible(Boolean(nextPart));
     setSpeakingPhase("prep");
     setPrepRemaining(module.tasks[nextIndex]?.prepSeconds ?? speakingTasks[0].prepSeconds);
     setPrepActive(module.id === "speak" && simulationMode);
     setRecordingSeconds(0);
     recordingSecondsRef.current = 0;
-  }, [currentIndex, finishModule, module, simulationMode, totalTasks]);
+  }, [currentIndex, currentPart, currentPartIndex, examParts, finishModule, module, simulationMode, totalTasks]);
 
   const goToPrevious = useCallback(() => {
     const previousIndex = Math.max(0, currentIndex - 1);
     setCurrentIndex(previousIndex);
+    setPartIntroVisible(false);
   }, [currentIndex]);
 
-  const skipCurrent = useCallback(() => {
-    setSkipped((previous) => ({ ...previous, [currentIndex]: true }));
-    goToNext();
-  }, [currentIndex, goToNext]);
+  const clearSpeechTimers = useCallback(() => {
+    if (speechStartTimerRef.current) {
+      window.clearTimeout(speechStartTimerRef.current);
+      speechStartTimerRef.current = null;
+    }
+    if (speechStopTimerRef.current) {
+      window.clearTimeout(speechStopTimerRef.current);
+      speechStopTimerRef.current = null;
+    }
+    if (speechWatchdogRef.current) {
+      window.clearInterval(speechWatchdogRef.current);
+      speechWatchdogRef.current = null;
+    }
+  }, []);
 
-  const goToQuestion = useCallback(
-    (index) => {
-      if (simulationMode) return;
-      setCurrentIndex(index);
-    },
-    [simulationMode]
-  );
+  const stopListeningSpeech = useCallback((soft = true) => {
+    clearSpeechTimers();
+    if (!("speechSynthesis" in window)) return;
+    if (soft) {
+      speechStopTimerRef.current = gracefulStopSpeech();
+      return;
+    }
+    window.speechSynthesis.cancel();
+  }, [clearSpeechTimers]);
 
   const playListeningAudio = useCallback(() => {
     if (module.id !== "listen") return;
@@ -1703,18 +2279,22 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       setAudioError("");
 
       if ("speechSynthesis" in window) {
-        window.speechSynthesis.cancel();
-        const utterance = new window.SpeechSynthesisUtterance(module.audio.transcript);
-        const selectedVoice = pickGermanVoice();
-        if (selectedVoice) utterance.voice = selectedVoice;
-        utterance.lang = "de-DE";
-        utterance.rate = module.audio.rate;
-        utterance.volume = 1;
-        utterance.pitch = 1;
+        stopListeningSpeech(false);
+        const utterance = createListeningUtterance(module.audio);
+        if (!utterance) {
+          setAudioPlaying(false);
+          audioSessionRef.current = false;
+          setAudioSessionActive(false);
+          setAudioError("La synthese vocale n'est pas disponible sur ce navigateur.");
+          return;
+        }
         utterance.onstart = () => {
           setAudioError("");
+          if (speechWatchdogRef.current) window.clearInterval(speechWatchdogRef.current);
+          speechWatchdogRef.current = startSpeechWatchdog();
         };
         utterance.onend = () => {
+          clearSpeechTimers();
           setAudioTimestamp(currentAudioDuration);
           audioTimestampRef.current = currentAudioDuration;
           setAudioPlaying(false);
@@ -1722,6 +2302,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           setAudioSessionActive(false);
         };
         utterance.onerror = () => {
+          clearSpeechTimers();
           setAudioPlaying(false);
           audioSessionRef.current = false;
           setAudioSessionActive(false);
@@ -1729,7 +2310,10 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             "La lecture audio a échoué sur cet appareil. Vérifiez le volume système et autorisez la synthèse vocale dans le navigateur."
           );
         };
-        window.speechSynthesis.speak(utterance);
+        speechStartTimerRef.current = window.setTimeout(() => {
+          speechStartTimerRef.current = null;
+          window.speechSynthesis.speak(utterance);
+        }, SPEECH_START_DELAY_MS);
       } else {
         setAudioPlaying(false);
         audioSessionRef.current = false;
@@ -1738,17 +2322,23 @@ export default function SimulationModulePage({ moduleIdOverride }) {
         return;
       }
     } else if ("speechSynthesis" in window) {
+      clearSpeechTimers();
       window.speechSynthesis.resume();
+      speechWatchdogRef.current = startSpeechWatchdog();
     }
 
     audioStartOffsetRef.current = startingFresh ? 0 : audioTimestampRef.current;
     audioStartedAtRef.current = Date.now();
     setAudioPlaying(true);
-  }, [audioSessionActive, audioTimestamp, currentAudioDuration, module, replaysUsed]);
+  }, [audioSessionActive, audioTimestamp, clearSpeechTimers, currentAudioDuration, module, replaysUsed, stopListeningSpeech]);
 
   const pauseListeningAudio = useCallback(() => {
     setAudioPlaying(false);
     audioStartOffsetRef.current = audioTimestampRef.current;
+    if (speechWatchdogRef.current) {
+      window.clearInterval(speechWatchdogRef.current);
+      speechWatchdogRef.current = null;
+    }
     if ("speechSynthesis" in window) {
       window.speechSynthesis.pause();
     }
@@ -1761,10 +2351,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     audioStartOffsetRef.current = 0;
     audioSessionRef.current = false;
     setAudioSessionActive(false);
-    if ("speechSynthesis" in window) {
-      window.speechSynthesis.cancel();
-    }
-  }, []);
+    stopListeningSpeech(true);
+  }, [stopListeningSpeech]);
 
   const saveWritingVersion = useCallback(() => {
     if (module.id !== "write") return;
@@ -1867,10 +2455,11 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia(getMicrophoneConstraints());
       mediaStreamRef.current = stream;
       audioChunksRef.current = [];
-      const recorder = new window.MediaRecorder(stream);
+      const recorderOptions = getPreferredRecorderOptions();
+      const recorder = new window.MediaRecorder(stream, recorderOptions);
       mediaRecorderRef.current = recorder;
 
       recorder.ondataavailable = (event) => {
@@ -1880,13 +2469,13 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       };
 
       recorder.onstop = () => {
-        const blob = new window.Blob(audioChunksRef.current, { type: "audio/webm" });
+        const blob = audioChunksRef.current.length ? createRecordingBlob(audioChunksRef.current) : null;
         finishRecording(blob);
         stream.getTracks().forEach((track) => track.stop());
         mediaStreamRef.current = null;
       };
 
-      recorder.start();
+      recorder.start(250);
       setIsRecording(true);
     } catch {
       fallbackRecordingRef.current = true;
@@ -1927,14 +2516,28 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       return;
     }
 
-    const nextIndex = Math.min(totalTasks - 1, currentIndex + 1);
+    const nextPart = currentPart && currentIndex >= currentPart.lastIndex ? examParts[currentPartIndex + 1] : null;
+    const nextIndex = nextPart ? nextPart.firstIndex : Math.min(totalTasks - 1, currentIndex + 1);
     setCurrentIndex(nextIndex);
+    setPartIntroVisible(Boolean(nextPart));
     setSpeakingPhase("prep");
     setPrepRemaining(module.tasks[nextIndex]?.prepSeconds ?? speakingTasks[0].prepSeconds);
     setPrepActive(module.id === "speak" && simulationMode);
     setRecordingSeconds(0);
     recordingSecondsRef.current = 0;
-  }, [currentIndex, finishModule, isRecording, module, persistProgress, simulationMode, stopRecording, totalTasks]);
+  }, [
+    currentIndex,
+    currentPart,
+    currentPartIndex,
+    examParts,
+    finishModule,
+    isRecording,
+    module,
+    persistProgress,
+    simulationMode,
+    stopRecording,
+    totalTasks,
+  ]);
 
   useEffect(() => {
     if (!simulationMode || completed) return undefined;
@@ -1997,6 +2600,114 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     void startRecording();
   }, [currentIndex, startRecording]);
 
+  const startCurrentPart = useCallback(() => {
+    const startIndex = currentPart?.firstIndex ?? currentIndex;
+    setCurrentIndex(startIndex);
+    setPartIntroVisible(false);
+    setSpeakingPhase("prep");
+    setPrepRemaining(module.tasks[startIndex]?.prepSeconds ?? speakingTasks[0].prepSeconds);
+    setPrepActive(module.id === "speak" && simulationMode);
+    setRecordingSeconds(0);
+    recordingSecondsRef.current = 0;
+    persistProgress(`Part ${currentPart?.number ?? currentPartIndex + 1} demarree a ${formatClock()}`);
+  }, [currentIndex, currentPart, currentPartIndex, module.id, module.tasks, persistProgress, simulationMode]);
+
+  const renderPartMaterial = (part, { compact = false } = {}) => {
+    const sourceText = part?.sourceText || module.passage?.intro || currentTask?.prompt || currentTask?.question || "";
+    const blocks = String(sourceText)
+      .split(/\n{2,}/)
+      .map((block) => block.trim())
+      .filter(Boolean);
+
+    return (
+      <div className={`${styles.examMaterial} ${compact ? styles.examMaterialCompact : ""}`}>
+        {blocks.length ? (
+          blocks.map((block, index) => {
+            const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
+            const listLineCount = lines.filter((line) => /^(\(?[a-j]\)|[-*]|\d+\.)\s+/i.test(line)).length;
+            const looksLikeList = lines.length > 1 && listLineCount >= Math.ceil(lines.length * 0.6);
+            if (looksLikeList) {
+              return (
+                <ul key={`${part?.id ?? "part"}-${index}`}>
+                  {lines.map((line) => (
+                    <li key={line} translate="no">{line.replace(/^[-*]\s*/, "")}</li>
+                  ))}
+                </ul>
+              );
+            }
+            return <p key={`${part?.id ?? "part"}-${index}`} translate="no">{block}</p>;
+          })
+        ) : (
+          <p translate="no">Die Anweisungen fuer diesen Teil stehen in der aktiven Frage.</p>
+        )}
+      </div>
+    );
+  };
+
+  const renderQuestionStepper = () => (
+    <div className={styles.stepNavigator} aria-label="Fragenfortschritt">
+      <div className={styles.stepNavigatorHeader}>
+        <span>Teil {currentPart?.number ?? currentPartIndex + 1} von {Math.max(1, examParts.length)}</span>
+        <strong>
+          Frage {currentIndex + 1} von {totalTasks}
+          {currentPartQuestionTotal > 1 ? ` / Teilfrage ${currentPartQuestionIndex + 1} von ${currentPartQuestionTotal}` : ""}
+        </strong>
+      </div>
+      <div className={styles.stepDots} role="list" aria-label="Fragen">
+        {module.tasks.map((task, index) => {
+          const answered = getTaskAnswered(module, task, answers[index]);
+          const isCurrent = index === currentIndex && !partIntroVisible;
+          const isPartStart = examParts.some((part) => part.firstIndex === index);
+          const state = isCurrent ? "current" : answered ? "completed" : index < currentIndex ? "visited" : "remaining";
+          const stateLabel = isCurrent ? "aktuell" : answered ? "abgeschlossen" : index < currentIndex ? "besucht" : "offen";
+          return (
+            <span
+              key={task.id}
+              role="listitem"
+              className={styles.stepDot}
+              data-state={state}
+              data-part-start={isPartStart ? "true" : "false"}
+              aria-current={isCurrent ? "step" : undefined}
+              aria-label={`Frage ${index + 1}: ${stateLabel}`}
+            >
+              {index + 1}
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  const renderPartIntro = () => (
+    <section className={styles.partIntroPanel}>
+      <div className={styles.partIntroHeader}>
+        <div>
+          <p className={styles.sectionLabel}>Teil {currentPart?.number ?? currentPartIndex + 1}</p>
+          <h2>{currentPart?.displayTitle ?? "Einleitung zum Teil"}</h2>
+          <p>
+            Lesen Sie zuerst die Anweisungen und das Quellenmaterial. Wenn Sie bereit sind, starten Sie die Fragen dieses Teils.
+          </p>
+        </div>
+        <div className={styles.partMetaStack}>
+          <span><ClipboardCheck size={16} /> {currentPartQuestionTotal} Frage{currentPartQuestionTotal > 1 ? "n" : ""}</span>
+          {currentPart?.durationMinutes ? <span><Clock3 size={16} /> {currentPart.durationMinutes} min</span> : null}
+          {currentPart?.points ? <span><ShieldCheck size={16} /> {currentPart.points} pts</span> : null}
+        </div>
+      </div>
+
+      <div className={styles.partIntroBody}>
+        {renderPartMaterial(currentPart)}
+      </div>
+
+      <div className={styles.partIntroActions}>
+        <button type="button" className={styles.primaryButton} onClick={startCurrentPart}>
+          Fragen starten
+          <ChevronRight size={16} />
+        </button>
+      </div>
+    </section>
+  );
+
   const renderQuestionControl = (task, answer) => {
     if (task.type === "multiple" || task.type === "trueFalse") {
       const options = task.type === "trueFalse" ? TRUE_FALSE_OPTIONS : task.options;
@@ -2032,6 +2743,92 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     if (task.type === "blank") {
       return (
         <label className={styles.fieldLabel}>
+          Antwort
+          <input
+            className={styles.textInput}
+            value={answer ?? ""}
+            onChange={(event) => setAnswerForCurrent(event.target.value)}
+            placeholder="Geben Sie das Wort oder den Ausdruck ein"
+          />
+        </label>
+      );
+    }
+
+    if (task.type === "select") {
+      return (
+        <label className={styles.fieldLabel}>
+          Antwort
+          <select
+            className={styles.selectInput}
+            value={answer ?? ""}
+            onChange={(event) => setAnswerForCurrent(event.target.value)}
+          >
+            <option value="">Option waehlen</option>
+            {(task.options ?? []).map((option) => (
+              <option key={option.value} value={option.value} translate="no">
+                {getProtectedChoiceLabel(task, option)}
+              </option>
+            ))}
+          </select>
+        </label>
+      );
+    }
+
+    if (task.type === "match") {
+      const answerObject = answer ?? {};
+      return (
+        <div className={styles.matchGrid}>
+          {task.paragraphs.map((paragraphId) => (
+            <label key={paragraphId} className={styles.matchRow}>
+              <span>Abschnitt {paragraphId}</span>
+              <select
+                value={answerObject[paragraphId] ?? ""}
+                onChange={(event) => setAnswerForCurrent({ ...answerObject, [paragraphId]: event.target.value })}
+              >
+                <option value="">Titel waehlen</option>
+                {task.headings.map((heading, index) => (
+                  <option key={heading} value={heading} translate="no">
+                    {getProtectedChoiceLabel(task, heading, index)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ))}
+        </div>
+      );
+    }
+
+    if (task.type === "order") {
+      const orderedAnswer = Array.isArray(answer) ? answer : [];
+      return (
+        <div className={styles.orderGrid}>
+          {task.correct.map((_, index) => (
+            <label key={index} className={styles.matchRow}>
+              <span>Position {index + 1}</span>
+              <select
+                value={orderedAnswer[index] ?? ""}
+                onChange={(event) => {
+                  const nextAnswer = [...orderedAnswer];
+                  nextAnswer[index] = event.target.value;
+                  setAnswerForCurrent(nextAnswer);
+                }}
+              >
+                <option value="">Ereignis waehlen</option>
+                {task.events.map((event) => (
+                  <option key={event.value} value={event.value} translate="no">
+                    {getProtectedChoiceLabel(task, event)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ))}
+        </div>
+      );
+    }
+
+    if (task.type === "blank") {
+      return (
+        <label className={styles.fieldLabel}>
           Réponse
           <input
             className={styles.textInput}
@@ -2039,6 +2836,26 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             onChange={(event) => setAnswerForCurrent(event.target.value)}
             placeholder="Tapez le mot ou l'expression"
           />
+        </label>
+      );
+    }
+
+    if (task.type === "select") {
+      return (
+        <label className={styles.fieldLabel}>
+          Réponse
+          <select
+            className={styles.selectInput}
+            value={answer ?? ""}
+            onChange={(event) => setAnswerForCurrent(event.target.value)}
+          >
+            <option value="">Choisir une option</option>
+            {(task.options ?? []).map((option) => (
+              <option key={option.value} value={option.value} translate="no">
+                {getProtectedChoiceLabel(task, option)}
+              </option>
+            ))}
+          </select>
         </label>
       );
     }
@@ -2103,24 +2920,17 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       <section className={styles.passagePane}>
         <div className={styles.sectionLabel}>
           <BookOpen size={18} />
-          Texte niveau {level}
+          Quelle Teil {currentPart?.number ?? currentPartIndex + 1}
         </div>
-        <h2 translate="no">{module.passage.title}</h2>
+        <h2 translate="no">{currentPart?.displayTitle ?? module.passage.title}</h2>
         <p className={styles.introText} translate="no">{module.passage.intro}</p>
-        <div className={styles.paragraphList}>
-          {module.passage.paragraphs.map((paragraph) => (
-            <article key={paragraph.id} className={styles.readingParagraph}>
-              <span>{paragraph.id}</span>
-              <p translate="no">{paragraph.text}</p>
-            </article>
-          ))}
-        </div>
+        {renderPartMaterial(currentPart, { compact: true })}
       </section>
 
-      <section className={styles.questionPane}>
+      <section key={currentTask.id} className={styles.questionPane}>
         <div className={styles.questionTopline}>
+          <span className={styles.questionStep}>Frage {currentIndex + 1} von {totalTasks}</span>
           <span>{currentTask.typeLabel}</span>
-          <span>{level}</span>
         </div>
         <h2>{currentTask.question}</h2>
         {renderQuestionControl(currentTask, currentAnswer)}
@@ -2140,6 +2950,82 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     const audioProgressPercent = currentAudioDuration
       ? Math.min(100, (audioTimestamp / currentAudioDuration) * 100)
       : 0;
+
+    if (module.id === "listen") {
+      return (
+        <div className={styles.listeningLayout}>
+          <section className={styles.audioPanel}>
+            <div className={styles.audioHeader}>
+              <div>
+                <div className={styles.sectionLabel}>
+                  <Headphones size={18} />
+                  {module.audio.title}
+                </div>
+                <h2>{module.audio.speaker}</h2>
+              </div>
+              <div className={styles.replayBadge} data-blocked={audioReplayBlocked ? "true" : "false"}>
+                <Volume2 size={16} />
+                {replaysLeft} Hoerdurchgang{replaysLeft !== 1 ? "e" : ""} uebrig
+              </div>
+            </div>
+
+            <div className={styles.playerControls}>
+              <button
+                type="button"
+                className={styles.audioPlayButton}
+                data-playing={audioPlaying ? "true" : "false"}
+                data-blocked={audioReplayBlocked ? "true" : "false"}
+                style={{ "--audio-progress": `${audioProgressPercent}%` }}
+                onClick={audioPlaying ? pauseListeningAudio : playListeningAudio}
+                disabled={!audioPlaying && audioReplayBlocked}
+                aria-label={audioPlaying ? "Pause" : "Abspielen"}
+              >
+                {audioPlaying ? <Pause size={34} /> : <Play size={34} />}
+              </button>
+              <div className={styles.audioTimeline}>
+                <div className={styles.timelineMeta}>
+                  <span>{formatTime(audioTimestamp)}</span>
+                  <span>{formatTime(currentAudioDuration)}</span>
+                </div>
+                <div className={styles.timelineTrack}>
+                  <span style={{ width: `${audioProgressPercent}%` }} />
+                </div>
+              </div>
+              <button type="button" className={styles.iconButton} onClick={resetListeningAudio} disabled={audioReplayBlocked} aria-label="Zum Anfang zurueck">
+                <RotateCcw size={20} />
+                Noch einmal hoeren
+              </button>
+            </div>
+
+            <div className={styles.lockedNote}>
+              <Lock size={18} />
+              Transkript zum Schutz des Tests ausgeblendet.
+            </div>
+            {audioError ? (
+              <p className={styles.warningText}>
+                <AlertCircle size={16} /> {toGermanStatus(audioError)}
+              </p>
+            ) : null}
+          </section>
+
+          <section className={styles.questionPane}>
+            <div className={styles.questionTopline}>
+              <span className={styles.questionStep}>Frage {currentIndex + 1} von {totalTasks}</span>
+              <span>{level}</span>
+            </div>
+            <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
+            <h2>{currentTask.question}</h2>
+            {renderQuestionControl(currentTask, currentAnswer)}
+            {!simulationMode ? (
+              <>
+                {!currentAnswered ? <p className={styles.hintLine}><WandSparkles size={16} /> {currentTask.hint}</p> : null}
+                <FeedbackBox task={currentTask} answer={currentAnswer} />
+              </>
+            ) : null}
+          </section>
+        </div>
+      );
+    }
 
     return (
       <div className={styles.listeningLayout}>
@@ -2192,16 +3078,17 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           </div>
           {audioError ? (
             <p className={styles.warningText}>
-              <AlertCircle size={16} /> {audioError}
+              <AlertCircle size={16} /> {toGermanStatus(audioError)}
             </p>
           ) : null}
         </section>
 
         <section className={styles.questionPane}>
           <div className={styles.questionTopline}>
-            <span>{currentTask.typeLabel}</span>
+            <span className={styles.questionStep}>Question {currentIndex + 1} of {totalTasks}</span>
             <span>{level}</span>
           </div>
+          <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
           <h2>{currentTask.question}</h2>
           {renderQuestionControl(currentTask, currentAnswer)}
           {!simulationMode ? (
@@ -2220,13 +3107,93 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     const words = countWords(text);
     const suggestions = getWritingSuggestions(currentTask, text);
 
+    if (module.id === "write") {
+      return (
+        <div className={styles.writingLayout}>
+          <section className={styles.promptPanel}>
+            <div className={styles.questionTopline}>
+              <span className={styles.questionStep}>Frage {currentIndex + 1} von {totalTasks}</span>
+              <span>{level}</span>
+            </div>
+            <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
+            <h2>{currentTask.title}</h2>
+            <p translate="no">{currentTask.prompt}</p>
+            <div className={styles.promptMeta}>
+              <span><FileText size={16} /> {currentTask.minWords}-{currentTask.maxWords} Woerter</span>
+              <span><ShieldCheck size={16} /> Register {currentTask.register}</span>
+            </div>
+          </section>
+
+          <section className={styles.editorPanel}>
+            <div className={styles.editorToolbar}>
+              <span>{words} Wort{words !== 1 ? "er" : ""}</span>
+              <span>Ziel {currentTask.targetWords}</span>
+              <button type="button" onClick={saveWritingVersion}>
+                <Save size={16} />
+                Entwurf speichern
+              </button>
+            </div>
+            <textarea
+              value={text}
+              onChange={(event) => setAnswerForCurrent(event.target.value)}
+              placeholder="Schreiben Sie Ihre Antwort auf Deutsch..."
+              className={styles.editor}
+            />
+          </section>
+
+          <div className={styles.writingSupportGrid}>
+            {!simulationMode ? (
+              <section className={styles.supportPanel}>
+                <div className={styles.sectionLabel}>
+                  <WandSparkles size={18} />
+                  Vorschlaege
+                </div>
+                <ul>
+                  {suggestions.map((suggestion) => (
+                    <li key={suggestion}>{suggestion}</li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
+
+            <section className={styles.supportPanel}>
+              <div className={styles.sectionLabel}>
+                <History size={18} />
+                Verlauf
+              </div>
+              {writingVersions.length ? (
+                <div className={styles.versionList}>
+                  {writingVersions.slice(0, 5).map((version) => (
+                    <button
+                      type="button"
+                      key={version.id}
+                      onClick={() => {
+                        setCurrentIndex(version.taskIndex);
+                        setAnswers((previous) => ({ ...previous, [version.taskIndex]: version.text }));
+                      }}
+                    >
+                      <span>{version.taskTitle}</span>
+                      <small>{formatClock(new Date(version.createdAt))} - {version.words} Woerter</small>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className={styles.mutedText}>Versionen erscheinen nach einigen Sekunden Schreibzeit.</p>
+              )}
+            </section>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className={styles.writingLayout}>
         <section className={styles.promptPanel}>
           <div className={styles.questionTopline}>
-            <span>{currentTask.typeLabel}</span>
+            <span className={styles.questionStep}>Question {currentIndex + 1} of {totalTasks}</span>
             <span>{level}</span>
           </div>
+          <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
           <h2>{currentTask.title}</h2>
           <p translate="no">{currentTask.prompt}</p>
           <div className={styles.promptMeta}>
@@ -2301,13 +3268,112 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     const answer = currentAnswer ?? {};
     const playbackSrc = answer.audioDataUrl || answer.audioUrl;
 
+    if (module.id === "speak") {
+      return (
+        <div className={styles.speakingLayout}>
+          <section className={styles.promptPanel}>
+            <div className={styles.questionTopline}>
+              <span className={styles.questionStep}>Frage {currentIndex + 1} von {totalTasks}</span>
+              <span>{level}</span>
+            </div>
+            <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
+            <h2>{currentTask.title}</h2>
+            <p translate="no">{currentTask.prompt}</p>
+            {currentTask.visual ? (
+              <img className={styles.speakingImage} src={speakingImage} alt="Aktive Personen in einer Alltagssituation" />
+            ) : null}
+            <div className={styles.promptMeta}>
+              <span><Clock3 size={16} /> Vorbereitung {currentTask.prepSeconds}s</span>
+              <span><Mic size={16} /> Zielantwort {currentTask.responseSeconds}s</span>
+            </div>
+          </section>
+
+          <section className={styles.recorderPanel}>
+            <div className={styles.timerGrid}>
+              <div className={styles.timerBlock}>
+                <Clock3 size={20} />
+                <strong>{formatTime(prepRemaining)}</strong>
+                <span>{speakingPhase === "prep" ? "Verbleibende Vorbereitungszeit" : "Verbleibende Zeit"}</span>
+              </div>
+              <div className={styles.timerBlock}>
+                <Mic size={20} />
+                <strong>{formatTime(recordingSeconds || answer.duration || 0)}</strong>
+                <span>Sprechzeit</span>
+              </div>
+            </div>
+
+            <div className={styles.micStage} data-recording={isRecording ? "true" : "false"}>
+              <div className={styles.waveform} aria-hidden="true">
+                <span />
+                <span />
+                <span />
+                <span />
+                <span />
+              </div>
+              <button
+                type="button"
+                className={isRecording ? styles.stopButton : styles.recordButton}
+                onClick={isRecording ? stopRecording : startRecording}
+                aria-label={isRecording ? "Aufnahme stoppen" : "Aufnahme starten"}
+              >
+                {isRecording ? <Square size={34} /> : <Mic size={38} />}
+              </button>
+              <div className={styles.waveform} aria-hidden="true">
+                <span />
+                <span />
+                <span />
+                <span />
+                <span />
+              </div>
+            </div>
+
+            <div className={styles.recordActions}>
+              <button type="button" className={styles.secondaryButton} onClick={beginPrep} disabled={prepActive || simulationMode}>
+                <TimerReset size={16} />
+                Vorbereitung neu starten
+              </button>
+              <button type="button" className={styles.secondaryButton} onClick={rerecord} disabled={isRecording}>
+                <RotateCcw size={16} />
+                Erneut aufnehmen
+              </button>
+            </div>
+
+            {recordError ? <p className={styles.warningText}><AlertCircle size={16} /> {toGermanStatus(recordError)}</p> : null}
+
+            {playbackSrc ? (
+              <SmoothedAudioPlayer key={playbackSrc} src={playbackSrc} label="Wiedergabe Ihrer muendlichen Antwort" />
+            ) : answer.simulated ? (
+              <p className={styles.mutedText}>Zeitgesteuerte Antwort ohne Audiodatei gespeichert.</p>
+            ) : (
+              <p className={styles.mutedText}>Ihre Wiedergabe erscheint hier nach der Aufnahme.</p>
+            )}
+          </section>
+
+          {!simulationMode ? (
+            <section className={styles.supportPanel}>
+              <div className={styles.sectionLabel}>
+                <ClipboardCheck size={18} />
+                Antwortschema
+              </div>
+              <ul>
+                {currentTask.checklist.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+        </div>
+      );
+    }
+
     return (
       <div className={styles.speakingLayout}>
         <section className={styles.promptPanel}>
           <div className={styles.questionTopline}>
-            <span>{currentTask.typeLabel}</span>
+            <span className={styles.questionStep}>Question {currentIndex + 1} of {totalTasks}</span>
             <span>{level}</span>
           </div>
+          <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
           <h2>{currentTask.title}</h2>
           <p translate="no">{currentTask.prompt}</p>
           {currentTask.visual ? (
@@ -2369,10 +3435,10 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             </button>
           </div>
 
-          {recordError ? <p className={styles.warningText}><AlertCircle size={16} /> {recordError}</p> : null}
+          {recordError ? <p className={styles.warningText}><AlertCircle size={16} /> {toGermanStatus(recordError)}</p> : null}
 
           {playbackSrc ? (
-            <audio className={styles.playback} src={playbackSrc} controls />
+            <SmoothedAudioPlayer key={playbackSrc} src={playbackSrc} label="Lecture de votre reponse orale" />
           ) : answer.simulated ? (
             <p className={styles.mutedText}>Réponse minutée enregistrée sans fichier audio.</p>
           ) : (
@@ -2401,6 +3467,60 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     if (completed) {
       const unlocked = score >= PASS_SCORE;
       const resultSummary = buildResultSummary(module, answers);
+      if (module?.id) {
+        return (
+          <section className={styles.resultPanel}>
+            <Trophy size={44} />
+            <p className={styles.sectionLabel}>{t.modulePage.result}</p>
+            <h2>{score}%</h2>
+            <p>
+              {unlocked
+                ? `Gut gemacht. Das naechste empfohlene Niveau ist ${getNextLevel(level)}.`
+                : `Arbeiten Sie weiter auf ${level}, bevor Sie die Schwierigkeit erhoehen.`}
+            </p>
+            <div className={styles.resultStats}>
+              <span><CheckCircle2 size={16} /> {answeredCount}/{totalTasks} Aufgaben bearbeitet</span>
+              <span><CheckCircle2 size={16} /> {resultSummary.correctCount} richtig</span>
+              <span><XCircle size={16} /> {resultSummary.wrongCount} falsch</span>
+              <span><Flag size={16} /> {Object.values(flagged).filter(Boolean).length} markiert</span>
+              <span><Clock3 size={16} /> {formatTime(elapsedSeconds)} Arbeitszeit</span>
+            </div>
+            <div className={styles.finalReviewList}>
+              {resultSummary.rows.map((row) => (
+                <article key={row.id} className={styles.finalReviewItem} data-correct={row.isCorrect ? "true" : "false"}>
+                  <div className={styles.finalReviewHeader}>
+                    <span>Frage {row.number}</span>
+                    <strong>{row.isCorrect ? "Richtig" : "Noch einmal pruefen"}</strong>
+                  </div>
+                  <h3>{row.title}</h3>
+                  <p><b>Ihre Antwort:</b> {row.userAnswer}</p>
+                  <p><b>Erwartete Antwort:</b> <span translate="no">{row.correctAnswer}</span></p>
+                  {row.explanation ? <p className={styles.finalExplanation}>{row.explanation}</p> : null}
+                </article>
+              ))}
+            </div>
+            {resultStatus ? <p className={styles.statusLine}>{toGermanStatus(resultStatus)}</p> : null}
+            <div className={styles.resultActions}>
+              <button type="button" className={styles.secondaryButton} onClick={() => navigate(loggedIn ? "/dashboard" : "/")}>
+                <ChevronLeft size={16} />
+                Zurueck
+              </button>
+              <button type="button" className={styles.secondaryButton} onClick={startSimulation}>
+                <RotateCcw size={16} />
+                Neu starten
+              </button>
+              <button type="button" className={styles.secondaryButton} onClick={() => navigate(selectedSeries ? `/simulations/${selectedSeries.examId}` : "/simulations", { state: { fromResults: true } })}>
+                <ClipboardCheck size={16} />
+                Neue Serie waehlen
+              </button>
+              <button type="button" className={styles.primaryButton} onClick={() => navigate(seriesRoute)}>
+                {t.modulePage.chooseModule}
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          </section>
+        );
+      }
       return (
         <section className={styles.resultPanel}>
           <Trophy size={44} />
@@ -2432,7 +3552,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               </article>
             ))}
           </div>
-          {resultStatus ? <p className={styles.statusLine}>{resultStatus}</p> : null}
+          {resultStatus ? <p className={styles.statusLine}>{toGermanStatus(resultStatus)}</p> : null}
           <div className={styles.resultActions}>
             <button type="button" className={styles.secondaryButton} onClick={() => navigate(loggedIn ? "/dashboard" : "/")}>
               <ChevronLeft size={16} />
@@ -2441,6 +3561,10 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             <button type="button" className={styles.secondaryButton} onClick={startSimulation}>
               <RotateCcw size={16} />
               Recommencer
+            </button>
+            <button type="button" className={styles.secondaryButton} onClick={() => navigate(selectedSeries ? `/simulations/${selectedSeries.examId}` : "/simulations", { state: { fromResults: true } })}>
+              <ClipboardCheck size={16} />
+              Choisir une nouvelle série
             </button>
             <button type="button" className={styles.primaryButton} onClick={() => navigate(seriesRoute)}>
               {t.modulePage.chooseModule}
@@ -2451,17 +3575,53 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       );
     }
 
+    if (partIntroVisible && currentPart) return renderPartIntro();
+
     if (module.id === "read") return renderReading();
     if (module.id === "listen") return renderListening();
     if (module.id === "write") return renderWriting();
     return renderSpeaking();
   };
 
+  if (waitingForImportedSeries) {
+    return (
+      <div className={styles.page} style={{ "--module-accent": module.accent, "--module-soft": module.soft }}>
+        <section className={styles.resultPanel}>
+          <p className={styles.sectionLabel}>Serie</p>
+          <h2>Importierte Aufgaben werden geladen...</h2>
+        </section>
+      </div>
+    );
+  }
+
+  if (false) {
+    return (
+      <div className={styles.page} style={{ "--module-accent": module.accent, "--module-soft": module.soft }}>
+        <section className={styles.resultPanel}>
+          <p className={styles.sectionLabel}>Series</p>
+          <h2>Chargement des exercices importés...</h2>
+        </section>
+      </div>
+    );
+  }
+
+  if (!params.seriesId && !importedModuleState.loading) {
+    return <ComingSoonPage title="Dieser Uebungsablauf ist noch nicht verfuegbar" />;
+  }
+
+  if (params.seriesId && !selectedSeries && !importedModuleState.loading) {
+    return <ComingSoonPage examId={params.examId} title="Diese Testserie ist noch nicht verfuegbar" />;
+  }
+
+  if (selectedSeries?.isImported && !selectedSeriesContent && !importedModuleState.loading) {
+    return <ComingSoonPage examId={params.examId} title="Dieses Modul ist noch nicht verfuegbar" />;
+  }
+
   if (blockedSeriesAccess || blockedVisitorRefresh) {
     return (
       <NotFoundPage
-        title="404 error"
-        message="This test session is not available. Open a free series from the series listing to start a visitor test."
+        title="404-Fehler"
+        message="Diese Testsitzung ist nicht verfuegbar. Oeffnen Sie eine kostenlose Serie aus der Serienliste, um einen Besuchertest zu starten."
       />
     );
   }
@@ -2469,11 +3629,16 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   return (
     <div className={styles.page} style={{ "--module-accent": module.accent, "--module-soft": module.soft }}>
       <nav className={styles.nav}>
-        <button type="button" className={styles.logoButton} onClick={() => navigate("/")} aria-label="Retour">
+        <button
+          type="button"
+          className={styles.logoButton}
+          onClick={() => navigate(loggedIn ? "/dashboard" : "/")}
+          aria-label="Zurueck"
+        >
           <img src={logo} alt="Deutsch Lernen" />
         </button>
         <div className={styles.navActions}>
-          {loggedIn ? (
+          {!loggedIn ? (
             <button type="button" onClick={() => navigate("/")}>
               <Home size={16} />
               {t.common.home}
@@ -2499,7 +3664,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               <h1>Simulation: {examHeading}</h1>
               <p>
                 <ModuleIcon size={18} />
-                Module: {moduleTitle} ({module.examPart})
+                Modul: {moduleTitle} ({module.examPart})
               </p>
             </div>
             <div
@@ -2507,7 +3672,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
                 styles.examTimer,
                 simulationMode && timerSeconds <= 15 ? styles.timerUrgent : "",
               ].join(" ")}
-              aria-label="Temps restant"
+              aria-label="Verbleibende Zeit"
             >
               <Clock3 size={22} />
               {formatExamTime(simulationMode ? timerSeconds : currentTaskDuration)}
@@ -2525,7 +3690,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             </span>
             <span className={styles.moduleBadge}>
               <Clock3 size={16} />
-              {simulationMode ? "Mode examen" : t.modulePage.freeTraining}
+              {simulationMode ? "Pruefungsmodus" : t.modulePage.freeTraining}
             </span>
             {simulationMode ? (
               <span className={styles.moduleBadge}>
@@ -2535,20 +3700,27 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             ) : null}
           </div>
 
-          <div className={styles.progressWrap} aria-label={`Question ${currentIndex + 1} sur ${totalTasks}`}>
+          <div className={styles.progressWrap} aria-label={`Frage ${currentIndex + 1} von ${totalTasks}`}>
             <div className={styles.progressText}>
-              <span>{currentIndex + 1}/{totalTasks} {t.modulePage.questions}</span>
-              <span>{answeredCount} {t.modulePage.answersSaved}</span>
+              <span>{answeredCount}/{totalTasks} Antworten</span>
+              <span>{remainingCount} uebrig - {completedPartCount}/{Math.max(1, examParts.length)} Abschnitte</span>
+            </div>
+            <div className={styles.progressText} hidden>
+              <span>{answeredCount}/{totalTasks} réponses</span>
+              <span>{remainingCount} restantes · {completedPartCount}/{Math.max(1, examParts.length)} sections</span>
             </div>
             <div className={styles.progressTrack}>
               <span style={{ width: `${progressPercent}%` }} />
             </div>
           </div>
+
+          {!completed ? renderQuestionStepper() : null}
         </header>
 
-        <div className={styles.workArea}>
+        <div className={`${styles.workArea} ${module.id === "read" ? styles.readingWorkArea : ""}`}>
           <section className={styles.mainContent}>{renderModuleContent()}</section>
 
+          {module.id !== "read" ? (
           <aside className={styles.sidebar}>
             <div className={styles.sidebarHeader}>
               <h2>Tests</h2>
@@ -2561,38 +3733,36 @@ export default function SimulationModulePage({ moduleIdOverride }) {
                 const isSkipped = Boolean(skipped[index]);
                 const isFlagged = Boolean(flagged[index]);
                 return (
-                  <button
+                  <span
                     key={task.id}
-                    type="button"
                     className={[
                       styles.questionButton,
                       index === currentIndex ? styles.questionCurrent : "",
                       answered ? styles.questionAnswered : "",
                       isSkipped ? styles.questionSkipped : "",
                     ].join(" ")}
-                    onClick={() => goToQuestion(index)}
-                    disabled={simulationMode && index !== currentIndex}
+                    data-static="true"
                     aria-current={index === currentIndex ? "step" : undefined}
-                    aria-label={`Question ${index + 1}`}
+                    aria-label={`Frage ${index + 1}`}
                   >
                     <span>{index + 1}</span>
                     {answered ? <CheckCircle2 size={14} /> : isSkipped ? <SkipForward size={14} /> : <Circle size={14} />}
                     {isFlagged ? <Flag size={12} className={styles.flagMini} /> : null}
-                  </button>
+                  </span>
                 );
               })}
             </div>
 
             <div className={styles.legend}>
               <span><i className={styles.legendAnswered} /> {t.modulePage.answered}</span>
-              <span><i className={styles.legendCurrent} /> En cours</span>
+              <span><i className={styles.legendCurrent} /> Aktuell</span>
               <span><i className={styles.legendFlagged} /> {t.modulePage.flagged}</span>
             </div>
 
             <div className={styles.notesBox}>
               <label htmlFor={`notes-${module.id}-${currentIndex}`}>
                 <PencilLine size={16} />
-                Notes
+                Notizen
               </label>
               <textarea
                 id={`notes-${module.id}-${currentIndex}`}
@@ -2600,7 +3770,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
                 onChange={(event) =>
                   setNotes((previous) => ({ ...previous, [currentIndex]: event.target.value }))
                 }
-                placeholder="Vos notes rapides..."
+                placeholder="Ihre kurzen Notizen..."
                 rows={4}
               />
             </div>
@@ -2618,36 +3788,32 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               </ul>
             </div>
 
-            <p className={styles.saveStatus}>{saveStatus}</p>
+            <p className={styles.saveStatus}>{toGermanStatus(saveStatus)}</p>
           </aside>
+          ) : null}
         </div>
 
-        {!completed ? (
-          <section className={styles.actionPanel}>
+        {!completed && !partIntroVisible ? (
+          <section
+            className={`${styles.actionPanel} ${styles.stepActionPanel}`}
+            aria-label="Aufgabennavigation"
+          >
             <button
               type="button"
-              className={styles.secondaryButton}
+              className={`${styles.secondaryButton} ${styles.mobileNavButton}`}
               onClick={goToPrevious}
-              disabled={currentIndex === 0 || simulationMode || isRecording}
+              disabled={currentIndex === 0 || isRecording}
             >
               <ChevronLeft size={16} />
-              Retour
+              Zurueck
             </button>
-            <button type="button" className={styles.secondaryButton} onClick={toggleFlag}>
-              <Flag size={16} />
-              {flagged[currentIndex] ? t.modulePage.removeFlag : t.modulePage.flagQuestion}
-            </button>
-            <button type="button" className={styles.secondaryButton} onClick={skipCurrent} disabled={isRecording}>
-              <SkipForward size={16} />
-              {t.common.skip}
-            </button>
+            {partIntroVisible ? (
             <button type="button" className={styles.secondaryButton} onClick={() => persistProgress(`Sauvegardé à ${formatClock()}`)}>
-              <Save size={16} />
-              {t.modulePage.saveProgress}
             </button>
+            ) : null}
             <button
               type="button"
-              className={styles.primaryButton}
+              className={`${styles.primaryButton} ${styles.mobileNavButton}`}
               onClick={goToNext}
               disabled={(nextDisabled && !currentSkipped) || isRecording}
             >

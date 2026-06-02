@@ -49,7 +49,7 @@ export const normalizeSimulationEntry = (entry) => {
   const currentIndex = Math.max(0, Number(entry?.currentIndex) || 0);
   const answeredCount = Math.max(0, Number(entry?.answeredCount) || 0);
   const progressPercent = totalTasks
-    ? Math.min(100, Math.round((Math.max(answeredCount, currentIndex + 1) / totalTasks) * 100))
+    ? Math.min(100, Math.round((answeredCount / totalTasks) * 100))
     : Math.max(0, Math.min(100, Number(entry?.progressPercent) || 0));
   const savedAt = entry?.lastAccessedAt ?? entry?.savedAt ?? new Date().toISOString();
 

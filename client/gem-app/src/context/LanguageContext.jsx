@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import { getStoredLanguage, setStoredLanguage } from "../utils/language";
 
 const LanguageContext = createContext({
@@ -95,7 +95,7 @@ const translations = {
         login: "Connexion",
         home: "Accueil",
         currentTopics: "Sujets actuels",
-        aboutTests: "À propos TestDaF/DSH",
+        aboutTests: "À propos",
         pages: "Pages",
         createAccount: "Créer un compte",
       },
@@ -904,7 +904,7 @@ export const getTranslations = (language = "fr") => translations[language] ?? tr
 
 export function LanguageProvider({ children }) {
   const [language, setLangState] = useState(getStoredLanguage);
-  const setLanguage = (next) => setLangState(setStoredLanguage(next));
+  const setLanguage = useCallback((next) => setLangState(setStoredLanguage(next)), []);
 
   const value = useMemo(
     () => ({ language, setLanguage, t: getTranslations(language) }),

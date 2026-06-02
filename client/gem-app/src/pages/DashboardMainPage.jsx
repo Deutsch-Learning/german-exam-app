@@ -3,12 +3,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import styles from "./DashboardPage.module.css";
 import API from "../services/api";
+import { clearDashboardCache, fetchDashboardData } from "../services/dashboard";
 
 import logo from "../assets/images/logo.png";
 import userIcon from "../assets/images/icon-profile.png";
 import { languageOptions } from "../utils/language";
 import { useLanguage } from "../context/LanguageContext";
 import { clearAuthSession, getAuthUser, isAdmin, updateStoredUser } from "../utils/access";
+import { useStartSimulationLanguage } from "../utils/simulationLanguage";
 
 const formatDateTimeFr = (iso) => {
   try {
@@ -94,7 +96,7 @@ const LanguageDropdown = ({ language, setLanguage }) => {
   );
 };
 
-const TopNav = ({ onToggleMenu, onGoHome, onGoDashboard, onGoProfile, onGoActualites, onGoAbout, onGoContact, onGoModule, onGoLessons, onSwitchAdmin, isAdminUser, language, setLanguage, labels }) => {
+const TopNav = ({ onToggleMenu, onGoDashboard, onGoProfile, onGoActualites, onGoAbout, onGoContact, onGoModule, onGoLessons, onSwitchAdmin, onLogout, isAdminUser, language, setLanguage, labels }) => {
   const [openFormation, setOpenFormation] = useState(false);
 
   return (
@@ -104,7 +106,6 @@ const TopNav = ({ onToggleMenu, onGoHome, onGoDashboard, onGoProfile, onGoActual
         <img src={logo} alt="Deutsch Lernen" className={styles.logo} />
       </div>
       <div className={styles.navLinks}>
-        <button type="button" className={styles.linkBtn} onClick={onGoHome}>{labels.home}</button>
         <button type="button" className={styles.linkBtn} onClick={onGoDashboard}>{labels.dashboard}</button>
         <button type="button" className={styles.linkBtn} onClick={onGoActualites}>{labels.news} <ChevronDownIcon /></button>
         <button type="button" className={styles.linkBtn} onClick={onGoAbout}>{labels.about} <ChevronDownIcon /></button>
@@ -130,6 +131,10 @@ const TopNav = ({ onToggleMenu, onGoHome, onGoDashboard, onGoProfile, onGoActual
         ) : null}
         <LanguageDropdown language={language} setLanguage={setLanguage} />
         <button className={styles.profileBtn} onClick={onGoProfile} type="button"><img src={userIcon} alt="Profile" /></button>
+        <button className={styles.logoutTopBtn} onClick={onLogout} type="button" aria-label={labels.logout}>
+          <IconLogout color="currentColor" />
+          <span>{labels.logout}</span>
+        </button>
       </div>
     </nav>
   );
@@ -291,10 +296,23 @@ const RecentSimulationsCard = ({ simulations, labels, onResume, onMore }) => (
   </div>
 );
 
+const DashboardSkeleton = () => (
+  <div className={styles.dashboardGrid} aria-label="Chargement du dashboard">
+    {["progress", "skills", "recent"].map((item) => (
+      <div key={item} className={styles.skeletonCard}>
+        <span />
+        <strong />
+        <i />
+      </div>
+    ))}
+  </div>
+);
+
 export default function DashboardMainPage() {
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { language, setLanguage, t } = useLanguage();
+  const startSimulationLanguage = useStartSimulationLanguage();
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -306,14 +324,16 @@ export default function DashboardMainPage() {
     setError("");
     try {
       if (!auth?.id) { setError("Utilisateur non connecté."); setData(null); return; }
-      const res = await API.get("/api/dashboard");
-      if (!res.data?.ok) { setError(res.data?.error ?? "Impossible de charger le dashboard."); setData(null); return; }
-      if (res.data?.user) {
-        updateStoredUser(res.data.user);
+      const dashboard = await fetchDashboardData();
+      if (!dashboard?.ok) { setError(dashboard?.error ?? "Impossible de charger le dashboard."); setData(null); return; }
+      if (dashboard?.user) {
+        updateStoredUser(dashboard.user);
       }
-      setData(res.data);
-    } catch {
-      setError("Impossible de joindre le backend.");
+      setData(dashboard);
+    } catch (err) {
+      const status = err?.response?.status;
+      const apiError = err?.response?.data?.error;
+      setError(status ? apiError ?? "Impossible de charger le dashboard." : "Impossible de joindre le backend.");
       setData(null);
     } finally {
       setLoading(false);
@@ -322,12 +342,26 @@ export default function DashboardMainPage() {
 
   useEffect(() => { fetchDashboard(); }, [fetchDashboard]);
 
+  useEffect(() => {
+    if (!sidebarOpen) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [sidebarOpen]);
+
   const displayName = useMemo(() => {
     const first = data?.user?.first_name ?? "";
     const last = data?.user?.last_name ?? "";
     const full = `${first} ${last}`.trim();
-    return full || data?.user?.username || "Utilisateur";
-  }, [data]);
+    const storedFirst = auth?.first_name ?? "";
+    const storedLast = auth?.last_name ?? "";
+    const storedFull = `${storedFirst} ${storedLast}`.trim();
+    return full || data?.user?.username || storedFull || auth?.username || "Utilisateur";
+  }, [auth, data]);
 
   const dashboardSimulations = useMemo(() => {
     return (data?.simulations ?? []).map((simulation) => ({
@@ -348,13 +382,23 @@ export default function DashboardMainPage() {
       // Local cleanup still needs to happen if the token is already expired.
     }
     clearAuthSession();
-    navigate("/login");
+    clearDashboardCache();
+    navigate("/", { replace: true });
   }, [navigate]);
+
+  const goToSimulations = useCallback(() => {
+    startSimulationLanguage();
+    navigate("/simulations");
+  }, [navigate, startSimulationLanguage]);
+
+  const goToSimulationModule = useCallback((moduleId) => {
+    startSimulationLanguage();
+    navigate(`/simulation/${moduleId}`);
+  }, [navigate, startSimulationLanguage]);
 
   const labels = useMemo(() => {
     const common = t.common;
     return {
-      home: common.home,
       news: common.news,
       about: common.about,
       training: common.training,
@@ -369,18 +413,18 @@ export default function DashboardMainPage() {
   }, [t]);
 
   return (
-    <div className={styles.appWrapper}>
+    <div className={`${styles.appWrapper} ${sidebarOpen ? styles.menuOpen : ""}`}>
       <TopNav
         onToggleMenu={() => setSidebarOpen(true)}
-        onGoHome={() => navigate("/")}
         onGoDashboard={() => navigate("/dashboard?view=user")}
         onGoProfile={() => navigate("/profile")}
         onGoActualites={() => navigate("/actualites")}
         onGoAbout={() => navigate("/about")}
         onGoContact={() => navigate("/contact")}
-        onGoModule={(moduleId) => navigate(`/simulation/${moduleId}`)}
+        onGoModule={goToSimulationModule}
         onGoLessons={() => navigate("/lessons")}
         onSwitchAdmin={() => navigate("/admin/dashboard")}
+        onLogout={onLogout}
         isAdminUser={isAdmin()}
         language={language}
         setLanguage={setLanguage}
@@ -392,7 +436,7 @@ export default function DashboardMainPage() {
           isOpen={sidebarOpen}
           onClose={() => setSidebarOpen(false)}
           onGoProfile={() => navigate("/profile")}
-          onGoSimulations={() => navigate("/simulations")}
+          onGoSimulations={goToSimulations}
           onGoProgress={() => navigate("/progress")}
           onLogout={onLogout}
           labels={labels}
@@ -403,6 +447,7 @@ export default function DashboardMainPage() {
             <h1>{t.dashboard.welcome} {loading ? "..." : displayName}</h1>
             {error ? <p className={styles.errorText}>{error}</p> : null}
           </header>
+          {loading && !data ? <DashboardSkeleton /> : (
           <div className={styles.dashboardGrid}>
             <div className={styles.colLeft}>
               <ProgressCard progress={data?.progress} labels={t.dashboard} />
@@ -413,15 +458,19 @@ export default function DashboardMainPage() {
               <RecentSimulationsCard
                 simulations={dashboardSimulations}
                 labels={t.dashboard}
-                onResume={(simulation) => navigate(simulation.route)}
+                onResume={(simulation) => {
+                  startSimulationLanguage();
+                  navigate(simulation.route);
+                }}
                 onMore={() => navigate("/recent-simulations")}
               />
             </div>
           </div>
+          )}
         </main>
       </div>
 
-      <button className={styles.floatingCta} onClick={() => navigate("/simulations")}>{t.dashboard.newSimulation}</button>
+      <button className={styles.floatingCta} onClick={goToSimulations}>{t.dashboard.newSimulation}</button>
     </div>
   );
 }

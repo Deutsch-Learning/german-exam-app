@@ -6,12 +6,16 @@ import {
   BarChart3,
   Download,
   FileJson,
+  LogOut,
   Shield,
+  Upload,
   Users,
 } from "lucide-react";
 import API from "../services/api";
 import logo from "../assets/images/logo.png";
 import styles from "./AdminPanel.module.css";
+import { clearDashboardCache } from "../services/dashboard";
+import { clearAuthSession } from "../utils/access";
 
 const formatDate = (value) => {
   if (!value) return "-";
@@ -50,6 +54,7 @@ const useAdminData = (loader) => {
 function AdminShell({ children }) {
   const location = useLocation();
   const navigate = useNavigate();
+  const [confirmLogout, setConfirmLogout] = useState(false);
   const links = [
     { to: "/admin/dashboard", label: "Dashboard", icon: BarChart3 },
     { to: "/admin/users", label: "Users", icon: Users },
@@ -57,6 +62,17 @@ function AdminShell({ children }) {
     { to: "/admin/api-usage", label: "API usage", icon: Activity },
     { to: "/admin/exports", label: "Exports", icon: Download },
   ];
+
+  const logout = async () => {
+    try {
+      await API.post("/api/auth/logout");
+    } catch {
+      // Local cleanup still needs to happen if the token is already expired.
+    }
+    clearAuthSession();
+    clearDashboardCache();
+    navigate("/", { replace: true });
+  };
 
   return (
     <div className={styles.adminPage}>
@@ -72,6 +88,14 @@ function AdminShell({ children }) {
             onClick={() => navigate("/dashboard?view=user")}
           >
             Switch to User
+          </button>
+          <button
+            type="button"
+            className={styles.logoutButton}
+            onClick={() => setConfirmLogout(true)}
+          >
+            <LogOut size={18} />
+            Logout
           </button>
           <nav className={styles.nav} aria-label="Admin navigation">
             {links.map((item) => {
@@ -91,6 +115,23 @@ function AdminShell({ children }) {
         </aside>
         <main className={styles.main}>{children}</main>
       </div>
+      {confirmLogout ? (
+        <div className={styles.modalOverlay} role="presentation">
+          <div className={styles.confirmModal} role="dialog" aria-modal="true" aria-labelledby="admin-logout-title">
+            <p className={styles.modalEyebrow}>Admin session</p>
+            <h2 id="admin-logout-title">Confirm logout</h2>
+            <p>Do you want to close the admin session and return to the public site?</p>
+            <div className={styles.modalActions}>
+              <button type="button" className={styles.secondaryButton} onClick={() => setConfirmLogout(false)}>
+                Cancel
+              </button>
+              <button type="button" className={styles.dangerButton} onClick={logout}>
+                Logout
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -330,6 +371,10 @@ function AdminExams() {
   const [generateForm, setGenerateForm] = useState({ type: "testdaf", serie: "serie-1", level: "B2", moduleCategory: "reading", quantity: 4 });
   const [jsonPayload, setJsonPayload] = useState("");
   const [questionEdit, setQuestionEdit] = useState({ examId: "", questionId: "", prompt: "" });
+  const [documentFile, setDocumentFile] = useState(null);
+  const [documentBusy, setDocumentBusy] = useState("");
+  const [documentAnalysis, setDocumentAnalysis] = useState(null);
+  const [documentError, setDocumentError] = useState("");
   const [status, setStatus] = useState("");
 
   const createExam = async (event) => {
@@ -346,6 +391,34 @@ function AdminExams() {
     setJsonPayload("");
     setStatus("JSON exam upload complete.");
     await reload();
+  };
+
+  const processDocument = async (mode) => {
+    if (!documentFile) return;
+    setDocumentBusy(mode);
+    setDocumentError("");
+    setStatus("");
+    try {
+      const formData = new FormData();
+      formData.append("document", documentFile);
+      const endpoint = mode === "import" ? "/api/admin/exams/import-document" : "/api/admin/exams/analyze-document";
+      const res = await API.post(endpoint, formData);
+      setDocumentAnalysis(res.data.analysis);
+      if (mode === "import") {
+        setStatus(
+          res.data.duplicate
+            ? "Document already imported. Existing data was kept."
+            : `${res.data.exams?.length ?? 0} exam series imported from document.`
+        );
+        await reload();
+      } else {
+        setStatus("Document analyzed. Review the detected structure before importing.");
+      }
+    } catch (err) {
+      setDocumentError(err.response?.data?.error ?? "Document processing failed.");
+    } finally {
+      setDocumentBusy("");
+    }
   };
 
   const generateExams = async (event) => {
@@ -377,7 +450,76 @@ function AdminExams() {
       <Header title="Exam Management" subtitle="Create exams, bulk upload JSON, and edit existing questions." />
       {status ? <p className={styles.status}>{status}</p> : null}
       {error ? <p className={styles.error}>{error}</p> : null}
+      {documentError ? <p className={styles.error}>{documentError}</p> : null}
       {loading ? <p>Loading...</p> : null}
+      <section className={styles.panel}>
+        <div className={styles.panelHeader}>
+          <div>
+            <h2>Intelligent document import</h2>
+            <p className={styles.panelHint}>Upload PDF, DOCX, TXT, or image files. The parser detects provider, level, section, series, questions, scoring, and prevents duplicate imports.</p>
+          </div>
+          <span className={styles.badge}>
+            <Upload size={14} />
+            Auto parser
+          </span>
+        </div>
+        <div className={styles.documentImportGrid}>
+          <label className={styles.field}>Exam document
+            <input
+              type="file"
+              accept=".pdf,.docx,.txt,.png,.jpg,.jpeg,.webp,.tif,.tiff,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/*"
+              onChange={(event) => {
+                setDocumentFile(event.target.files?.[0] ?? null);
+                setDocumentAnalysis(null);
+                setDocumentError("");
+              }}
+            />
+          </label>
+          <div className={styles.actions}>
+            <button
+              className={styles.secondaryButton}
+              type="button"
+              disabled={!documentFile || Boolean(documentBusy)}
+              onClick={() => processDocument("analyze")}
+            >
+              {documentBusy === "analyze" ? "Analyzing..." : "Analyze only"}
+            </button>
+            <button
+              className={styles.button}
+              type="button"
+              disabled={!documentFile || Boolean(documentBusy)}
+              onClick={() => processDocument("import")}
+            >
+              {documentBusy === "import" ? "Importing..." : "Analyze & import"}
+            </button>
+          </div>
+        </div>
+        {documentAnalysis ? (
+          <div className={styles.importSummary}>
+            <div className={styles.summaryGrid}>
+              <span><strong>Provider</strong>{documentAnalysis.metadata?.provider ?? "-"}</span>
+              <span><strong>Exam</strong>{documentAnalysis.metadata?.examType ?? "-"}</span>
+              <span><strong>Level</strong>{documentAnalysis.metadata?.level ?? "-"}</span>
+              <span><strong>Section</strong>{documentAnalysis.metadata?.sectionLabel ?? documentAnalysis.metadata?.sectionType ?? "-"}</span>
+              <span><strong>Series</strong>{documentAnalysis.outline?.series?.length ?? 0}</span>
+              <span><strong>Questions</strong>{documentAnalysis.validation?.questionCount ?? 0}</span>
+            </div>
+            {documentAnalysis.validation?.warnings?.length ? (
+              <ul className={styles.warningList}>
+                {documentAnalysis.validation.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+              </ul>
+            ) : null}
+            <div className={styles.outlineList}>
+              {(documentAnalysis.outline?.series ?? []).slice(0, 8).map((series) => (
+                <article key={`${series.seriesNumber}-${series.title}`}>
+                  <strong>{series.sourceLabel}: {series.title}</strong>
+                  <span>{series.sectionCount} sections · {series.questionCount} questions</span>
+                </article>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </section>
       <div className={styles.split}>
         <section className={styles.panel}>
           <h2>Create exam</h2>

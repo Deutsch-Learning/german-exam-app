@@ -50,6 +50,7 @@ import ServiceCard from "../components/landing/ServiceCard";
 import TestimonialCard from "../components/landing/TestimonialCard";
 import { useLanguage } from "../context/LanguageContext";
 import { examSimulations } from "../data/siteContent";
+import { useStartSimulationLanguage } from "../utils/simulationLanguage";
 
 const trustedCountries = [
   { code: "DE", name: "Germany", flag: germanyFlag },
@@ -76,6 +77,7 @@ const trustedCountries = [
 
 export default function LandingPage() {
   const { language, setLanguage, t } = useLanguage();
+  const startSimulationLanguage = useStartSimulationLanguage();
   const copy = t.landing;
 
   const services = [
@@ -172,6 +174,7 @@ export default function LandingPage() {
                   className="sim-start-button"
                   style={{ "--sim-accent": exam.accent }}
                   to={exam.path}
+                  onClick={startSimulationLanguage}
                 >
                   <BookOpenCheck size={18} />
                   {exam.buttonLabel}
@@ -327,7 +330,7 @@ export default function LandingPage() {
             <Link className="btn btn-primary btn-large" to="/offers">
               {copy.viewOffers}
             </Link>
-            <Link className="btn btn-secondary btn-large" to="/start-preparation">
+            <Link className="btn btn-secondary btn-large" to="/start-preparation" onClick={startSimulationLanguage}>
               <ShieldCheck size={18} />
               {copy.tryFree}
             </Link>
