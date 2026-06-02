@@ -123,7 +123,11 @@ export default function Navbar({ logo, language = "fr", onChangeLanguage, labels
   );
 
   const renderDropdown = (dropdown) =>
-    dropdown.id === "topics" ? renderTopicDropdown(dropdown) : renderLinkDropdown(dropdown);
+    !dropdown.items.length ? (
+      <Link key={dropdown.id} className="nav-link" to={dropdown.id === "about" ? "/about" : "/"} onClick={closeMenus}>
+        {dropdown.label}
+      </Link>
+    ) : dropdown.id === "topics" ? renderTopicDropdown(dropdown) : renderLinkDropdown(dropdown);
 
   return (
     <>

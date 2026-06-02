@@ -162,7 +162,7 @@ export default function LandingPage() {
         <div className="container hero-container">
           <div className="hero-content">
             <h1 className="hero-title">
-              {copy.heroTitleA}
+              <span className="hero-title-wipe">{copy.heroTitleA}</span>
               <br />
               {copy.heroTitleB}
             </h1>

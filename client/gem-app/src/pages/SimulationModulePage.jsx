@@ -1565,6 +1565,7 @@ const buildSeriesModule = (baseModule, content, series) => {
   if (content.isImported) {
     return {
       ...baseModule,
+      isImported: true,
       eyebrow: `${series.code} / ${baseModule.eyebrow}`,
       examPart: `${series.examName} ${series.code} - ${baseModule.examPart}`,
       tasks: content.tasks?.length ? content.tasks : baseModule.tasks,
@@ -1885,7 +1886,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const score = calculateModuleScore(module, answers);
   const currentAnswered = getTaskAnswered(module, currentTask, currentAnswer);
   const currentSkipped = Boolean(skipped[currentIndex]);
-  const nextDisabled = !completed && !currentAnswered;
+  const nextDisabled = !completed && module.id !== "write" && !currentAnswered;
   const level = currentTask?.level ?? "A1";
   const audioAtSessionEnd = module.id === "listen" && audioTimestamp >= currentAudioDuration;
   const audioReplayBlocked = module.id === "listen" && replaysUsed >= AUDIO_REPLAY_LIMIT && (!audioSessionActive || audioAtSessionEnd);
@@ -3502,8 +3503,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
                   </div>
                   <h3>{row.title}</h3>
                   <p><b>Ihre Antwort:</b> {row.userAnswer}</p>
-                  <p><b>Erwartete Antwort:</b> <span translate="no">{row.correctAnswer}</span></p>
-                  {row.explanation ? <p className={styles.finalExplanation}>{row.explanation}</p> : null}
+                  {!module.isImported ? <p><b>Erwartete Antwort:</b> <span translate="no">{row.correctAnswer}</span></p> : null}
+                  {!module.isImported && row.explanation ? <p className={styles.finalExplanation}>{row.explanation}</p> : null}
                 </article>
               ))}
             </div>
@@ -3555,8 +3556,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
                 </div>
                 <h3>{row.title}</h3>
                 <p><b>Votre réponse:</b> {row.userAnswer}</p>
-                <p><b>Réponse attendue:</b> <span translate="no">{row.correctAnswer}</span></p>
-                {row.explanation ? <p className={styles.finalExplanation}>{row.explanation}</p> : null}
+                {!module.isImported ? <p><b>Réponse attendue:</b> <span translate="no">{row.correctAnswer}</span></p> : null}
+                {!module.isImported && row.explanation ? <p className={styles.finalExplanation}>{row.explanation}</p> : null}
               </article>
             ))}
           </div>

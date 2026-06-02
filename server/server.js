@@ -761,10 +761,21 @@ const normalizeProviderId = (value) => {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
   if (normalized.includes("goethe")) return "goethe";
+  if (normalized.includes("osd") || normalized.includes("oesd")) return "osd";
   if (normalized.includes("testdaf")) return "testdaf";
   if (normalized.includes("telc")) return "telc";
+  if (normalized.includes("ecl")) return "ecl";
   if (normalized === "dsh" || normalized.includes("deutsche-sprachpruefung")) return "dsh";
   return normalized;
+};
+
+const getProviderRouteMeta = (value) => {
+  const raw = String(value ?? "").trim();
+  const levelMatch = raw.match(/\b(A1|A2|B1|B2|C1|C2)\b/i);
+  return {
+    provider: normalizeProviderId(raw),
+    level: levelMatch ? levelMatch[1].toUpperCase() : null,
+  };
 };
 
 const toImportedSeriesId = (provider, level, seriesNumber) =>
@@ -880,10 +891,12 @@ const toPublicSeriesList = (rows) => {
   });
 };
 
-const queryImportedExamRows = async (provider, seriesNumber = null) => {
+const queryImportedExamRows = async (provider, seriesNumber = null, level = null) => {
   const params = [provider];
   const seriesClause = seriesNumber == null ? "" : "AND e.series_number = $2";
   if (seriesNumber != null) params.push(seriesNumber);
+  const levelClause = level ? `AND UPPER(COALESCE(e.level, '')) = $${params.length + 1}` : "";
+  if (level) params.push(String(level).toUpperCase());
 
   return pool.query(
     `
@@ -908,6 +921,7 @@ const queryImportedExamRows = async (provider, seriesNumber = null) => {
         AND e.source_import_id IS NOT NULL
         AND e.series_number IS NOT NULL
         ${seriesClause}
+        ${levelClause}
       ORDER BY e.series_number,
                CASE e.section_type
                  WHEN 'read' THEN 1
@@ -1123,10 +1137,10 @@ const buildImportedModuleContent = ({ exam, sections, questions }) => {
 
 app.get("/api/exams/:provider/series", async (req, res) => {
   try {
-    const provider = normalizeProviderId(req.params.provider);
+    const { provider, level } = getProviderRouteMeta(req.params.provider);
     if (!provider) return res.status(400).json({ ok: false, error: "Invalid exam provider" });
 
-    const importedRows = await queryImportedExamRows(provider);
+    const importedRows = await queryImportedExamRows(provider, null, level);
     const series = toPublicSeriesList(importedRows.rows);
     return res.json({ ok: true, source: "database", series });
   } catch (err) {
@@ -1137,14 +1151,14 @@ app.get("/api/exams/:provider/series", async (req, res) => {
 
 app.get("/api/exams/:provider/series/:seriesId/:moduleId", async (req, res) => {
   try {
-    const provider = normalizeProviderId(req.params.provider);
+    const { provider, level } = getProviderRouteMeta(req.params.provider);
     const seriesNumber = parseSeriesNumber(req.params.seriesId);
     const moduleId = String(req.params.moduleId || "").trim().toLowerCase();
     if (!provider || !seriesNumber || !PUBLIC_MODULE_META[moduleId]) {
       return res.status(400).json({ ok: false, error: "Invalid imported module request" });
     }
 
-    const importedRows = await queryImportedExamRows(provider, seriesNumber);
+    const importedRows = await queryImportedExamRows(provider, seriesNumber, level);
     const series = toPublicSeriesList(importedRows.rows)[0];
     const exam = importedRows.rows.find((row) => row.section_type === moduleId);
     if (!series || !exam) {

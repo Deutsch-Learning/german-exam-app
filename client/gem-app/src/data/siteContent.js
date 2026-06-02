@@ -41,38 +41,7 @@ export const currentTopics = [
   },
 ];
 
-export const aboutTestSections = [
-  {
-    id: "whats-testdaf-dsh",
-    label: "whats TestDaF/DSH",
-    path: "/about#whats-testdaf-dsh",
-  },
-  {
-    id: "testdaf-dsh-registration",
-    label: "TestDaF/DSH registration",
-    path: "/about#testdaf-dsh-registration",
-  },
-  {
-    id: "useful-links",
-    label: "useful links",
-    path: "/about#useful-links",
-  },
-  {
-    id: "different-test-testdaf-dsh",
-    label: "different test on the TestDaF/DSH",
-    path: "/about#different-test-testdaf-dsh",
-  },
-  {
-    id: "testdaf-dsh-results",
-    label: "TestDaF/DSH Results",
-    path: "/about#testdaf-dsh-results",
-  },
-  {
-    id: "others",
-    label: "Others",
-    path: "/about#others",
-  },
-];
+export const aboutTestSections = [];
 
 export const pageLinks = [
   {
@@ -97,32 +66,56 @@ export const pageLinks = [
 
 export const examSimulations = [
   {
-    id: "testdaf",
-    name: "TestDaF",
-    buttonLabel: "Start TestDaF Sim",
-    path: "/simulations/testdaf",
-    accent: "#c10016",
-  },
-  {
-    id: "dsh",
-    name: "DSH",
-    buttonLabel: "Start DSH Sim",
-    path: "/simulations/dsh",
-    accent: "#111827",
-  },
-  {
-    id: "goethe",
-    name: "Goethe",
-    buttonLabel: "Start Goethe Sim",
-    path: "/simulations/goethe",
+    id: "goethe-b1",
+    name: "Goethe B1",
+    buttonLabel: "Start Goethe B1",
+    path: "/simulations/goethe-b1",
     accent: "#f9c415",
+    provider: "goethe",
+    level: "B1",
+  },
+  {
+    id: "goethe-b2",
+    name: "Goethe B2",
+    buttonLabel: "Start Goethe B2",
+    path: "/simulations/goethe-b2",
+    accent: "#d97706",
+    provider: "goethe",
+    level: "B2",
+  },
+  {
+    id: "osd-b1",
+    name: "OSD B1",
+    buttonLabel: "Start OSD B1",
+    path: "/simulations/osd-b1",
+    accent: "#2563eb",
+    provider: "osd",
+    level: "B1",
+  },
+  {
+    id: "osd-b2",
+    name: "OSD B2",
+    buttonLabel: "Start OSD B2",
+    path: "/simulations/osd-b2",
+    accent: "#1d4ed8",
+    provider: "osd",
+    level: "B2",
   },
   {
     id: "telc",
-    name: "telc Deutsch",
-    buttonLabel: "Start telc Deutsch Sim",
+    name: "TELC",
+    buttonLabel: "Start TELC",
     path: "/simulations/telc",
     accent: "#0f766e",
+    provider: "telc",
+  },
+  {
+    id: "ecl",
+    name: "ECL",
+    buttonLabel: "Start ECL",
+    path: "/simulations/ecl",
+    accent: "#7c3aed",
+    provider: "ecl",
   },
 ];
 

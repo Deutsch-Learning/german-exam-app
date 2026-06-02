@@ -301,10 +301,48 @@ h4 {
   margin-bottom: 20px;
 }
 
+.hero-title-wipe {
+  display: inline-block;
+  position: relative;
+  overflow: hidden;
+  vertical-align: bottom;
+}
+
+.hero-title-wipe::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.96) 24%, rgba(255, 255, 255, 0.96) 76%, transparent 100%);
+  transform: translateX(-115%);
+  animation: heroTitleRewrite 4.8s ease-in-out infinite;
+}
+
+@keyframes heroTitleRewrite {
+  0%,
+  24% {
+    transform: translateX(-115%);
+  }
+  44%,
+  58% {
+    transform: translateX(0%);
+  }
+  82%,
+  100% {
+    transform: translateX(115%);
+  }
+}
+
 .hero-subtitle {
   color: var(--text-light);
   font-size: 1.05rem;
   margin-bottom: 30px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-title-wipe::after {
+    animation: none;
+    content: none;
+  }
 }
 
 @media (min-width: 992px) {
