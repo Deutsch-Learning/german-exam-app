@@ -52,16 +52,17 @@ const writeStoredSeries = (key, series) => {
 export const fetchImportedSeries = async (examId) => {
   if (!examId) return [];
   const key = String(examId).toLowerCase();
+  const withAccessExamId = (series = []) => series.map((item) => ({ ...item, accessExamId: key }));
   const cached = getCached(seriesCache, key);
   if (cached) return cached;
   const stored = readStoredSeries(key);
-  if (stored) return stored;
+  if (stored) return withAccessExamId(stored);
 
   return setCached(
     seriesCache,
     key,
     API.get(`/api/exams/${encodeURIComponent(examId)}/series`).then((response) => {
-      const series = Array.isArray(response.data?.series) ? response.data.series : [];
+      const series = withAccessExamId(Array.isArray(response.data?.series) ? response.data.series : []);
       writeStoredSeries(key, series);
       return series;
     })

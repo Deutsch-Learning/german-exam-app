@@ -88,6 +88,26 @@ export const hasPaidSeriesAccess = () => {
   );
 };
 
-export const canOpenSeries = (series) => Boolean(series?.isFree) || hasPaidSeriesAccess();
+export const hasPartialSeriesAccess = (series) => {
+  const auth = getAuthUser();
+  if (!auth?.id || !series) return false;
+
+  const grants = Array.isArray(auth.partial_access)
+    ? auth.partial_access
+    : Array.isArray(auth.partialAccess)
+      ? auth.partialAccess
+      : [];
+  const examId = String(series.examId ?? series.exam_id ?? "").toLowerCase();
+  const accessExamId = String(series.accessExamId ?? series.access_exam_id ?? "").toLowerCase();
+  const seriesId = String(series.id ?? series.seriesId ?? series.series_id ?? "").toLowerCase();
+
+  return grants.some((grant) => (
+    [examId, accessExamId].filter(Boolean).includes(String(grant?.examId ?? grant?.exam_id ?? "").toLowerCase()) &&
+    String(grant?.seriesId ?? grant?.series_id ?? "").toLowerCase() === seriesId
+  ));
+};
+
+export const canOpenSeries = (series) =>
+  Boolean(series?.isFree) || hasPaidSeriesAccess() || hasPartialSeriesAccess(series);
 
 export const isVisitorSeriesAttempt = (series) => Boolean(series?.isFree) && !isLoggedIn();

@@ -35,10 +35,10 @@ export default function Footer() {
     <footer className="footer">
       <div className="container footer-container">
         <div className="footer-brand">
-          <span>Deutsch</span> Learning
+          <span>Deutsch</span> Prüfung
         </div>
         <div className="footer-bottom">
-          <p>Copyright &copy; 2024 Deutsch Learning. All rights reserved.</p>
+          <p>Copyright &copy; 2026- Deutsch Prüfung. All rights reserved.</p>
           <div className="footer-socials" aria-label="Social media">
             {socialLinks.map((item) => (
               <a key={item.id} href={item.href} aria-label={item.label} target="_blank" rel="noreferrer">

@@ -1,5 +1,5 @@
 /* eslint-disable react-hooks/set-state-in-effect */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import {
   Activity,
@@ -16,6 +16,8 @@ import logo from "../assets/images/logo.png";
 import styles from "./AdminPanel.module.css";
 import { clearDashboardCache } from "../services/dashboard";
 import { clearAuthSession } from "../utils/access";
+import { examSimulations } from "../data/siteContent";
+import { fetchImportedSeries } from "../services/importedExams";
 
 const formatDate = (value) => {
   if (!value) return "-";
@@ -225,7 +227,7 @@ function AdminUsers() {
 
   return (
     <>
-      <Header title="User Management" subtitle="View users, suspend or activate accounts, and grant full access." />
+      <Header title="User Management" subtitle="View users, suspend or activate accounts, and grant full or partial series access." />
       {status ? <p className={styles.status}>{status}</p> : null}
       {error ? <p className={styles.error}>{error}</p> : null}
       {loading ? <p>Loading...</p> : null}
@@ -251,7 +253,22 @@ function AdminUsers() {
                     </span>
                   </td>
                   <td>{user.email_verified ? "Yes" : "No"}</td>
-                  <td>{user.has_full_access ? "Full" : "Free"}</td>
+                  <td>
+                    {user.has_full_access ? (
+                      <span className={styles.badge}>Full</span>
+                    ) : Array.isArray(user.partial_access) && user.partial_access.length ? (
+                      <div className={styles.accessSummary}>
+                        <span className={`${styles.badge} ${styles.warn}`}>Partial</span>
+                        <small>
+                          {user.partial_access.map((grant) =>
+                            `${grant.examName || grant.examId} / ${grant.seriesCode || grant.seriesId}`
+                          ).join(", ")}
+                        </small>
+                      </div>
+                    ) : (
+                      <span className={styles.badge}>Free</span>
+                    )}
+                  </td>
                   <td>{user.simulation_count} tests · {user.avg_score}% avg</td>
                   <td>
                     <div className={styles.actions}>
@@ -264,13 +281,7 @@ function AdminUsers() {
                           Suspend
                         </button>
                       )}
-                      <button
-                        className={styles.secondaryButton}
-                        type="button"
-                        onClick={() => updateUser(user, { hasFullAccess: !user.has_full_access })}
-                      >
-                        {user.has_full_access ? "Revoke full" : "Grant full"}
-                      </button>
+                      <UserAccessControl user={user} onUpdate={updateUser} />
                     </div>
                   </td>
                 </tr>
@@ -280,6 +291,192 @@ function AdminUsers() {
         </div>
       </section>
     </>
+  );
+}
+
+function UserAccessControl({ user, onUpdate }) {
+  const partialAccess = useMemo(
+    () => (Array.isArray(user.partial_access) ? user.partial_access : []),
+    [user.partial_access]
+  );
+  const partialAccessKey = useMemo(() => JSON.stringify(partialAccess), [partialAccess]);
+  const initialMode = user.has_full_access ? "full" : partialAccess.length ? "partial" : "free";
+  const [mode, setMode] = useState(initialMode);
+  const [selectedExamIds, setSelectedExamIds] = useState(() =>
+    [...new Set(partialAccess.map((grant) => grant.examId).filter(Boolean))]
+  );
+  const [selectedSeriesByExam, setSelectedSeriesByExam] = useState(() =>
+    partialAccess.reduce((acc, grant) => {
+      if (!grant.examId || !grant.seriesId) return acc;
+      acc[grant.examId] = [...new Set([...(acc[grant.examId] ?? []), grant.seriesId])];
+      return acc;
+    }, {})
+  );
+  const [seriesByExam, setSeriesByExam] = useState({});
+  const [loadingByExam, setLoadingByExam] = useState({});
+  const requestedSeriesRef = useRef(new Set());
+
+  useEffect(() => {
+    setMode(user.has_full_access ? "full" : partialAccess.length ? "partial" : "free");
+    setSelectedExamIds([...new Set(partialAccess.map((grant) => grant.examId).filter(Boolean))]);
+    setSelectedSeriesByExam(
+      partialAccess.reduce((acc, grant) => {
+        if (!grant.examId || !grant.seriesId) return acc;
+        acc[grant.examId] = [...new Set([...(acc[grant.examId] ?? []), grant.seriesId])];
+        return acc;
+      }, {})
+    );
+  }, [partialAccess, partialAccessKey, user.has_full_access]);
+
+  useEffect(() => {
+    if (mode !== "partial" || !selectedExamIds.length) return undefined;
+
+    selectedExamIds.forEach((examId) => {
+      if (!examId || seriesByExam[examId] || requestedSeriesRef.current.has(examId)) return;
+
+      requestedSeriesRef.current.add(examId);
+      setLoadingByExam((current) => ({ ...current, [examId]: true }));
+      fetchImportedSeries(examId)
+        .then((items) => {
+          setSeriesByExam((current) => ({ ...current, [examId]: items }));
+          setSelectedSeriesByExam((current) => {
+            const validIds = new Set(items.map((item) => item.id));
+            const nextIds = (current[examId] ?? []).filter((seriesId) => validIds.has(seriesId));
+            return { ...current, [examId]: nextIds };
+          });
+        })
+        .catch(() => {
+          setSeriesByExam((current) => ({ ...current, [examId]: [] }));
+        })
+        .finally(() => {
+          setLoadingByExam((current) => ({ ...current, [examId]: false }));
+          requestedSeriesRef.current.delete(examId);
+        });
+    });
+    return undefined;
+  }, [mode, selectedExamIds, seriesByExam]);
+
+  const totalSelectedSeries = selectedExamIds.reduce(
+    (sum, examId) => sum + (selectedSeriesByExam[examId]?.length ?? 0),
+    0
+  );
+  const canValidatePartial = mode !== "partial" || (selectedExamIds.length > 0 && totalSelectedSeries > 0);
+
+  const toggleExam = (examId) => {
+    setSelectedExamIds((current) => {
+      if (current.includes(examId)) return current.filter((id) => id !== examId);
+      return [...current, examId];
+    });
+    setSelectedSeriesByExam((current) => ({ ...current, [examId]: current[examId] ?? [] }));
+  };
+
+  const toggleSeries = (examId, seriesId) => {
+    setSelectedSeriesByExam((current) => {
+      const currentIds = current[examId] ?? [];
+      const nextIds = currentIds.includes(seriesId)
+        ? currentIds.filter((id) => id !== seriesId)
+        : [...currentIds, seriesId];
+      return { ...current, [examId]: nextIds };
+    });
+  };
+
+  const validateAccess = () => {
+    if (mode === "full") {
+      onUpdate(user, { hasFullAccess: true, partialAccess: [] });
+      return;
+    }
+
+    if (mode === "free") {
+      onUpdate(user, { hasFullAccess: false, partialAccess: [] });
+      return;
+    }
+
+    onUpdate(user, {
+      hasFullAccess: false,
+      partialAccess: selectedExamIds.flatMap((examId) => {
+        const exam = examSimulations.find((item) => item.id === examId);
+        const seriesList = seriesByExam[examId] ?? [];
+        return (selectedSeriesByExam[examId] ?? []).map((seriesId) => {
+          const series = seriesList.find((item) => item.id === seriesId);
+          return {
+            examId,
+            seriesId,
+            examName: exam?.name ?? examId,
+            seriesCode: series?.code ?? seriesId,
+            grantedAt: new Date().toISOString(),
+          };
+        });
+      }),
+    });
+  };
+
+  return (
+    <div className={styles.accessControl}>
+      <label>
+        Access
+        <select value={mode} onChange={(event) => setMode(event.target.value)}>
+          <option value="free">Free access</option>
+          <option value="partial">Partial access</option>
+          <option value="full">Full access</option>
+        </select>
+      </label>
+
+      {mode === "partial" ? (
+        <div className={styles.partialAccessFields}>
+          <div className={styles.multiAccessGroup}>
+            <p>Tests</p>
+            <div className={styles.multiAccessList}>
+              {examSimulations.map((exam) => (
+                <label key={exam.id} className={styles.checkOption}>
+                  <input
+                    type="checkbox"
+                    checked={selectedExamIds.includes(exam.id)}
+                    onChange={() => toggleExam(exam.id)}
+                  />
+                  <span>{exam.name}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {selectedExamIds.map((examId) => {
+            const exam = examSimulations.find((item) => item.id === examId);
+            const series = seriesByExam[examId] ?? [];
+            const loadingSeries = Boolean(loadingByExam[examId]);
+            return (
+              <div key={examId} className={styles.multiAccessGroup}>
+                <p>{exam?.name ?? examId} series</p>
+                {loadingSeries ? <span className={styles.accessHint}>Loading series...</span> : null}
+                {!loadingSeries && !series.length ? <span className={styles.accessHint}>No series available</span> : null}
+                {!loadingSeries && series.length ? (
+                  <div className={styles.multiAccessList}>
+                    {series.map((item) => (
+                      <label key={item.id} className={styles.checkOption}>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(selectedSeriesByExam[examId]?.includes(item.id))}
+                          onChange={() => toggleSeries(examId, item.id)}
+                        />
+                        <span>{item.code}</span>
+                      </label>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+
+      <button
+        className={styles.button}
+        type="button"
+        onClick={validateAccess}
+        disabled={!canValidatePartial}
+      >
+        Validate
+      </button>
+    </div>
   );
 }
 

@@ -347,7 +347,7 @@ export default function SimulationSelectionPage() {
         <header className={styles.headerSection}>
           <h1 className={styles.title}>Waehlen Sie Ihren Test</h1>
           <p className={styles.subtitle}>
-            Waehlen Sie Goethe B1/B2, OSD B1/B2, TELC oder ECL. Kostenlose Serien bleiben offen,
+            Waehlen Sie Goethe B1/B2, ÖSD B1/B2, TELC oder ECL. Kostenlose Serien bleiben offen,
             Premium-Serien sind ohne Vollzugriff gesperrt.
           </p>
           <p className={styles.subtitle} hidden>

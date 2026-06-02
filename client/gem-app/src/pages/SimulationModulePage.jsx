@@ -1203,6 +1203,13 @@ const getTaskDuration = (module, task) => {
   return typeBase + levelExtra;
 };
 
+const getPartDurationSeconds = (module, part) => {
+  if (part?.durationMinutes) return Math.max(1, Number(part.durationMinutes)) * 60;
+  const taskIndexes = Array.isArray(part?.taskIndexes) ? part.taskIndexes : [];
+  const taskTotal = taskIndexes.reduce((sum, taskIndex) => sum + getTaskDuration(module, module.tasks[taskIndex]), 0);
+  return taskTotal || module.tasks.reduce((sum, task) => sum + getTaskDuration(module, task), 0);
+};
+
 const normalizePartKey = (value, fallback = "part-1") => {
   const text = String(value ?? "").trim().toLowerCase();
   const partMatch = text.match(/(?:teil|part)\s*(\d+)/i);
@@ -1910,7 +1917,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const currentAudioDuration = module.id === "listen" ? getEstimatedAudioDuration(module.audio) : 0;
   const answeredCount = module.tasks.filter((task, index) => getTaskAnswered(module, task, answers[index])).length;
   const remainingCount = Math.max(0, totalTasks - answeredCount);
-  const flaggedCount = Object.values(flagged).filter(Boolean).length;
   const completedPartCount = examParts.filter((part) =>
     part.taskIndexes.every((taskIndex) => getTaskAnswered(module, module.tasks[taskIndex], answers[taskIndex]))
   ).length;
@@ -1949,7 +1955,14 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setNotes(stored?.notes ?? {});
     setElapsedSeconds(Number(stored?.elapsedSeconds) || 0);
     const restoredTask = module.tasks[restoredIndex] ?? module.tasks[0];
-    setTimerSeconds(Number(stored?.timerSeconds) || totalExamDuration);
+    const restoredPart = examParts.find((part) => part.taskIndexes.includes(restoredIndex)) ?? examParts[0];
+    const restoredPartDuration = restoredPart ? getPartDurationSeconds(module, restoredPart) : totalExamDuration;
+    const savedTimer = Number(stored?.timerSeconds);
+    setTimerSeconds(
+      stored?.currentPartId === restoredPart?.id && Number.isFinite(savedTimer) && savedTimer > 0
+        ? savedTimer
+        : restoredPartDuration
+    );
     setSimulationMode(stored?.completed ? Boolean(stored?.simulationMode) : true);
     setCompleted(Boolean(stored?.completed));
     setPartIntroVisible(stored?.completed ? false : stored?.partIntroVisible ?? restoredIndex === 0);
@@ -1965,7 +1978,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setResultStatus("");
     setSaveStatus(stored?.savedAt ? `Dernière sauvegarde ${formatClock(new Date(stored.savedAt))}` : "Sauvegarde locale prête");
     setRestoredKey(progressKey);
-  }, [module, progressKey, shouldPersistProgress, totalExamDuration, totalTasks]);
+  }, [examParts, module, progressKey, shouldPersistProgress, totalExamDuration, totalTasks]);
 
   useEffect(() => {
     if (completed) return undefined;
@@ -2226,7 +2239,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setFlagged({});
     setNotes({});
     setElapsedSeconds(0);
-    setTimerSeconds(totalExamDuration);
+    setTimerSeconds(examParts[0] ? getPartDurationSeconds(module, examParts[0]) : totalExamDuration);
     setSimulationMode(true);
     setCompleted(false);
     setPartIntroVisible(true);
@@ -2248,7 +2261,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     if ("speechSynthesis" in window) {
       gracefulStopSpeech(80);
     }
-  }, [module.id, module.tasks, totalExamDuration]);
+  }, [examParts, module, totalExamDuration]);
 
   const goToNext = useCallback(() => {
     if (currentIndex >= totalTasks - 1) {
@@ -2259,6 +2272,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     const nextIndex = nextPart ? nextPart.firstIndex : Math.min(totalTasks - 1, currentIndex + 1);
     setCurrentIndex(nextIndex);
     setPartIntroVisible(Boolean(nextPart));
+    if (nextPart) setTimerSeconds(getPartDurationSeconds(module, nextPart));
     setSpeakingPhase("prep");
     setPrepRemaining(module.tasks[nextIndex]?.prepSeconds ?? speakingTasks[0].prepSeconds);
     setPrepActive(module.id === "speak" && simulationMode);
@@ -2268,17 +2282,25 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
   const goToPrevious = useCallback(() => {
     const previousIndex = Math.max(0, currentIndex - 1);
+    const previousPart = examParts.find((part) => part.taskIndexes.includes(previousIndex));
     setCurrentIndex(previousIndex);
     setPartIntroVisible(false);
-  }, [currentIndex]);
+    if (previousPart?.id !== currentPart?.id) {
+      setTimerSeconds(getPartDurationSeconds(module, previousPart));
+    }
+  }, [currentIndex, currentPart?.id, examParts, module]);
 
   const jumpToQuestion = useCallback((targetIndex) => {
     if (isRecording) return;
     const safeIndex = Math.min(Math.max(0, targetIndex), totalTasks - 1);
+    const targetPart = examParts.find((part) => part.taskIndexes.includes(safeIndex));
     setCurrentIndex(safeIndex);
     setPartIntroVisible(false);
+    if (targetPart?.id !== currentPart?.id) {
+      setTimerSeconds(getPartDurationSeconds(module, targetPart));
+    }
     setNavPanelOpen(false);
-  }, [isRecording, totalTasks]);
+  }, [currentPart?.id, examParts, isRecording, module, totalTasks]);
 
   const clearSpeechTimers = useCallback(() => {
     if (speechStartTimerRef.current) {
@@ -2587,9 +2609,10 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   ]);
 
   useEffect(() => {
-    if (!simulationMode || completed) return undefined;
+    if (!simulationMode || completed || partIntroVisible) return undefined;
 
     if (timerSeconds <= 0) {
+      setResultStatus("Zeit abgelaufen. Die Antworten werden angezeigt.");
       finishModule();
       return undefined;
     }
@@ -2599,7 +2622,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     }, 1000);
 
     return () => window.clearInterval(interval);
-  }, [completed, finishModule, simulationMode, timerSeconds]);
+  }, [completed, finishModule, partIntroVisible, simulationMode, timerSeconds]);
 
   useEffect(() => {
     if (module.id !== "speak" || !simulationMode || !prepActive || completed) return undefined;
@@ -2651,13 +2674,14 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     const startIndex = currentPart?.firstIndex ?? currentIndex;
     setCurrentIndex(startIndex);
     setPartIntroVisible(false);
+    setTimerSeconds(currentPart ? getPartDurationSeconds(module, currentPart) : totalExamDuration);
     setSpeakingPhase("prep");
     setPrepRemaining(module.tasks[startIndex]?.prepSeconds ?? speakingTasks[0].prepSeconds);
     setPrepActive(module.id === "speak" && simulationMode);
     setRecordingSeconds(0);
     recordingSecondsRef.current = 0;
     persistProgress(`Part ${currentPart?.number ?? currentPartIndex + 1} demarree a ${formatClock()}`);
-  }, [currentIndex, currentPart, currentPartIndex, module.id, module.tasks, persistProgress, simulationMode]);
+  }, [currentIndex, currentPart, currentPartIndex, module, persistProgress, simulationMode, totalExamDuration]);
 
   const renderPartMaterial = (part, { compact = false } = {}) => {
     const sourceText = part?.sourceText || module.passage?.intro || currentTask?.prompt || currentTask?.question || "";
@@ -2762,31 +2786,17 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
         <section className={styles.navCard} aria-label="Timer und Status">
           <div className={styles.navCardHeader}>
-            <span><Clock3 size={16} /> Timer/Status</span>
+            <span><Clock3 size={16} /> Section Timer/Status</span>
           </div>
           <div className={styles.navTimer}>
             {formatExamTime(simulationMode ? timerSeconds : currentTaskDuration)}
           </div>
           <p className={styles.navStatusText}>
-            {simulationMode ? "Pruefungsmodus aktiv" : t.modulePage.freeTraining}
+            {simulationMode
+              ? `Teil ${currentPart?.number ?? currentPartIndex + 1} von ${Math.max(1, examParts.length)}`
+              : t.modulePage.freeTraining}
           </p>
           {simulationMode ? <span className={styles.navStatusBadge}><Lock size={14} /> Navigation kontrolliert</span> : null}
-        </section>
-
-        <section className={styles.navCard} aria-label="Pruefungsfortschritt">
-          <div className={styles.navCardHeader}>
-            <span><Gauge size={16} /> Exam Progress</span>
-            <strong>{Math.round(Number(progressPercent))}%</strong>
-          </div>
-          <div className={styles.navMetricGrid}>
-            <span><strong>{answeredCount}</strong> beantwortet</span>
-            <span><strong>{remainingCount}</strong> offen</span>
-            <span><strong>{flaggedCount}</strong> markiert</span>
-            <span><strong>{completedPartCount}/{Math.max(1, examParts.length)}</strong> Teile</span>
-          </div>
-          <div className={styles.progressTrack}>
-            <span style={{ width: `${progressPercent}%` }} />
-          </div>
         </section>
 
         <section className={styles.navCard} aria-label="Abschnittsfortschritt">
