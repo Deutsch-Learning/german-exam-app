@@ -772,9 +772,11 @@ const normalizeProviderId = (value) => {
 const getProviderRouteMeta = (value) => {
   const raw = String(value ?? "").trim();
   const levelMatch = raw.match(/\b(A1|A2|B1|B2|C1|C2)\b/i);
+  const normalizedRaw = raw.toLowerCase();
+  const level = levelMatch ? levelMatch[1].toUpperCase() : null;
   return {
-    provider: normalizeProviderId(raw),
-    level: levelMatch ? levelMatch[1].toUpperCase() : null,
+    provider: normalizedRaw.includes("osd") && level === "B1" ? "goethe" : normalizeProviderId(raw),
+    level,
   };
 };
 

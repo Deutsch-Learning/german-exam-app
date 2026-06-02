@@ -175,7 +175,8 @@ h4 {
 
 .lang-chevron {
   color: #6b7280;
-  font-size: 0.8rem;
+  flex: 0 0 auto;
+  stroke-width: 2.4;
 }
 
 .language-menu {
@@ -889,8 +890,14 @@ h4 {
 }
 
 .nav-chevron {
-  font-size: 0.72rem;
   color: #6b7280;
+  flex: 0 0 auto;
+  stroke-width: 2.4;
+  transition: transform 0.18s ease;
+}
+
+.nav-dropdown.is-open .nav-chevron {
+  transform: rotate(180deg);
 }
 
 .nav-dropdown-menu {

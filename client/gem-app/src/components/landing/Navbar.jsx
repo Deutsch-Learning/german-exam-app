@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Menu, X } from "lucide-react";
-import { aboutTestSections, currentTopics, pageLinks } from "../../data/siteContent";
+import { ChevronDown, Menu, X } from "lucide-react";
+import { aboutTestSections, pageLinks } from "../../data/siteContent";
 import { languageOptions } from "../../utils/language";
 import { isLoggedIn } from "../../utils/access";
 
@@ -17,7 +17,6 @@ export default function Navbar({ logo, language = "fr", onChangeLanguage, labels
   );
 
   const dropdowns = [
-    { id: "topics", label: labels.currentTopics ?? "Current topics", items: currentTopics },
     { id: "about", label: labels.aboutTests ?? "About TestDaF/DSH", items: aboutTestSections },
     { id: "pages", label: labels.pages ?? "Pages", items: pageLinks },
   ];
@@ -50,44 +49,6 @@ export default function Navbar({ logo, language = "fr", onChangeLanguage, labels
     };
   }, [mobileOpen]);
 
-  const renderTopicDropdown = ({ id, label, items }) => {
-    const topicOpen = openDropdown === id || items.some((item) => item.id === openDropdown);
-
-    return (
-    <div
-      className={`nav-dropdown ${topicOpen ? "is-open" : ""}`}
-      onMouseEnter={() => setOpenDropdown((value) => value || id)}
-      onMouseLeave={() => setOpenDropdown("")}
-    >
-      <button
-        type="button"
-        className="nav-link nav-dropdown-trigger"
-        aria-expanded={topicOpen}
-        onClick={() => setOpenDropdown((value) => (value === id ? "" : id))}
-      >
-        {label}
-        <span className="nav-chevron">v</span>
-      </button>
-      <div className="nav-dropdown-menu">
-        {items.map((item) => (
-          <Link
-            className="nav-dropdown-item nav-topic-link"
-            key={item.id}
-            to={item.path}
-            onClick={closeMenus}
-          >
-            <img src={logo} alt="" className="nav-dropdown-logo" />
-            <span>
-              <strong>{item.label}</strong>
-              <small>{item.seriesTitle}</small>
-            </span>
-          </Link>
-        ))}
-      </div>
-    </div>
-    );
-  };
-
   const renderLinkDropdown = ({ id, label, items }) => (
     <div
       className={`nav-dropdown ${openDropdown === id ? "is-open" : ""}`}
@@ -101,7 +62,7 @@ export default function Navbar({ logo, language = "fr", onChangeLanguage, labels
         onClick={() => setOpenDropdown((value) => (value === id ? "" : id))}
       >
         {label}
-        <span className="nav-chevron">v</span>
+        <ChevronDown className="nav-chevron" size={16} aria-hidden="true" />
       </button>
       <div className="nav-dropdown-menu">
         {items.map((item) => (
@@ -127,7 +88,7 @@ export default function Navbar({ logo, language = "fr", onChangeLanguage, labels
       <Link key={dropdown.id} className="nav-link" to={dropdown.id === "about" ? "/about" : "/"} onClick={closeMenus}>
         {dropdown.label}
       </Link>
-    ) : dropdown.id === "topics" ? renderTopicDropdown(dropdown) : renderLinkDropdown(dropdown);
+    ) : renderLinkDropdown(dropdown);
 
   return (
     <>
@@ -162,7 +123,7 @@ export default function Navbar({ logo, language = "fr", onChangeLanguage, labels
                   <span className="flag-fallback" aria-hidden="true">GL</span>
                 )}
                 <span>{language.toUpperCase()}</span>
-                <span className="lang-chevron">v</span>
+                <ChevronDown className="lang-chevron" size={15} aria-hidden="true" />
               </button>
               {openLang ? (
                 <div className="language-menu">
