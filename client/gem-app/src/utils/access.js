@@ -98,10 +98,11 @@ export const hasPartialSeriesAccess = (series) => {
       ? auth.partialAccess
       : [];
   const examId = String(series.examId ?? series.exam_id ?? "").toLowerCase();
+  const accessExamId = String(series.accessExamId ?? series.access_exam_id ?? "").toLowerCase();
   const seriesId = String(series.id ?? series.seriesId ?? series.series_id ?? "").toLowerCase();
 
   return grants.some((grant) => (
-    String(grant?.examId ?? grant?.exam_id ?? "").toLowerCase() === examId &&
+    [examId, accessExamId].filter(Boolean).includes(String(grant?.examId ?? grant?.exam_id ?? "").toLowerCase()) &&
     String(grant?.seriesId ?? grant?.series_id ?? "").toLowerCase() === seriesId
   ));
 };

@@ -1,5 +1,5 @@
 /* eslint-disable react-hooks/set-state-in-effect */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import {
   Activity,
@@ -314,6 +314,7 @@ function UserAccessControl({ user, onUpdate }) {
   );
   const [seriesByExam, setSeriesByExam] = useState({});
   const [loadingByExam, setLoadingByExam] = useState({});
+  const requestedSeriesRef = useRef(new Set());
 
   useEffect(() => {
     setMode(user.has_full_access ? "full" : partialAccess.length ? "partial" : "free");
@@ -329,15 +330,14 @@ function UserAccessControl({ user, onUpdate }) {
 
   useEffect(() => {
     if (mode !== "partial" || !selectedExamIds.length) return undefined;
-    let cancelled = false;
 
     selectedExamIds.forEach((examId) => {
-      if (!examId || seriesByExam[examId] || loadingByExam[examId]) return;
+      if (!examId || seriesByExam[examId] || requestedSeriesRef.current.has(examId)) return;
 
+      requestedSeriesRef.current.add(examId);
       setLoadingByExam((current) => ({ ...current, [examId]: true }));
       fetchImportedSeries(examId)
         .then((items) => {
-          if (cancelled) return;
           setSeriesByExam((current) => ({ ...current, [examId]: items }));
           setSelectedSeriesByExam((current) => {
             const validIds = new Set(items.map((item) => item.id));
@@ -346,17 +346,15 @@ function UserAccessControl({ user, onUpdate }) {
           });
         })
         .catch(() => {
-          if (!cancelled) setSeriesByExam((current) => ({ ...current, [examId]: [] }));
+          setSeriesByExam((current) => ({ ...current, [examId]: [] }));
         })
         .finally(() => {
-          if (!cancelled) setLoadingByExam((current) => ({ ...current, [examId]: false }));
+          setLoadingByExam((current) => ({ ...current, [examId]: false }));
+          requestedSeriesRef.current.delete(examId);
         });
     });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [loadingByExam, mode, selectedExamIds, seriesByExam]);
+    return undefined;
+  }, [mode, selectedExamIds, seriesByExam]);
 
   const totalSelectedSeries = selectedExamIds.reduce(
     (sum, examId) => sum + (selectedSeriesByExam[examId]?.length ?? 0),
