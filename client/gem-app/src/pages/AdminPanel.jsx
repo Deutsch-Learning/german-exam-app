@@ -295,52 +295,92 @@ function AdminUsers() {
 }
 
 function UserAccessControl({ user, onUpdate }) {
-  const partialAccess = Array.isArray(user.partial_access) ? user.partial_access : [];
-  const firstGrant = partialAccess[0] ?? {};
+  const partialAccess = useMemo(
+    () => (Array.isArray(user.partial_access) ? user.partial_access : []),
+    [user.partial_access]
+  );
+  const partialAccessKey = useMemo(() => JSON.stringify(partialAccess), [partialAccess]);
   const initialMode = user.has_full_access ? "full" : partialAccess.length ? "partial" : "free";
   const [mode, setMode] = useState(initialMode);
-  const [examId, setExamId] = useState(firstGrant.examId || examSimulations[0]?.id || "");
-  const [seriesId, setSeriesId] = useState(firstGrant.seriesId || "");
-  const [series, setSeries] = useState([]);
-  const [loadingSeries, setLoadingSeries] = useState(false);
+  const [selectedExamIds, setSelectedExamIds] = useState(() =>
+    [...new Set(partialAccess.map((grant) => grant.examId).filter(Boolean))]
+  );
+  const [selectedSeriesByExam, setSelectedSeriesByExam] = useState(() =>
+    partialAccess.reduce((acc, grant) => {
+      if (!grant.examId || !grant.seriesId) return acc;
+      acc[grant.examId] = [...new Set([...(acc[grant.examId] ?? []), grant.seriesId])];
+      return acc;
+    }, {})
+  );
+  const [seriesByExam, setSeriesByExam] = useState({});
+  const [loadingByExam, setLoadingByExam] = useState({});
 
   useEffect(() => {
     setMode(user.has_full_access ? "full" : partialAccess.length ? "partial" : "free");
-    setExamId(firstGrant.examId || examSimulations[0]?.id || "");
-    setSeriesId(firstGrant.seriesId || "");
-  }, [firstGrant.examId, firstGrant.seriesId, partialAccess.length, user.has_full_access]);
+    setSelectedExamIds([...new Set(partialAccess.map((grant) => grant.examId).filter(Boolean))]);
+    setSelectedSeriesByExam(
+      partialAccess.reduce((acc, grant) => {
+        if (!grant.examId || !grant.seriesId) return acc;
+        acc[grant.examId] = [...new Set([...(acc[grant.examId] ?? []), grant.seriesId])];
+        return acc;
+      }, {})
+    );
+  }, [partialAccess, partialAccessKey, user.has_full_access]);
 
   useEffect(() => {
-    if (mode !== "partial" || !examId) return undefined;
+    if (mode !== "partial" || !selectedExamIds.length) return undefined;
     let cancelled = false;
-    setLoadingSeries(true);
 
-    fetchImportedSeries(examId)
-      .then((items) => {
-        if (cancelled) return;
-        setSeries(items);
-        if (!items.some((item) => item.id === seriesId)) {
-          setSeriesId(items[0]?.id ?? "");
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setSeries([]);
-          setSeriesId("");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingSeries(false);
-      });
+    selectedExamIds.forEach((examId) => {
+      if (!examId || seriesByExam[examId] || loadingByExam[examId]) return;
+
+      setLoadingByExam((current) => ({ ...current, [examId]: true }));
+      fetchImportedSeries(examId)
+        .then((items) => {
+          if (cancelled) return;
+          setSeriesByExam((current) => ({ ...current, [examId]: items }));
+          setSelectedSeriesByExam((current) => {
+            const validIds = new Set(items.map((item) => item.id));
+            const nextIds = (current[examId] ?? []).filter((seriesId) => validIds.has(seriesId));
+            return { ...current, [examId]: nextIds };
+          });
+        })
+        .catch(() => {
+          if (!cancelled) setSeriesByExam((current) => ({ ...current, [examId]: [] }));
+        })
+        .finally(() => {
+          if (!cancelled) setLoadingByExam((current) => ({ ...current, [examId]: false }));
+        });
+    });
 
     return () => {
       cancelled = true;
     };
-  }, [examId, mode, seriesId]);
+  }, [loadingByExam, mode, selectedExamIds, seriesByExam]);
 
-  const selectedExam = examSimulations.find((exam) => exam.id === examId);
-  const selectedSeries = series.find((item) => item.id === seriesId);
-  const canValidatePartial = mode !== "partial" || Boolean(examId && seriesId);
+  const totalSelectedSeries = selectedExamIds.reduce(
+    (sum, examId) => sum + (selectedSeriesByExam[examId]?.length ?? 0),
+    0
+  );
+  const canValidatePartial = mode !== "partial" || (selectedExamIds.length > 0 && totalSelectedSeries > 0);
+
+  const toggleExam = (examId) => {
+    setSelectedExamIds((current) => {
+      if (current.includes(examId)) return current.filter((id) => id !== examId);
+      return [...current, examId];
+    });
+    setSelectedSeriesByExam((current) => ({ ...current, [examId]: current[examId] ?? [] }));
+  };
+
+  const toggleSeries = (examId, seriesId) => {
+    setSelectedSeriesByExam((current) => {
+      const currentIds = current[examId] ?? [];
+      const nextIds = currentIds.includes(seriesId)
+        ? currentIds.filter((id) => id !== seriesId)
+        : [...currentIds, seriesId];
+      return { ...current, [examId]: nextIds };
+    });
+  };
 
   const validateAccess = () => {
     if (mode === "full") {
@@ -355,15 +395,20 @@ function UserAccessControl({ user, onUpdate }) {
 
     onUpdate(user, {
       hasFullAccess: false,
-      partialAccess: [
-        {
-          examId,
-          seriesId,
-          examName: selectedExam?.name ?? examId,
-          seriesCode: selectedSeries?.code ?? seriesId,
-          grantedAt: new Date().toISOString(),
-        },
-      ],
+      partialAccess: selectedExamIds.flatMap((examId) => {
+        const exam = examSimulations.find((item) => item.id === examId);
+        const seriesList = seriesByExam[examId] ?? [];
+        return (selectedSeriesByExam[examId] ?? []).map((seriesId) => {
+          const series = seriesList.find((item) => item.id === seriesId);
+          return {
+            examId,
+            seriesId,
+            examName: exam?.name ?? examId,
+            seriesCode: series?.code ?? seriesId,
+            grantedAt: new Date().toISOString(),
+          };
+        });
+      }),
     });
   };
 
@@ -380,24 +425,48 @@ function UserAccessControl({ user, onUpdate }) {
 
       {mode === "partial" ? (
         <div className={styles.partialAccessFields}>
-          <label>
-            Test
-            <select value={examId} onChange={(event) => setExamId(event.target.value)}>
+          <div className={styles.multiAccessGroup}>
+            <p>Tests</p>
+            <div className={styles.multiAccessList}>
               {examSimulations.map((exam) => (
-                <option key={exam.id} value={exam.id}>{exam.name}</option>
+                <label key={exam.id} className={styles.checkOption}>
+                  <input
+                    type="checkbox"
+                    checked={selectedExamIds.includes(exam.id)}
+                    onChange={() => toggleExam(exam.id)}
+                  />
+                  <span>{exam.name}</span>
+                </label>
               ))}
-            </select>
-          </label>
-          <label>
-            Series
-            <select value={seriesId} onChange={(event) => setSeriesId(event.target.value)} disabled={loadingSeries || !series.length}>
-              {loadingSeries ? <option value="">Loading series...</option> : null}
-              {!loadingSeries && !series.length ? <option value="">No series available</option> : null}
-              {!loadingSeries ? series.map((item) => (
-                <option key={item.id} value={item.id}>{item.code}</option>
-              )) : null}
-            </select>
-          </label>
+            </div>
+          </div>
+
+          {selectedExamIds.map((examId) => {
+            const exam = examSimulations.find((item) => item.id === examId);
+            const series = seriesByExam[examId] ?? [];
+            const loadingSeries = Boolean(loadingByExam[examId]);
+            return (
+              <div key={examId} className={styles.multiAccessGroup}>
+                <p>{exam?.name ?? examId} series</p>
+                {loadingSeries ? <span className={styles.accessHint}>Loading series...</span> : null}
+                {!loadingSeries && !series.length ? <span className={styles.accessHint}>No series available</span> : null}
+                {!loadingSeries && series.length ? (
+                  <div className={styles.multiAccessList}>
+                    {series.map((item) => (
+                      <label key={item.id} className={styles.checkOption}>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(selectedSeriesByExam[examId]?.includes(item.id))}
+                          onChange={() => toggleSeries(examId, item.id)}
+                        />
+                        <span>{item.code}</span>
+                      </label>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
         </div>
       ) : null}
 
