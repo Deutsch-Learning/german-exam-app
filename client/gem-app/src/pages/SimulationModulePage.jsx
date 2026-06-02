@@ -1314,6 +1314,27 @@ const buildExamParts = (module) => {
     }));
 };
 
+const classifyExamTextLine = (line, index = 0, total = 1) => {
+  const text = String(line ?? "").trim();
+  if (!text) return "body";
+
+  if (/^(achtung|warning|warnung|important|wichtig|note|notiz|hinweis|remarque|attention)\b\s*:?\s*/i.test(text)) {
+    return "notice";
+  }
+
+  if (/^(anweisung|instructions?|directions?|aufgabe|consigne|lisez|lesen sie|hoeren sie|hören sie|schreiben sie|waehlen sie|wählen sie|kreuzen sie|ordnen sie|markieren sie|completez|complétez|choisissez|associez|ecoutez|écoutez)\b/i.test(text)) {
+    return "instruction";
+  }
+
+  if (/^(teil|part|section|abschnitt)\s*\d+\b/i.test(text)) return index === 0 ? "sectionTitle" : "subtitle";
+  if (/^(quelle|source|text|texte|transkript|transcript|situation|scenario|szenario)\b\s*:?\s*/i.test(text)) return "subtitle";
+  if (/^[A-ZÄÖÜ][\p{L}\p{N}\s'’().,:-]{2,72}:$/u.test(text)) return "subtitle";
+  if (total > 1 && index === 0 && text.length <= 90 && !/[?؟]$/.test(text)) return "sectionTitle";
+  if (text.length <= 56 && !/[.!?]$/.test(text)) return "subtitle";
+
+  return "body";
+};
+
 const getStoredProgress = (key) => {
   try {
     return JSON.parse(localStorage.getItem(key) ?? "null");
@@ -2637,18 +2658,45 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               return (
                 <ul key={`${part?.id ?? "part"}-${index}`}>
                   {lines.map((line) => (
-                    <li key={line} translate="no">{line.replace(/^[-*]\s*/, "")}</li>
+                    <li key={line} className={styles.examTextBody} translate="no">{line.replace(/^[-*]\s*/, "")}</li>
                   ))}
                 </ul>
               );
             }
-            return <p key={`${part?.id ?? "part"}-${index}`} translate="no">{block}</p>;
+            const blockType = lines.length === 1
+              ? classifyExamTextLine(lines[0], index, blocks.length)
+              : "instruction";
+            return (
+              <p key={`${part?.id ?? "part"}-${index}`} className={styles[`examText${blockType[0].toUpperCase()}${blockType.slice(1)}`]} translate="no">
+                {block}
+              </p>
+            );
           })
         ) : (
-          <p translate="no">Die Anweisungen fuer diesen Teil stehen in der aktiven Frage.</p>
+          <p className={styles.examTextInstruction} translate="no">Die Anweisungen fuer diesen Teil stehen in der aktiven Frage.</p>
         )}
       </div>
     );
+  };
+
+  const renderStructuredExamText = (text, keyPrefix = "exam-text") => {
+    const lines = String(text ?? "")
+      .replace(/\r/g, "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    if (!lines.length) return null;
+
+    return lines.map((line, index) => {
+      const lineType = classifyExamTextLine(line, index, lines.length);
+      const className = styles[`examText${lineType[0].toUpperCase()}${lineType.slice(1)}`];
+      return (
+        <p key={`${keyPrefix}-${index}`} className={className} translate="no">
+          {line}
+        </p>
+      );
+    });
   };
 
   const renderQuestionStepper = () => (
@@ -2930,7 +2978,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           Quelle Teil {currentPart?.number ?? currentPartIndex + 1}
         </div>
         <h2 translate="no">{currentPart?.displayTitle ?? module.passage.title}</h2>
-        <p className={styles.introText} translate="no">{module.passage.intro}</p>
+        <div className={styles.introText}>{renderStructuredExamText(module.passage.intro, "reading-intro")}</div>
         {renderPartMaterial(currentPart, { compact: true })}
       </section>
 
@@ -2939,7 +2987,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           <span className={styles.questionStep}>Frage {currentIndex + 1} von {totalTasks}</span>
           <span>{currentTask.typeLabel}</span>
         </div>
-        <h2>{currentTask.question}</h2>
+        <h2 className={styles.questionText}>{currentTask.question}</h2>
         {renderQuestionControl(currentTask, currentAnswer)}
         {!simulationMode ? (
           <>
@@ -3021,7 +3069,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               <span>{level}</span>
             </div>
             <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
-            <h2>{currentTask.question}</h2>
+            <h2 className={styles.questionText}>{currentTask.question}</h2>
             {renderQuestionControl(currentTask, currentAnswer)}
             {!simulationMode ? (
               <>
@@ -3096,7 +3144,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             <span>{level}</span>
           </div>
           <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
-          <h2>{currentTask.question}</h2>
+          <h2 className={styles.questionText}>{currentTask.question}</h2>
           {renderQuestionControl(currentTask, currentAnswer)}
           {!simulationMode ? (
             <>
@@ -3124,7 +3172,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             </div>
             <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
             <h2>{currentTask.title}</h2>
-            <p translate="no">{currentTask.prompt}</p>
+            <div className={styles.instructionText}>{renderStructuredExamText(currentTask.prompt, `write-prompt-${currentTask.id}`)}</div>
             <div className={styles.promptMeta}>
               <span><FileText size={16} /> {currentTask.minWords}-{currentTask.maxWords} Woerter</span>
               <span><ShieldCheck size={16} /> Register {currentTask.register}</span>
@@ -3202,7 +3250,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           </div>
           <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
           <h2>{currentTask.title}</h2>
-          <p translate="no">{currentTask.prompt}</p>
+          <div className={styles.instructionText}>{renderStructuredExamText(currentTask.prompt, `write-prompt-${currentTask.id}`)}</div>
           <div className={styles.promptMeta}>
             <span><FileText size={16} /> {currentTask.minWords}-{currentTask.maxWords} mots</span>
             <span><ShieldCheck size={16} /> Registre {currentTask.register}</span>
@@ -3285,7 +3333,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             </div>
             <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
             <h2>{currentTask.title}</h2>
-            <p translate="no">{currentTask.prompt}</p>
+            <div className={styles.instructionText}>{renderStructuredExamText(currentTask.prompt, `speak-prompt-${currentTask.id}`)}</div>
             {currentTask.visual ? (
               <img className={styles.speakingImage} src={speakingImage} alt="Aktive Personen in einer Alltagssituation" />
             ) : null}
@@ -3382,7 +3430,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           </div>
           <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
           <h2>{currentTask.title}</h2>
-          <p translate="no">{currentTask.prompt}</p>
+          <div className={styles.instructionText}>{renderStructuredExamText(currentTask.prompt, `speak-prompt-${currentTask.id}`)}</div>
           {currentTask.visual ? (
             <img className={styles.speakingImage} src={speakingImage} alt="Personnes actives dans un contexte quotidien" />
           ) : null}
