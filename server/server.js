@@ -1251,7 +1251,7 @@ const registerHandler = async (req, res) => {
 app.post("/register", registerHandler);
 app.post("/api/auth/register", registerHandler);
 
-app.post("/resend-verification", async (req, res) => {
+const resendVerificationHandler = async (req, res) => {
   try {
     if (!EMAIL_VERIFICATION_REQUIRED) {
       return res.json({ ok: true, message: "Email verification is currently disabled." });
@@ -1288,7 +1288,10 @@ app.post("/resend-verification", async (req, res) => {
     console.error(err);
     return res.status(500).json({ ok: false, error: "Server error" });
   }
-});
+};
+
+app.post("/resend-verification", resendVerificationHandler);
+app.post("/api/auth/resend-verification", resendVerificationHandler);
 
 const verifyEmailToken = async (token) => {
   if (!token || typeof token !== "string") return null;
@@ -1500,7 +1503,7 @@ const logoutHandler = async (req, res) => {
 app.post("/api/auth/logout", requireAuth, logoutHandler);
 app.post("/logout", requireAuth, logoutHandler);
 
-app.post("/forgot-password", async (req, res) => {
+const forgotPasswordHandler = async (req, res) => {
   try {
     const email = normalizeEmail(req.body?.email);
     if (!isEmail(email)) {
@@ -1532,9 +1535,12 @@ app.post("/forgot-password", async (req, res) => {
     console.error(err);
     return res.status(500).json({ ok: false, error: "Server error" });
   }
-});
+};
 
-app.post("/reset-password", async (req, res) => {
+app.post("/forgot-password", forgotPasswordHandler);
+app.post("/api/auth/forgot-password", forgotPasswordHandler);
+
+const resetPasswordHandler = async (req, res) => {
   try {
     const { token, password } = req.body ?? {};
     if (typeof token !== "string" || typeof password !== "string") {
@@ -1567,7 +1573,10 @@ app.post("/reset-password", async (req, res) => {
     console.error(err);
     return res.status(500).json({ ok: false, error: "Server error" });
   }
-});
+};
+
+app.post("/reset-password", resetPasswordHandler);
+app.post("/api/auth/reset-password", resetPasswordHandler);
 
 const profileHandler = async (req, res) => {
   return res.json({ ok: true, user: sanitizeUser(req.user) });
@@ -2558,13 +2567,32 @@ if (isProduction && !SERVE_CLIENT) {
   });
 }
 
-ensureSchema()
-  .then(() => {
-    app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
+let schemaReady;
+
+function initializeSchema() {
+  if (!schemaReady) {
+    schemaReady = ensureSchema().catch((err) => {
+      schemaReady = null;
+      throw err;
     });
-  })
-  .catch((err) => {
-    console.error("Schema init failed", err);
-    process.exit(1);
-  });
+  }
+  return schemaReady;
+}
+
+if (require.main === module) {
+  initializeSchema()
+    .then(() => {
+      app.listen(PORT, () => {
+        console.log(`Server running on port ${PORT}`);
+      });
+    })
+    .catch((err) => {
+      console.error("Schema init failed", err);
+      process.exit(1);
+    });
+}
+
+module.exports = {
+  app,
+  ensureSchema: initializeSchema,
+};

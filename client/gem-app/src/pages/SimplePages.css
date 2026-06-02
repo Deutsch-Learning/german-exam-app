@@ -240,6 +240,31 @@
   color: #6b7280;
 }
 
+.simple-loading-dots {
+  min-height: 1em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: #c10016;
+}
+
+.simple-loading-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+  animation: simpleLoadingDotPulse 0.9s ease-in-out infinite;
+}
+
+.simple-loading-dots span:nth-child(2) {
+  animation-delay: 0.12s;
+}
+
+.simple-loading-dots span:nth-child(3) {
+  animation-delay: 0.24s;
+}
+
 .series-minimal-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(136px, 1fr));
@@ -299,6 +324,10 @@
   animation: simpleSkeleton 1.2s ease-in-out infinite;
 }
 
+.series-box-skeleton .simple-loading-dots {
+  color: #c10016;
+}
+
 @keyframes seriesRise {
   from {
     opacity: 0;
@@ -316,6 +345,25 @@
   }
   to {
     background-position: -80% 0, 0 0;
+  }
+}
+
+@keyframes simpleLoadingDotPulse {
+  0%,
+  80%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .simple-loading-dots span {
+    animation: none;
   }
 }
 

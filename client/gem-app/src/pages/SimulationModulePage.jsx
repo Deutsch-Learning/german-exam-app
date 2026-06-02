@@ -58,6 +58,14 @@ import ComingSoonPage from "./ComingSoonPage";
 const LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"];
 const PASS_SCORE = 70;
 
+const ImportedLoadingDots = () => (
+  <span className={styles.importedLoadingDots} aria-label="Importierte Aufgaben werden geladen">
+    <span />
+    <span />
+    <span />
+  </span>
+);
+
 const readingPassage = {
   title: "La bibliothèque universitaire devient plus flexible",
   intro:
@@ -3588,23 +3596,13 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       <div className={styles.page} style={{ "--module-accent": module.accent, "--module-soft": module.soft }}>
         <section className={styles.resultPanel}>
           <p className={styles.sectionLabel}>Serie</p>
-          <h2>Importierte Aufgaben werden geladen...</h2>
+          <h2>
+            <ImportedLoadingDots />
+          </h2>
         </section>
       </div>
     );
   }
-
-  if (false) {
-    return (
-      <div className={styles.page} style={{ "--module-accent": module.accent, "--module-soft": module.soft }}>
-        <section className={styles.resultPanel}>
-          <p className={styles.sectionLabel}>Series</p>
-          <h2>Chargement des exercices importés...</h2>
-        </section>
-      </div>
-    );
-  }
-
   if (!params.seriesId && !importedModuleState.loading) {
     return <ComingSoonPage title="Dieser Uebungsablauf ist noch nicht verfuegbar" />;
   }

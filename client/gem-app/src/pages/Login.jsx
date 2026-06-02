@@ -49,7 +49,7 @@ export default function LoginPage() {
     if (!validateForm()) return;
     setIsLoading(true);
     try {
-      const res = await API.post("/login", {
+      const res = await API.post("/api/auth/login", {
         email: formData.email,
         password: formData.password,
         rememberMe: formData.rememberMe,

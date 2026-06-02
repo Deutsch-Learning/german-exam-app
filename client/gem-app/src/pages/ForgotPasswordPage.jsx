@@ -16,7 +16,7 @@ export default function ForgotPasswordPage() {
     setMessage("");
     setDevLink("");
     try {
-      const res = await API.post("/forgot-password", { email });
+      const res = await API.post("/api/auth/forgot-password", { email });
       setStatus("success");
       setMessage(res.data?.message ?? "Si cet email existe, un lien de réinitialisation a été envoyé.");
       setDevLink(res.data?.devResetUrl ?? "");

@@ -2,7 +2,7 @@ import axios from "axios";
 import { clearAuthSession, getAuthSession, getAuthToken, storeAuthSession } from "../utils/access";
 
 const API = axios.create({
-  baseURL: import.meta.env.VITE_API_URL ?? "http://localhost:3000",
+  baseURL: import.meta.env.VITE_API_URL || (import.meta.env.DEV ? "http://localhost:3000" : ""),
   withCredentials: true,
 });
 

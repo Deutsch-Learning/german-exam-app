@@ -64,7 +64,7 @@ export default function ProfilePage() {
         return;
       }
       const [res, dashboardPayload] = await Promise.all([
-        API.get("/me"),
+        API.get("/api/user/profile"),
         fetchDashboardData().catch(() => null),
       ]);
       if (!res.data?.ok) {
@@ -109,7 +109,7 @@ export default function ProfilePage() {
         setError("Utilisateur non connecté.");
         return;
       }
-      const res = await API.put("/me", {
+      const res = await API.put("/api/user/profile", {
         username: formData.username,
         firstName: formData.firstName,
         lastName: formData.lastName,
@@ -140,7 +140,7 @@ export default function ProfilePage() {
     setError("");
     setResendingVerification(true);
     try {
-      const res = await API.post("/resend-verification", { email: user.email });
+      const res = await API.post("/api/auth/resend-verification", { email: user.email });
       setVerificationNotice(
         res.data?.message ?? "Un nouvel email de verification a ete envoye."
       );
