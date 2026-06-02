@@ -16,6 +16,8 @@ import logo from "../assets/images/logo.png";
 import styles from "./AdminPanel.module.css";
 import { clearDashboardCache } from "../services/dashboard";
 import { clearAuthSession } from "../utils/access";
+import { examSimulations } from "../data/siteContent";
+import { fetchImportedSeries } from "../services/importedExams";
 
 const formatDate = (value) => {
   if (!value) return "-";
@@ -225,7 +227,7 @@ function AdminUsers() {
 
   return (
     <>
-      <Header title="User Management" subtitle="View users, suspend or activate accounts, and grant full access." />
+      <Header title="User Management" subtitle="View users, suspend or activate accounts, and grant full or partial series access." />
       {status ? <p className={styles.status}>{status}</p> : null}
       {error ? <p className={styles.error}>{error}</p> : null}
       {loading ? <p>Loading...</p> : null}
@@ -251,7 +253,22 @@ function AdminUsers() {
                     </span>
                   </td>
                   <td>{user.email_verified ? "Yes" : "No"}</td>
-                  <td>{user.has_full_access ? "Full" : "Free"}</td>
+                  <td>
+                    {user.has_full_access ? (
+                      <span className={styles.badge}>Full</span>
+                    ) : Array.isArray(user.partial_access) && user.partial_access.length ? (
+                      <div className={styles.accessSummary}>
+                        <span className={`${styles.badge} ${styles.warn}`}>Partial</span>
+                        <small>
+                          {user.partial_access.map((grant) =>
+                            `${grant.examName || grant.examId} / ${grant.seriesCode || grant.seriesId}`
+                          ).join(", ")}
+                        </small>
+                      </div>
+                    ) : (
+                      <span className={styles.badge}>Free</span>
+                    )}
+                  </td>
                   <td>{user.simulation_count} tests · {user.avg_score}% avg</td>
                   <td>
                     <div className={styles.actions}>
@@ -264,13 +281,7 @@ function AdminUsers() {
                           Suspend
                         </button>
                       )}
-                      <button
-                        className={styles.secondaryButton}
-                        type="button"
-                        onClick={() => updateUser(user, { hasFullAccess: !user.has_full_access })}
-                      >
-                        {user.has_full_access ? "Revoke full" : "Grant full"}
-                      </button>
+                      <UserAccessControl user={user} onUpdate={updateUser} />
                     </div>
                   </td>
                 </tr>
@@ -280,6 +291,125 @@ function AdminUsers() {
         </div>
       </section>
     </>
+  );
+}
+
+function UserAccessControl({ user, onUpdate }) {
+  const partialAccess = Array.isArray(user.partial_access) ? user.partial_access : [];
+  const firstGrant = partialAccess[0] ?? {};
+  const initialMode = user.has_full_access ? "full" : partialAccess.length ? "partial" : "free";
+  const [mode, setMode] = useState(initialMode);
+  const [examId, setExamId] = useState(firstGrant.examId || examSimulations[0]?.id || "");
+  const [seriesId, setSeriesId] = useState(firstGrant.seriesId || "");
+  const [series, setSeries] = useState([]);
+  const [loadingSeries, setLoadingSeries] = useState(false);
+
+  useEffect(() => {
+    setMode(user.has_full_access ? "full" : partialAccess.length ? "partial" : "free");
+    setExamId(firstGrant.examId || examSimulations[0]?.id || "");
+    setSeriesId(firstGrant.seriesId || "");
+  }, [firstGrant.examId, firstGrant.seriesId, partialAccess.length, user.has_full_access]);
+
+  useEffect(() => {
+    if (mode !== "partial" || !examId) return undefined;
+    let cancelled = false;
+    setLoadingSeries(true);
+
+    fetchImportedSeries(examId)
+      .then((items) => {
+        if (cancelled) return;
+        setSeries(items);
+        if (!items.some((item) => item.id === seriesId)) {
+          setSeriesId(items[0]?.id ?? "");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSeries([]);
+          setSeriesId("");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingSeries(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [examId, mode, seriesId]);
+
+  const selectedExam = examSimulations.find((exam) => exam.id === examId);
+  const selectedSeries = series.find((item) => item.id === seriesId);
+  const canValidatePartial = mode !== "partial" || Boolean(examId && seriesId);
+
+  const validateAccess = () => {
+    if (mode === "full") {
+      onUpdate(user, { hasFullAccess: true, partialAccess: [] });
+      return;
+    }
+
+    if (mode === "free") {
+      onUpdate(user, { hasFullAccess: false, partialAccess: [] });
+      return;
+    }
+
+    onUpdate(user, {
+      hasFullAccess: false,
+      partialAccess: [
+        {
+          examId,
+          seriesId,
+          examName: selectedExam?.name ?? examId,
+          seriesCode: selectedSeries?.code ?? seriesId,
+          grantedAt: new Date().toISOString(),
+        },
+      ],
+    });
+  };
+
+  return (
+    <div className={styles.accessControl}>
+      <label>
+        Access
+        <select value={mode} onChange={(event) => setMode(event.target.value)}>
+          <option value="free">Free access</option>
+          <option value="partial">Partial access</option>
+          <option value="full">Full access</option>
+        </select>
+      </label>
+
+      {mode === "partial" ? (
+        <div className={styles.partialAccessFields}>
+          <label>
+            Test
+            <select value={examId} onChange={(event) => setExamId(event.target.value)}>
+              {examSimulations.map((exam) => (
+                <option key={exam.id} value={exam.id}>{exam.name}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Series
+            <select value={seriesId} onChange={(event) => setSeriesId(event.target.value)} disabled={loadingSeries || !series.length}>
+              {loadingSeries ? <option value="">Loading series...</option> : null}
+              {!loadingSeries && !series.length ? <option value="">No series available</option> : null}
+              {!loadingSeries ? series.map((item) => (
+                <option key={item.id} value={item.id}>{item.code}</option>
+              )) : null}
+            </select>
+          </label>
+        </div>
+      ) : null}
+
+      <button
+        className={styles.button}
+        type="button"
+        onClick={validateAccess}
+        disabled={!canValidatePartial}
+      >
+        Validate
+      </button>
+    </div>
   );
 }
 

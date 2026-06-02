@@ -148,9 +148,41 @@ const sanitizeUser = (user) => ({
   status: user.status,
   email_verified: Boolean(user.email_verified),
   has_full_access: Boolean(user.has_full_access),
+  partial_access: normalizePartialAccess(user.partial_access),
   created_at: user.created_at,
   last_login_at: user.last_login_at,
 });
+
+const normalizePartialAccess = (value) => {
+  const raw = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? (() => {
+          try {
+            return JSON.parse(value);
+          } catch {
+            return [];
+          }
+        })()
+      : [];
+
+  const seen = new Set();
+  return raw
+    .map((item) => ({
+      examId: String(item?.examId ?? item?.exam_id ?? "").trim().toLowerCase(),
+      seriesId: String(item?.seriesId ?? item?.series_id ?? "").trim().toLowerCase(),
+      seriesCode: String(item?.seriesCode ?? item?.series_code ?? "").trim(),
+      examName: String(item?.examName ?? item?.exam_name ?? "").trim(),
+      grantedAt: item?.grantedAt || item?.granted_at || new Date().toISOString(),
+    }))
+    .filter((item) => item.examId && item.seriesId)
+    .filter((item) => {
+      const key = `${item.examId}:${item.seriesId}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+};
 
 const getClientIp = (req) =>
   String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "")
@@ -378,6 +410,7 @@ async function ensureSchema() {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_hash TEXT;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_expires_at TIMESTAMPTZ;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS has_full_access BOOLEAN NOT NULL DEFAULT FALSE;`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS partial_access JSONB NOT NULL DEFAULT '[]'::jsonb;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS suspended_at TIMESTAMPTZ;`);
   await pool.query(`UPDATE users SET role = 'user' WHERE role IS NULL OR role::text NOT IN ('user', 'admin');`);
@@ -1320,7 +1353,7 @@ const verifyEmailToken = async (token) => {
      WHERE verification_token_hash = $1
        AND verification_expires_at > NOW()
      RETURNING id, email, username, first_name, last_name, date_of_birth, role, status,
-               email_verified, has_full_access, created_at, last_login_at`,
+               email_verified, has_full_access, partial_access, created_at, last_login_at`,
     [tokenHash(token)]
   );
   return r.rows[0] ?? null;
@@ -1364,7 +1397,7 @@ const loginHandler = async (req, res) => {
 
     const userRes = await pool.query(
       `SELECT id, email, username, first_name, last_name, date_of_birth, password_hash, role, status,
-              email_verified, has_full_access, created_at, last_login_at
+              email_verified, has_full_access, partial_access, created_at, last_login_at
        FROM users
        WHERE email = $1`,
       [normalizeEmail(email)]
@@ -1417,7 +1450,7 @@ const refreshHandler = async (req, res) => {
     const tokenRes = await pool.query(
       `SELECT rt.id AS refresh_token_id, rt.user_id, rt.expires_at, rt.revoked_at,
               u.email, u.username, u.first_name, u.last_name, u.date_of_birth,
-              u.role, u.status, u.email_verified, u.has_full_access, u.created_at, u.last_login_at
+              u.role, u.status, u.email_verified, u.has_full_access, u.partial_access, u.created_at, u.last_login_at
        FROM refresh_tokens rt
        JOIN users u ON u.id = rt.user_id
        WHERE rt.token_hash = $1
@@ -1474,6 +1507,7 @@ const refreshHandler = async (req, res) => {
       status: row.status,
       email_verified: row.email_verified,
       has_full_access: row.has_full_access,
+      partial_access: row.partial_access,
       created_at: row.created_at,
       last_login_at: row.last_login_at,
     };
@@ -1799,7 +1833,7 @@ const updateProfileHandler = async (req, res) => {
            verification_expires_at = CASE WHEN $6 THEN $8 ELSE verification_expires_at END
        WHERE id = $9
        RETURNING id, email, username, first_name, last_name, date_of_birth, role, status,
-                 email_verified, has_full_access, created_at, last_login_at`,
+                 email_verified, has_full_access, partial_access, created_at, last_login_at`,
       [
         safeUsername,
         safeFirst,
@@ -1930,7 +1964,7 @@ app.get("/api/admin/users", requireAdmin, async (req, res) => {
   try {
     const users = await pool.query(`
       SELECT u.id, u.email, u.username, u.first_name, u.last_name, u.role, u.status,
-             u.email_verified, u.has_full_access, u.created_at, u.last_login_at, u.suspended_at,
+             u.email_verified, u.has_full_access, u.partial_access, u.created_at, u.last_login_at, u.suspended_at,
              COUNT(s.id)::int AS simulation_count,
              COALESCE(ROUND(AVG(s.score_pct))::int, 0) AS avg_score
       FROM users u
@@ -1948,7 +1982,7 @@ app.get("/api/admin/users", requireAdmin, async (req, res) => {
 const updateAdminUserStatusHandler = async (req, res) => {
   try {
     const targetId = Number(req.params.id);
-    const { status, hasFullAccess, role } = req.body ?? {};
+    const { status, hasFullAccess, role, partialAccess } = req.body ?? {};
     if (!Number.isInteger(targetId) || targetId <= 0) {
       return res.status(400).json({ ok: false, error: "Invalid user id" });
     }
@@ -1957,20 +1991,24 @@ const updateAdminUserStatusHandler = async (req, res) => {
     }
     const nextStatus = status === "suspended" ? "suspended" : status === "active" ? "active" : null;
     const nextRole = role === "admin" || role === "user" ? role : null;
+    const nextPartialAccess = Array.isArray(partialAccess) ? normalizePartialAccess(partialAccess) : null;
+    const nextHasFullAccess = typeof hasFullAccess === "boolean" ? hasFullAccess : null;
 
     const updated = await pool.query(
       `UPDATE users
        SET status = COALESCE($1, status),
            suspended_at = CASE WHEN $1 = 'suspended' THEN NOW() WHEN $1 = 'active' THEN NULL ELSE suspended_at END,
            has_full_access = COALESCE($2, has_full_access),
-           role = COALESCE($3, role)
-       WHERE id = $4
+           role = COALESCE($3, role),
+           partial_access = COALESCE($4::jsonb, partial_access)
+       WHERE id = $5
        RETURNING id, email, username, first_name, last_name, role, status,
-                 email_verified, has_full_access, created_at, last_login_at, suspended_at`,
+                 email_verified, has_full_access, partial_access, created_at, last_login_at, suspended_at`,
       [
         nextStatus,
-        typeof hasFullAccess === "boolean" ? hasFullAccess : null,
+        nextHasFullAccess,
         nextRole,
+        nextPartialAccess ? JSON.stringify(nextPartialAccess) : null,
         targetId,
       ]
     );
@@ -1984,7 +2022,8 @@ const updateAdminUserStatusHandler = async (req, res) => {
     }
     await auditAdminAction(req, "user.update_access", "user", targetId, {
       status: nextStatus,
-      hasFullAccess,
+      hasFullAccess: nextHasFullAccess,
+      partialAccess: nextPartialAccess,
       role: nextRole,
     });
     await logUserAction(targetId, nextStatus === "suspended" ? "account.suspended" : "account.updated", req);

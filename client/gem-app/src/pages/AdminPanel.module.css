@@ -249,6 +249,7 @@
 .actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: flex-start;
   gap: 8px;
 }
 
@@ -282,6 +283,59 @@
 .dangerButton {
   background: #dc2626;
   color: #ffffff;
+}
+
+.button:disabled,
+.secondaryButton:disabled,
+.dangerButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.accessSummary {
+  display: grid;
+  gap: 6px;
+}
+
+.accessSummary small {
+  max-width: 220px;
+  color: #64748b;
+  line-height: 1.35;
+}
+
+.accessControl {
+  width: min(100%, 360px);
+  display: grid;
+  gap: 8px;
+}
+
+.accessControl label,
+.partialAccessFields label {
+  display: grid;
+  gap: 5px;
+  color: #475569;
+  font-size: 0.76rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.accessControl select,
+.partialAccessFields select {
+  min-height: 38px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #111827;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 0.86rem;
+  text-transform: none;
+}
+
+.partialAccessFields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(130px, 1fr));
+  gap: 8px;
 }
 
 .modalOverlay {
