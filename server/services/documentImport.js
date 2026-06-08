@@ -108,6 +108,7 @@ const detectExamType = (text, provider, level) => {
   if (provider === "goethe" && level) return `Goethe-Zertifikat ${level}`;
   if (provider === "testdaf") return "TestDaF";
   if (provider === "telc" && level) return `telc Deutsch ${level}`;
+  if (provider === "ecl" && level) return `ECL Deutsch ${level}`;
   if (provider === "dsh") return "DSH";
   return firstLines.slice(0, 120) || "Imported exam";
 };

@@ -742,6 +742,11 @@ const PUBLIC_EXAM_META = {
     examName: "TELC Deutsch",
     accent: "#0f766e",
   },
+  ecl: {
+    examId: "ecl",
+    examName: "ECL Deutsch",
+    accent: "#7c3aed",
+  },
   testdaf: {
     examId: "testdaf",
     examName: "TestDaF",
