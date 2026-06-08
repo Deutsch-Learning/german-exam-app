@@ -697,6 +697,7 @@ const ensureDocumentImportSchema = async (pool) => {
     CREATE INDEX IF NOT EXISTS exam_document_imports_created_idx
       ON exam_document_imports(created_at DESC);
   `);
+  await pool.query(`ALTER TABLE exam_document_imports ENABLE ROW LEVEL SECURITY;`);
   await pool.query(`ALTER TABLE exams ADD COLUMN IF NOT EXISTS provider TEXT;`);
   await pool.query(`ALTER TABLE exams ADD COLUMN IF NOT EXISTS section_type TEXT;`);
   await pool.query(`ALTER TABLE exams ADD COLUMN IF NOT EXISTS series_number INTEGER;`);
@@ -727,6 +728,7 @@ const ensureDocumentImportSchema = async (pool) => {
     CREATE INDEX IF NOT EXISTS exam_sections_exam_position_idx
       ON exam_sections(exam_id, position, id);
   `);
+  await pool.query(`ALTER TABLE exam_sections ENABLE ROW LEVEL SECURITY;`);
   await pool.query(`ALTER TABLE exam_questions ADD COLUMN IF NOT EXISTS section_id INTEGER REFERENCES exam_sections(id) ON DELETE SET NULL;`);
   await pool.query(`ALTER TABLE exam_questions ADD COLUMN IF NOT EXISTS question_type TEXT;`);
   await pool.query(`ALTER TABLE exam_questions ADD COLUMN IF NOT EXISTS transcript TEXT;`);
