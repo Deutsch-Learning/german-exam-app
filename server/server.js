@@ -19,6 +19,12 @@ const {
   importParsedExamDocument,
   summarizeOutline,
 } = require("./services/documentImport");
+const {
+  correctWritingSimulation,
+  ensureWritingCorrectionSchema,
+  getWritingCorrectionForSimulation,
+  isWritingSimulation,
+} = require("./services/writingCorrection");
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -645,6 +651,7 @@ async function ensureSchema() {
   `);
 
   await ensureDocumentImportSchema(pool);
+  await ensureWritingCorrectionSchema(pool);
 }
 
 const getFeature = (req) => {
@@ -1095,6 +1102,8 @@ const buildWritingTask = (question, index) => {
   const wordTarget = Number(metadata.wordTarget) || (question.part_number === 3 ? 40 : 80);
   const minWords = 80;
   const targetWords = Math.max(wordTarget, minWords);
+  const points = Number(scoring.points) || Number(question.section_points) || 0;
+  const durationMinutes = Number(scoring.durationMinutes) || Number(question.section_duration_minutes) || null;
 
   return {
     id: `db-question-${question.id}`,
@@ -1105,13 +1114,20 @@ const buildWritingTask = (question, index) => {
     minWords,
     targetWords,
     maxWords: null,
+    maxScore: points || null,
+    taskWeight: points || null,
+    durationMinutes,
     prompt: clipText(question.prompt || question.section_instructions, 2200),
     criteria: [
       "Alle Inhaltspunkte behandeln",
       "Klare Struktur",
       "Passender B1-Wortschatz",
-      `${Number(scoring.points) || 0} Punkte`,
+      points ? `${points} Punkte` : null,
     ].filter(Boolean),
+    scoring: {
+      points: points || null,
+      durationMinutes,
+    },
     sampleAnswer: correct.sampleAnswer ? clipText(correct.sampleAnswer, 1600) : undefined,
     sourceQuestionId: question.id,
     ...buildTaskPartMeta(question, index),
@@ -1947,7 +1963,37 @@ const createSimulationHandler = async (req, res) => {
     );
     await logUserAction(req.user.id, "simulation.completed", req);
 
-    return res.status(201).json({ ok: true, simulation: insert.rows[0] });
+    let writingCorrection = null;
+    if (isWritingSimulation(insert.rows[0])) {
+      try {
+        writingCorrection = await correctWritingSimulation(pool, insert.rows[0]);
+      } catch (err) {
+        console.error("Writing correction failed", err);
+      }
+    }
+
+    const correctionScoreApplied = writingCorrection && ["completed", "partial"].includes(writingCorrection.status);
+    const savedSimulation = writingCorrection
+      ? {
+          ...insert.rows[0],
+          score_pct: correctionScoreApplied ? writingCorrection.percentage : insert.rows[0].score_pct,
+          ai_corrections: {
+            ...(insert.rows[0].ai_corrections || {}),
+            writingCorrection: {
+              status: writingCorrection.status,
+              correctionId: writingCorrection.id,
+              provider: writingCorrection.provider,
+              model: writingCorrection.model,
+              totalScore: writingCorrection.totalScore,
+              maxScore: writingCorrection.maxScore,
+              percentage: writingCorrection.percentage,
+              correctedAt: writingCorrection.correctedAt,
+            },
+          },
+        }
+      : insert.rows[0];
+
+    return res.status(201).json({ ok: true, simulation: savedSimulation, writingCorrection });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ ok: false, error: "Server error" });
@@ -1956,6 +2002,62 @@ const createSimulationHandler = async (req, res) => {
 
 app.post("/simulations", requireAuth, createSimulationHandler);
 app.post("/api/user/simulations", requireAuth, createSimulationHandler);
+
+const getOwnedSimulation = async (req, res) => {
+  const simulationId = Number(req.params.simulationId || req.params.id);
+  if (!Number.isInteger(simulationId) || simulationId <= 0) {
+    res.status(400).json({ ok: false, error: "Invalid simulation id" });
+    return null;
+  }
+
+  const params = [simulationId];
+  const ownerClause = req.user.role === "admin" ? "" : "AND user_id = $2";
+  if (req.user.role !== "admin") params.push(req.user.id);
+
+  const simulation = await pool.query(
+    `SELECT id, user_id, exam_name, taken_at, created_at, score_pct, level_current, level_target,
+            ai_corrections, result_details, duration_seconds
+     FROM simulations
+     WHERE id = $1 ${ownerClause}
+     LIMIT 1`,
+    params
+  );
+
+  if (!simulation.rows[0]) {
+    res.status(404).json({ ok: false, error: "Simulation not found" });
+    return null;
+  }
+  return simulation.rows[0];
+};
+
+app.get("/api/simulations/:simulationId/writing-correction", requireAuth, async (req, res) => {
+  try {
+    const simulation = await getOwnedSimulation(req, res);
+    if (!simulation) return;
+    const correction = await getWritingCorrectionForSimulation(pool, simulation.id);
+    return res.json({ ok: true, correction });
+  } catch (err) {
+    console.error("Writing correction lookup failed", err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.post("/api/simulations/:simulationId/writing-correction", requireAuth, async (req, res) => {
+  try {
+    const simulation = await getOwnedSimulation(req, res);
+    if (!simulation) return;
+    if (!isWritingSimulation(simulation)) {
+      return res.status(400).json({ ok: false, error: "Simulation is not a writing module" });
+    }
+    const correction = await correctWritingSimulation(pool, simulation, {
+      force: req.query.force === "true" || req.body?.force === true,
+    });
+    return res.json({ ok: true, correction });
+  } catch (err) {
+    console.error("Writing correction request failed", err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
 
 app.post("/contact", async (req, res) => {
   try {
