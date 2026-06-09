@@ -1974,6 +1974,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const [navPanelOpen, setNavPanelOpen] = useState(false);
   const [, setSaveStatus] = useState("");
   const [resultStatus, setResultStatus] = useState("");
+  const [savedSimulationId, setSavedSimulationId] = useState(null);
   const [writingCorrection, setWritingCorrection] = useState(null);
   const [writingCorrectionLoading, setWritingCorrectionLoading] = useState(false);
   const [writingCorrectionError, setWritingCorrectionError] = useState("");
@@ -2043,6 +2044,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       setCompleted(false);
       setPartIntroVisible(true);
       setWritingVersions([]);
+      setSavedSimulationId(null);
       setWritingCorrection(null);
       setWritingCorrectionLoading(false);
       setWritingCorrectionError("");
@@ -2082,6 +2084,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setAudioPlaying(false);
     setAudioSessionActive(false);
     setResultStatus("");
+    setSavedSimulationId(null);
     setWritingCorrection(null);
     setWritingCorrectionLoading(false);
     setWritingCorrectionError("");
@@ -2110,6 +2113,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       }
 
       if (isWritingModule) {
+        setSavedSimulationId(null);
         setWritingCorrection(null);
         setWritingCorrectionError("");
         setWritingCorrectionLoading(true);
@@ -2174,8 +2178,19 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             durationSeconds: elapsedSeconds,
           }
         );
-        const correction = response.data?.writingCorrection ?? null;
+        let correction = response.data?.writingCorrection ?? null;
         if (isWritingModule) {
+          const simulationId = response.data?.simulation?.id;
+          if (simulationId) setSavedSimulationId(simulationId);
+          if (!correction && simulationId) {
+            setResultStatus("Résultat enregistré. Correction IA en cours.");
+            try {
+              const correctionResponse = await API.post(`/api/simulations/${simulationId}/writing-correction`);
+              correction = correctionResponse.data?.correction ?? null;
+            } catch {
+              setWritingCorrectionError("Résultat enregistré, mais la correction IA n'a pas pu se terminer. Relancez la correction depuis ce résultat.");
+            }
+          }
           setWritingCorrection(correction);
           if (correction?.status === "partial" || correction?.status === "failed") {
             setWritingCorrectionError(correction.errorMessage || "Correction IA indisponible pour le moment.");
@@ -2426,6 +2441,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setCompleted(false);
     setPartIntroVisible(true);
     setWritingVersions([]);
+    setSavedSimulationId(null);
     setWritingCorrection(null);
     setWritingCorrectionLoading(false);
     setWritingCorrectionError("");
@@ -3849,6 +3865,26 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     );
   };
 
+  const retryWritingCorrection = async () => {
+    if (!savedSimulationId || writingCorrectionLoading) return;
+    setWritingCorrectionError("");
+    setWritingCorrectionLoading(true);
+    try {
+      const correctionResponse = await API.post(`/api/simulations/${savedSimulationId}/writing-correction`, { force: true });
+      const correction = correctionResponse.data?.correction ?? null;
+      setWritingCorrection(correction);
+      if (correction?.status === "partial" || correction?.status === "failed") {
+        setWritingCorrectionError(correction.errorMessage || "Correction IA indisponible pour le moment.");
+      } else {
+        setResultStatus("Correction IA terminée.");
+      }
+    } catch {
+      setWritingCorrectionError("La correction IA n'a pas pu se terminer. Vous pouvez réessayer dans quelques instants.");
+    } finally {
+      setWritingCorrectionLoading(false);
+    }
+  };
+
   const renderWritingCorrectionPanel = () => {
     if (module.id !== "write") return null;
 
@@ -3872,6 +3908,14 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             <strong>Indisponible</strong>
           </div>
           <p className={styles.aiCorrectionMessage}>{writingCorrectionError}</p>
+          {savedSimulationId ? (
+            <div className={styles.aiCorrectionActions}>
+              <button type="button" className={styles.secondaryButton} onClick={retryWritingCorrection}>
+                <RotateCcw size={16} />
+                Relancer la correction
+              </button>
+            </div>
+          ) : null}
         </section>
       ) : null;
     }
@@ -3977,7 +4021,17 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           })}
         </div>
 
-        {writingCorrectionError ? <p className={styles.aiCorrectionWarning}>{writingCorrectionError}</p> : null}
+        {writingCorrectionError ? (
+          <div className={styles.aiCorrectionWarning}>
+            <p>{writingCorrectionError}</p>
+            {savedSimulationId ? (
+              <button type="button" className={styles.secondaryButton} onClick={retryWritingCorrection}>
+                <RotateCcw size={16} />
+                Relancer la correction
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </section>
     );
   };

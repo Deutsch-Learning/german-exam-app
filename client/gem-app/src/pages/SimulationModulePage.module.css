@@ -1365,6 +1365,18 @@
   background: #fffbeb;
   color: #92400e;
   font-weight: 800;
+  display: grid;
+  gap: 10px;
+}
+
+.aiCorrectionWarning p {
+  margin: 0;
+}
+
+.aiCorrectionActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .aiSummaryGrid {
