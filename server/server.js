@@ -1093,8 +1093,8 @@ const buildWritingTask = (question, index) => {
   const scoring = asJsonObject(question.scoring);
   const correct = asJsonObject(question.correct_answer);
   const wordTarget = Number(metadata.wordTarget) || (question.part_number === 3 ? 40 : 80);
-  const minWords = Math.max(30, Math.round(wordTarget * 0.75));
-  const maxWords = Math.max(wordTarget + 20, Math.round(wordTarget * 1.45));
+  const minWords = 80;
+  const targetWords = Math.max(wordTarget, minWords);
 
   return {
     id: `db-question-${question.id}`,
@@ -1103,8 +1103,8 @@ const buildWritingTask = (question, index) => {
     title: question.section_title || `Aufgabe ${index + 1}`,
     register: question.part_number === 1 ? "informell" : question.part_number === 3 ? "halbformell" : "neutral",
     minWords,
-    targetWords: wordTarget,
-    maxWords,
+    targetWords,
+    maxWords: null,
     prompt: clipText(question.prompt || question.section_instructions, 2200),
     criteria: [
       "Alle Inhaltspunkte behandeln",

@@ -537,6 +537,19 @@ const writingTasks = [
   },
 ];
 
+const WRITING_MIN_WORDS = 80;
+
+const getWritingMinimumWords = (task) =>
+  Math.max(WRITING_MIN_WORDS, Number(task?.minWords) || WRITING_MIN_WORDS);
+
+const withMinimumWritingWords = (tasks) =>
+  tasks.map((task) => ({
+    ...task,
+    minWords: getWritingMinimumWords(task),
+    targetWords: Math.max(Number(task.targetWords) || WRITING_MIN_WORDS, WRITING_MIN_WORDS),
+    maxWords: null,
+  }));
+
 const speakingTasks = [
   {
     id: "speak-1",
@@ -966,7 +979,7 @@ const MODULES = {
     soft: "#f5f3ff",
     Icon: PencilLine,
     simulationSeconds: 60 * 60,
-    tasks: withGermanPrompts(writingTasks, germanWritingPrompts),
+    tasks: withMinimumWritingWords(withGermanPrompts(writingTasks, germanWritingPrompts)),
     focus: ["Plan clair", "Registre adapté", "Connecteurs", "Correction grammaticale"],
     advancement: [
       "Sujets plus abstraits",
@@ -1018,7 +1031,7 @@ const GERMAN_MODULE_OVERRIDES = {
   write: {
     title: "Schriftlicher Ausdruck",
     eyebrow: "Strukturierte Produktion",
-    tasks: withGermanTaskCopy(writingTasks),
+    tasks: withMinimumWritingWords(withGermanTaskCopy(writingTasks)),
     focus: ["Klarer Plan", "Passendes Register", "Konnektoren", "Grammatische Korrektheit"],
     advancement: ["Abstraktere Themen", "Hoehere Wortgrenzen", "Formelles Register", "Nuancierte Argumentation"],
   },
@@ -1165,6 +1178,12 @@ const countWords = (text) => {
   const words = String(text ?? "").trim().match(/\S+/g);
   return words ? words.length : 0;
 };
+
+const formatWritingRequirementGerman = (task) =>
+  `Mindestens ${getWritingMinimumWords(task)} Woerter, keine Obergrenze`;
+
+const formatWritingRequirementFrench = (task) =>
+  `Minimum ${getWritingMinimumWords(task)} mots, sans limite maximale`;
 
 const getEstimatedAudioDuration = (audio) => {
   const wordCount = countWords(audio?.transcript);
@@ -1412,7 +1431,7 @@ const evaluateWriting = (task, text) => {
   const structureBonus = /(\n|erstens|zweitens|abschließend|zusammenfassend)/i.test(text) ? 10 : 0;
   const registerBonus =
     task.register === "formel" && /(Sehr geehrte|Mit freundlichen Grüßen|bitte|würde)/i.test(text) ? 10 : 0;
-  const lengthPenalty = words > task.maxWords ? Math.min(20, words - task.maxWords) : 0;
+  const lengthPenalty = 0;
 
   return Math.max(0, Math.min(100, Math.round(targetRatio * 68 + connectorBonus + structureBonus + registerBonus - lengthPenalty)));
 };
@@ -1687,7 +1706,7 @@ const buildResultSummary = (module, answers) => {
         typeLabel: task.typeLabel,
         isCorrect: taskScore >= PASS_SCORE,
         userAnswer: `${countWords(answers[index])} Woerter`,
-        correctAnswer: `Ziel: ${task.minWords}-${task.maxWords} Woerter`,
+        correctAnswer: formatWritingRequirementGerman(task),
         explanation: `Geschaetzte Punktzahl: ${taskScore}%`,
       };
     }
@@ -1715,7 +1734,7 @@ const buildResultSummary = (module, answers) => {
         typeLabel: task.typeLabel,
         isCorrect: taskScore >= PASS_SCORE,
         userAnswer: `${countWords(answers[index])} mots`,
-        correctAnswer: `Objectif: ${task.minWords}-${task.maxWords} mots`,
+        correctAnswer: formatWritingRequirementFrench(task),
         explanation: `Score estimé: ${taskScore}%`,
       };
     }
@@ -3320,7 +3339,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             <h2>{currentTask.title}</h2>
             <div className={styles.instructionText}>{renderStructuredExamText(currentTask.prompt, `write-prompt-${currentTask.id}`)}</div>
             <div className={styles.promptMeta}>
-              <span><FileText size={16} /> {currentTask.minWords}-{currentTask.maxWords} Woerter</span>
+              <span><FileText size={16} /> {formatWritingRequirementGerman(currentTask)}</span>
               <span><ShieldCheck size={16} /> Register {currentTask.register}</span>
             </div>
           </section>
@@ -3328,7 +3347,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           <section className={styles.editorPanel}>
             <div className={styles.editorToolbar}>
               <span>{words} Wort{words !== 1 ? "er" : ""}</span>
-              <span>Ziel {currentTask.targetWords}</span>
+              <span>Minimum {getWritingMinimumWords(currentTask)}</span>
               <button type="button" onClick={saveWritingVersion}>
                 <Save size={16} />
                 Entwurf speichern
@@ -3398,7 +3417,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           <h2>{currentTask.title}</h2>
           <div className={styles.instructionText}>{renderStructuredExamText(currentTask.prompt, `write-prompt-${currentTask.id}`)}</div>
           <div className={styles.promptMeta}>
-            <span><FileText size={16} /> {currentTask.minWords}-{currentTask.maxWords} mots</span>
+            <span><FileText size={16} /> {formatWritingRequirementFrench(currentTask)}</span>
             <span><ShieldCheck size={16} /> Registre {currentTask.register}</span>
           </div>
         </section>
@@ -3406,7 +3425,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
         <section className={styles.editorPanel}>
           <div className={styles.editorToolbar}>
             <span>{words} mot{words > 1 ? "s" : ""}</span>
-            <span>Objectif {currentTask.targetWords}</span>
+            <span>Minimum {getWritingMinimumWords(currentTask)}</span>
             <button type="button" onClick={saveWritingVersion}>
               <Save size={16} />
               Sauver le brouillon
