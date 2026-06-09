@@ -2,6 +2,10 @@ const crypto = require("crypto");
 
 const PROVIDER = "gemini";
 const DEFAULT_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+const FALLBACK_MODELS = (process.env.GEMINI_FALLBACK_MODELS || "gemini-2.5-flash-lite,gemini-2.0-flash-lite,gemini-2.0-flash")
+  .split(",")
+  .map((item) => item.trim())
+  .filter(Boolean);
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 const GEMINI_TIMEOUT_MS = Number(process.env.GEMINI_TIMEOUT_MS || 45000);
 const GEMINI_MAX_ATTEMPTS = Math.max(1, Number(process.env.GEMINI_MAX_ATTEMPTS || 3));
@@ -58,12 +62,65 @@ const RESPONSE_SCHEMA = {
   ],
 };
 
+const BATCH_RESPONSE_SCHEMA = {
+  type: "object",
+  properties: {
+    tasks: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          taskIndex: { type: "number" },
+          score: { type: "number" },
+          maxScore: { type: "number" },
+          criterionScores: {
+            type: "object",
+            properties: {
+              instructions: { type: "number" },
+              taskCompletion: { type: "number" },
+              coherence: { type: "number" },
+              grammar: { type: "number" },
+              spelling: { type: "number" },
+              vocabulary: { type: "number" },
+              register: { type: "number" },
+            },
+            required: CRITERION_KEYS,
+          },
+          strengths: {
+            type: "array",
+            items: { type: "string" },
+          },
+          weaknesses: {
+            type: "array",
+            items: { type: "string" },
+          },
+          feedback: { type: "string" },
+          estimatedLevel: { type: "string" },
+        },
+        required: [
+          "taskIndex",
+          "score",
+          "maxScore",
+          "criterionScores",
+          "strengths",
+          "weaknesses",
+          "feedback",
+          "estimatedLevel",
+        ],
+      },
+    },
+  },
+  required: ["tasks"],
+};
+
 class AiCorrectionError extends Error {
   constructor(message, options = {}) {
     super(message);
     this.name = "AiCorrectionError";
     this.status = options.status || null;
     this.transient = Boolean(options.transient);
+    this.body = options.body || null;
+    this.retryAfterMs = Number.isFinite(Number(options.retryAfterMs)) ? Number(options.retryAfterMs) : null;
   }
 }
 
@@ -106,6 +163,8 @@ const uniqueStrings = (items, limit = 8) => {
 };
 
 const normalizeArray = (value, limit = 8) => (Array.isArray(value) ? uniqueStrings(value, limit) : []);
+
+const getCandidateModels = (primaryModel) => uniqueStrings([primaryModel, ...FALLBACK_MODELS], 5);
 
 const getFirstPositiveNumber = (...values) => {
   for (const value of values) {
@@ -295,19 +354,25 @@ const buildEmptyEvaluation = (task) => ({
   estimatedLevel: task.level || "",
 });
 
-const buildUnavailableEvaluation = (task) => ({
-  score: 0,
-  maxScore: roundScore(task.maxScore),
-  criterionScores: normalizeCriterionScores({}),
-  strengths: [],
-  weaknesses: ["La correction automatique n'a pas pu etre effectuee pour cette tache."],
-  feedback: "La correction IA est momentanement indisponible. La reponse est enregistree et pourra etre corrigee a nouveau.",
-  estimatedLevel: task.level || "",
-});
+const buildUnavailableEvaluation = (task, message) => {
+  const feedback = cleanText(
+    message || "La correction IA est momentanement indisponible. La reponse est enregistree et pourra etre corrigee a nouveau.",
+    1000
+  );
+  return {
+    score: 0,
+    maxScore: roundScore(task.maxScore),
+    criterionScores: normalizeCriterionScores({}),
+    strengths: [],
+    weaknesses: [feedback],
+    feedback,
+    estimatedLevel: task.level || "",
+  };
+};
 
 const isTransientStatus = (status) => status === 408 || status === 409 || status === 429 || status >= 500;
 
-const callGemini = async ({ apiKey, model, prompt, timeoutMs = GEMINI_TIMEOUT_MS }) => {
+const callGemini = async ({ apiKey, model, prompt, timeoutMs = GEMINI_TIMEOUT_MS, responseSchema = RESPONSE_SCHEMA }) => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), Math.max(1000, timeoutMs));
 
@@ -324,17 +389,26 @@ const callGemini = async ({ apiKey, model, prompt, timeoutMs = GEMINI_TIMEOUT_MS
         generationConfig: {
           temperature: 0.15,
           responseMimeType: "application/json",
-          responseJsonSchema: RESPONSE_SCHEMA,
+          responseJsonSchema: responseSchema,
         },
       }),
     });
 
     if (!response.ok) {
       const body = await response.text().catch(() => "");
+      const retryAfter = response.headers.get("retry-after");
+      const retryAfterSeconds = Number(retryAfter);
+      const retryAfterDate = retryAfter ? Date.parse(retryAfter) : NaN;
+      const retryAfterMs = Number.isFinite(retryAfterSeconds)
+        ? retryAfterSeconds * 1000
+        : Number.isFinite(retryAfterDate)
+          ? Math.max(0, retryAfterDate - Date.now())
+          : null;
       throw new AiCorrectionError(`Gemini request failed (${response.status})`, {
         status: response.status,
         transient: isTransientStatus(response.status),
         body,
+        retryAfterMs,
       });
     }
 
@@ -366,9 +440,28 @@ const callGemini = async ({ apiKey, model, prompt, timeoutMs = GEMINI_TIMEOUT_MS
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const evaluateTaskWithRetry = async ({ apiKey, model, task, deadlineAt = 0 }) => {
+const getRetryDelayMs = (err, attempt) => {
+  const retryAfterMs = Number(err?.retryAfterMs);
+  if (Number.isFinite(retryAfterMs) && retryAfterMs > 0) return Math.min(retryAfterMs, 10000);
+  return err?.status === 429 ? 1500 * attempt * attempt : 500 * attempt * attempt;
+};
+
+const getCorrectionFailureMessage = (err) => {
+  if (err?.status === 429) {
+    return "Trop de demandes de correction en meme temps. Attendez environ une minute, puis relancez la correction.";
+  }
+  if (err?.status >= 500) {
+    return "Le service de correction IA est surcharge pour le moment. Les reponses sont enregistrees; relancez la correction dans quelques instants.";
+  }
+  if (err?.message === "AI correction deadline reached" || err?.message === "Gemini request timed out") {
+    return "La correction IA a pris trop de temps. Les reponses sont enregistrees; relancez la correction dans quelques instants.";
+  }
+  return "La correction IA est momentanement indisponible. Les reponses sont enregistrees; relancez la correction dans quelques instants.";
+};
+
+const evaluateTaskWithRetry = async ({ apiKey, model, task, deadlineAt = 0, maxAttempts = GEMINI_MAX_ATTEMPTS }) => {
   let lastError;
-  for (let attempt = 1; attempt <= GEMINI_MAX_ATTEMPTS; attempt += 1) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
       const remainingMs = deadlineAt ? deadlineAt - Date.now() - 750 : GEMINI_TIMEOUT_MS;
       if (deadlineAt && remainingMs < 2500) {
@@ -383,11 +476,116 @@ const evaluateTaskWithRetry = async ({ apiKey, model, task, deadlineAt = 0 }) =>
       return {
         evaluation: normalizeEvaluation(raw, task),
         attempts: attempt,
+        model,
       };
     } catch (err) {
       lastError = err;
-      if (!err.transient || attempt >= GEMINI_MAX_ATTEMPTS) break;
-      const delayMs = 500 * attempt * attempt;
+      if (!err.transient || attempt >= maxAttempts) break;
+      const delayMs = getRetryDelayMs(err, attempt);
+      if (deadlineAt && Date.now() + delayMs > deadlineAt - 750) break;
+      await wait(delayMs);
+    }
+  }
+  throw lastError;
+};
+
+const buildBatchPrompt = (tasks) => {
+  const contexts = tasks.map((task) => ({
+    taskIndex: task.index,
+    examType: task.examType,
+    moduleType: task.moduleType,
+    title: task.title,
+    subtitles: task.subtitles,
+    instructions: task.instructions,
+    durationMinutes: task.durationMinutes,
+    maxScore: task.maxScore,
+    taskWeight: task.taskWeight,
+    expectedLevel: task.level,
+    minimumWords: task.minWords,
+    targetWords: task.targetWords,
+    register: task.register,
+    criteria: task.criteria,
+    candidateResponse: task.candidateResponse,
+  }));
+
+  return [
+    "You are a certified examiner for German Expression Ecrite tasks.",
+    "Evaluate every task independently against its own task context. Do not let a good or bad answer affect another task.",
+    "Do not invent missing candidate content. Feedback must be in French, concise, practical, and examiner-style.",
+    "Each task score must be between 0 and that task's maxScore and must never exceed the maximum score.",
+    "Criterion scores are diagnostic values from 0 to 10 for each criterion.",
+    "Evaluate respect of instructions, task completion, coherence and organization, grammar and syntax, spelling and punctuation, vocabulary richness, register and tone.",
+    "Return strict JSON only, matching the response schema.",
+    "Return exactly one correction object for each supplied taskIndex.",
+    "Task contexts:",
+    JSON.stringify(contexts, null, 2),
+  ].join("\n\n");
+};
+
+const evaluateTasksWithRetry = async ({ apiKey, model, tasks, deadlineAt = 0, maxAttempts = GEMINI_MAX_ATTEMPTS }) => {
+  if (tasks.length === 1) {
+    const result = await evaluateTaskWithRetry({ apiKey, model, task: tasks[0], deadlineAt, maxAttempts });
+    return {
+      attempts: result.attempts,
+      model: result.model,
+      results: [{ task: tasks[0], evaluation: result.evaluation, aiSucceeded: true, aiFailed: false, model: result.model }],
+    };
+  }
+
+  let lastError;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const remainingMs = deadlineAt ? deadlineAt - Date.now() - 750 : GEMINI_TIMEOUT_MS;
+      if (deadlineAt && remainingMs < 2500) {
+        throw new AiCorrectionError("AI correction deadline reached", { transient: false });
+      }
+
+      const raw = await callGemini({
+        apiKey,
+        model,
+        prompt: buildBatchPrompt(tasks),
+        timeoutMs: deadlineAt ? Math.min(GEMINI_TIMEOUT_MS, remainingMs) : GEMINI_TIMEOUT_MS,
+        responseSchema: BATCH_RESPONSE_SCHEMA,
+      });
+      const returnedTasks = Array.isArray(raw?.tasks) ? raw.tasks : [];
+      if (!returnedTasks.length) {
+        throw new AiCorrectionError("Gemini returned no task corrections", { transient: false });
+      }
+
+      const byIndex = new Map();
+      for (const item of returnedTasks) {
+        const index = Number(item?.taskIndex);
+        if (Number.isInteger(index)) byIndex.set(index, item);
+      }
+
+      return {
+        attempts: attempt,
+        model,
+        results: tasks.map((task) => {
+          const rawTask = byIndex.get(task.index);
+          if (!rawTask) {
+            return {
+              task,
+              evaluation: buildUnavailableEvaluation(task, "La correction IA n'a pas retourne de resultat pour cette tache."),
+              aiSucceeded: false,
+              aiFailed: true,
+              errorMessage: "Missing task correction in AI response.",
+              model,
+            };
+          }
+          return {
+            task,
+            evaluation: normalizeEvaluation(rawTask, task),
+            aiSucceeded: true,
+            aiFailed: false,
+            model,
+          };
+        }),
+      };
+    } catch (err) {
+      lastError = err;
+      if (!err.transient || attempt >= maxAttempts) break;
+      const delayMs = getRetryDelayMs(err, attempt);
       if (deadlineAt && Date.now() + delayMs > deadlineAt - 750) break;
       await wait(delayMs);
     }
@@ -797,75 +995,137 @@ const correctWritingSimulation = async (pool, simulation, options = {}) => {
   const apiKey = process.env.GEMINI_API_KEY?.trim();
   const deadlineAt = Date.now() + WRITING_CORRECTION_DEADLINE_MS;
 
-  const correctTask = async (task) => {
-    const taskHash = hashValue({ requestHash, taskIndex: task.index });
+  const taskHashFor = (task) => hashValue({ requestHash, taskIndex: task.index });
+  const logIds = new Map();
+  const taskResultsByIndex = new Map();
+
+  await Promise.all(tasks.map(async (task) => {
+    const taskHash = taskHashFor(task);
     const hasResponse = Boolean(task.candidateResponse.trim());
-    let logId = null;
-    let evaluation;
-    let aiSucceeded = false;
-    let aiFailed = false;
+    const responseWords = task.candidateResponse.split(/\s+/).filter(Boolean).length;
+    const logId = await insertLog(pool, {
+      correctionId: correction.id,
+      simulationId: simulation.id,
+      userId: simulation.user_id,
+      taskIndex: task.index,
+      model,
+      requestHash: taskHash,
+      status: hasResponse && apiKey ? "started" : hasResponse ? "failed" : "skipped",
+      requestMetadata: {
+        taskId: task.taskId,
+        title: task.title,
+        maxScore: task.maxScore,
+        responseWords,
+        batch: true,
+      },
+    });
+    logIds.set(task.index, logId);
 
-    try {
-      logId = await insertLog(pool, {
-        correctionId: correction.id,
-        simulationId: simulation.id,
-        userId: simulation.user_id,
-        taskIndex: task.index,
-        model,
-        requestHash: taskHash,
-        status: hasResponse && apiKey ? "started" : "skipped",
-        requestMetadata: {
-          taskId: task.taskId,
-          title: task.title,
-          maxScore: task.maxScore,
-          responseWords: task.candidateResponse.split(/\s+/).filter(Boolean).length,
-        },
+    if (!hasResponse) {
+      const evaluation = buildEmptyEvaluation(task);
+      taskResultsByIndex.set(task.index, {
+        task,
+        evaluation,
+        aiSucceeded: false,
+        aiFailed: false,
       });
+      await finishLog(pool, logId, {
+        status: "skipped",
+        responseMetadata: { reason: "empty_response" },
+      });
+    } else if (!apiKey) {
+      const message = "GEMINI_API_KEY is not configured on the server.";
+      const evaluation = buildUnavailableEvaluation(task, message);
+      taskResultsByIndex.set(task.index, {
+        task,
+        evaluation,
+        aiSucceeded: false,
+        aiFailed: true,
+        errorMessage: "La correction IA n'est pas configuree sur le serveur.",
+      });
+      await finishLog(pool, logId, {
+        status: "failed",
+        errorMessage: message,
+      });
+    }
+  }));
 
-      if (!hasResponse) {
-        evaluation = buildEmptyEvaluation(task);
-        await finishLog(pool, logId, {
-          status: "skipped",
-          responseMetadata: { reason: "empty_response" },
+  const aiTasks = tasks.filter((task) => task.candidateResponse.trim() && apiKey);
+  if (aiTasks.length) {
+    try {
+      let batch = null;
+      let lastError = null;
+      const candidateModels = getCandidateModels(model);
+      for (const candidateModel of candidateModels) {
+        try {
+          batch = await evaluateTasksWithRetry({
+            apiKey,
+            model: candidateModel,
+            tasks: aiTasks,
+            deadlineAt,
+            maxAttempts: candidateModel === model ? Math.min(GEMINI_MAX_ATTEMPTS, 2) : 1,
+          });
+          break;
+        } catch (err) {
+          lastError = err;
+          if (!err.transient || (deadlineAt && deadlineAt - Date.now() < 3500)) break;
+        }
+      }
+      if (!batch) throw lastError || new AiCorrectionError("AI correction failed", { transient: true });
+
+      await Promise.all(batch.results.map(async (result) => {
+        taskResultsByIndex.set(result.task.index, result);
+        await finishLog(pool, logIds.get(result.task.index), {
+          status: result.aiSucceeded ? "completed" : "failed",
+          attemptCount: batch.attempts,
+          errorMessage: result.errorMessage || null,
+          responseMetadata: result.aiSucceeded
+            ? {
+                score: result.evaluation.score,
+                maxScore: result.evaluation.maxScore,
+                estimatedLevel: result.evaluation.estimatedLevel,
+                model: batch.model,
+                batch: true,
+              }
+            : { batch: true },
         });
-      } else if (!apiKey) {
-        aiFailed = true;
-        evaluation = buildUnavailableEvaluation(task);
-        await finishLog(pool, logId, {
+      }));
+    } catch (err) {
+      const userMessage = getCorrectionFailureMessage(err);
+      await Promise.all(aiTasks.map(async (task) => {
+        const evaluation = buildUnavailableEvaluation(task, userMessage);
+        taskResultsByIndex.set(task.index, {
+          task,
+          evaluation,
+          aiSucceeded: false,
+          aiFailed: true,
+          errorMessage: userMessage,
+        });
+        await finishLog(pool, logIds.get(task.index), {
           status: "failed",
-          errorMessage: "GEMINI_API_KEY is not configured on the server.",
-        });
-      } else {
-        const result = await evaluateTaskWithRetry({ apiKey, model, task, deadlineAt });
-        evaluation = result.evaluation;
-        aiSucceeded = true;
-        await finishLog(pool, logId, {
-          status: "completed",
-          attemptCount: result.attempts,
+          attemptCount: Math.min(GEMINI_MAX_ATTEMPTS, 2),
+          errorMessage: cleanText(err.message || "AI correction failed", 1000),
           responseMetadata: {
-            score: evaluation.score,
-            maxScore: evaluation.maxScore,
-            estimatedLevel: evaluation.estimatedLevel,
+            providerStatus: err?.status || null,
+            batch: true,
           },
         });
-      }
-    } catch (err) {
-      aiFailed = true;
-      evaluation = buildUnavailableEvaluation(task);
-      if (logId) {
-        await finishLog(pool, logId, {
-          status: "failed",
-          attemptCount: GEMINI_MAX_ATTEMPTS,
-          errorMessage: cleanText(err.message || "AI correction failed", 1000),
-        });
-      }
+      }));
     }
+  }
 
-    await upsertTaskCorrection(pool, correction, task, evaluation, model, taskHash);
-    return { task, evaluation, aiSucceeded, aiFailed };
-  };
+  const taskResults = tasks.map((task) => taskResultsByIndex.get(task.index) || {
+    task,
+    evaluation: buildUnavailableEvaluation(task),
+    aiSucceeded: false,
+    aiFailed: true,
+    errorMessage: "La correction IA est momentanement indisponible.",
+  });
 
-  const taskResults = await Promise.all(tasks.map((task) => correctTask(task)));
+  await Promise.all(taskResults.map(({ task, evaluation, model: taskModel }) =>
+    upsertTaskCorrection(pool, correction, task, evaluation, taskModel || model, taskHashFor(task))
+  ));
+
   const aiSuccessCount = taskResults.filter((item) => item.aiSucceeded).length;
   const aiFailureCount = taskResults.filter((item) => item.aiFailed).length;
 
@@ -877,11 +1137,13 @@ const correctWritingSimulation = async (pool, simulation, options = {}) => {
         ? "failed"
         : "completed";
   const overall = buildOverall(taskResults, status);
+  const finalModel = taskResults.find((item) => item.model)?.model || model;
+  const failureMessages = uniqueStrings(taskResults.map((item) => item.errorMessage).filter(Boolean), 3);
   const errorMessage =
     status === "failed"
-      ? "AI correction failed for every non-empty writing task."
+      ? failureMessages[0] || "La correction IA n'a pas pu corriger les taches non vides."
       : status === "partial"
-        ? "AI correction failed for at least one writing task."
+        ? failureMessages[0] || "La correction IA a echoue pour au moins une tache."
         : null;
 
   const updated = await pool.query(
@@ -894,6 +1156,7 @@ const correctWritingSimulation = async (pool, simulation, options = {}) => {
          overall_strengths = $7,
          overall_weaknesses = $8,
          error_message = $9,
+         model = $10,
          updated_at = NOW(),
          corrected_at = NOW()
      WHERE id = $1
@@ -908,6 +1171,7 @@ const correctWritingSimulation = async (pool, simulation, options = {}) => {
       JSON.stringify(overall.strengths),
       JSON.stringify(overall.weaknesses),
       errorMessage,
+      finalModel,
     ]
   );
 

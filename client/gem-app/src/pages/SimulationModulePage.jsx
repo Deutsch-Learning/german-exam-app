@@ -3867,6 +3867,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const retryWritingCorrection = async () => {
     if (!savedSimulationId || writingCorrectionLoading) return;
     setWritingCorrectionError("");
+    setWritingCorrection(null);
     setWritingCorrectionLoading(true);
     try {
       const correctionResponse = await API.post(`/api/simulations/${savedSimulationId}/writing-correction`, { force: true });
@@ -3874,11 +3875,13 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       setWritingCorrection(correction);
       if (correction?.status === "partial" || correction?.status === "failed") {
         setWritingCorrectionError(correction.errorMessage || "Correction IA indisponible pour le moment.");
+      } else if (correction?.status === "processing") {
+        setResultStatus("Correction IA en cours.");
       } else {
         setResultStatus("Correction IA terminée.");
       }
-    } catch {
-      setWritingCorrectionError("La correction IA n'a pas pu se terminer. Vous pouvez réessayer dans quelques instants.");
+    } catch (err) {
+      setWritingCorrectionError(err?.response?.data?.error || "La correction IA n'a pas pu se terminer. Vous pouvez réessayer dans quelques instants.");
     } finally {
       setWritingCorrectionLoading(false);
     }
@@ -3889,12 +3892,17 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
     if (writingCorrectionLoading) {
       return (
-        <section className={styles.aiCorrectionPanel}>
+        <section className={styles.aiCorrectionPanel} data-status="processing">
           <div className={styles.aiCorrectionHeader}>
             <span><WandSparkles size={18} /> Correction IA</span>
-            <strong>En cours</strong>
+            <strong><ImportedLoadingDots label="Correction IA en cours" /></strong>
           </div>
-          <p className={styles.aiCorrectionMessage}>Correction automatique en cours. Les scores apparaitront ici des que l'examinateur IA aura termine.</p>
+          <p className={styles.aiCorrectionMessage}>Analyse des consignes et de vos réponses. Le score final apparait dès que la correction est terminée.</p>
+          <div className={styles.aiProgressSteps} aria-hidden="true">
+            <span>Consignes</span>
+            <span>Texte candidat</span>
+            <span>Score final</span>
+          </div>
         </section>
       );
     }
@@ -3928,6 +3936,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           : writingCorrection.status === "failed"
             ? "Echec"
             : "En cours";
+    const correctionHasScores = ["completed", "partial"].includes(writingCorrection.status);
 
     return (
       <section className={styles.aiCorrectionPanel} data-status={writingCorrection.status}>
@@ -3936,20 +3945,18 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           <strong>{statusLabel}</strong>
         </div>
 
-        <div className={styles.aiScoreGrid}>
-          <div>
-            <span>Score total</span>
-            <strong>{formatCorrectionScore(writingCorrection.totalScore)} / {formatCorrectionScore(writingCorrection.maxScore)}</strong>
+        {correctionHasScores ? (
+          <div className={styles.aiScoreGrid}>
+            <div>
+              <span>Score total</span>
+              <strong>{formatCorrectionScore(writingCorrection.totalScore)} / {formatCorrectionScore(writingCorrection.maxScore)}</strong>
+            </div>
+            <div>
+              <span>Pourcentage</span>
+              <strong>{formatCorrectionScore(writingCorrection.percentage)}%</strong>
+            </div>
           </div>
-          <div>
-            <span>Pourcentage</span>
-            <strong>{formatCorrectionScore(writingCorrection.percentage)}%</strong>
-          </div>
-          <div>
-            <span>Modele</span>
-            <strong>{writingCorrection.model || "Gemini"}</strong>
-          </div>
-        </div>
+        ) : null}
 
         {writingCorrection.overallFeedback ? (
           <p className={styles.aiCorrectionMessage}>{writingCorrection.overallFeedback}</p>
@@ -4041,10 +4048,12 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       const isWritingResult = module.id === "write";
       const correctionScoreReady =
         isWritingResult &&
+        !writingCorrectionLoading &&
         ["completed", "partial"].includes(writingCorrection?.status) &&
         Number.isFinite(Number(writingCorrection?.percentage));
       const correctionFailed =
         isWritingResult &&
+        !writingCorrectionLoading &&
         !correctionScoreReady &&
         (writingCorrection?.status === "failed" || Boolean(writingCorrectionError));
       const displayedScore = correctionScoreReady ? Number(writingCorrection.percentage) : isWritingResult ? null : score;

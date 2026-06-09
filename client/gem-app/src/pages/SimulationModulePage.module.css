@@ -1329,7 +1329,7 @@
 }
 
 .aiScoreGrid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .aiScoreGrid div,
@@ -1382,6 +1382,43 @@
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.aiProgressSteps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.aiProgressSteps span {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #1e40af;
+  padding: 10px 12px;
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.aiProgressSteps span::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(37, 99, 235, 0.16), transparent);
+  transform: translateX(-100%);
+  animation: aiProgressSweep 1.4s ease-in-out infinite;
+}
+
+.aiProgressSteps span:nth-child(2)::after {
+  animation-delay: 0.16s;
+}
+
+.aiProgressSteps span:nth-child(3)::after {
+  animation-delay: 0.32s;
 }
 
 .aiSummaryGrid {
@@ -1474,6 +1511,7 @@
 
   .aiScoreGrid,
   .aiSummaryGrid,
+  .aiProgressSteps,
   .aiTaskFeedbackGrid {
     grid-template-columns: 1fr;
   }
@@ -2649,6 +2687,16 @@
   40% {
     opacity: 1;
     transform: translateY(-0.14em);
+  }
+}
+
+@keyframes aiProgressSweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  55%,
+  100% {
+    transform: translateX(100%);
   }
 }
 
