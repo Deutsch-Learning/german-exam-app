@@ -1963,37 +1963,12 @@ const createSimulationHandler = async (req, res) => {
     );
     await logUserAction(req.user.id, "simulation.completed", req);
 
-    let writingCorrection = null;
-    if (isWritingSimulation(insert.rows[0])) {
-      try {
-        writingCorrection = await correctWritingSimulation(pool, insert.rows[0]);
-      } catch (err) {
-        console.error("Writing correction failed", err);
-      }
-    }
-
-    const correctionScoreApplied = writingCorrection && ["completed", "partial"].includes(writingCorrection.status);
-    const savedSimulation = writingCorrection
-      ? {
-          ...insert.rows[0],
-          score_pct: correctionScoreApplied ? writingCorrection.percentage : insert.rows[0].score_pct,
-          ai_corrections: {
-            ...(insert.rows[0].ai_corrections || {}),
-            writingCorrection: {
-              status: writingCorrection.status,
-              correctionId: writingCorrection.id,
-              provider: writingCorrection.provider,
-              model: writingCorrection.model,
-              totalScore: writingCorrection.totalScore,
-              maxScore: writingCorrection.maxScore,
-              percentage: writingCorrection.percentage,
-              correctedAt: writingCorrection.correctedAt,
-            },
-          },
-        }
-      : insert.rows[0];
-
-    return res.status(201).json({ ok: true, simulation: savedSimulation, writingCorrection });
+    return res.status(201).json({
+      ok: true,
+      simulation: insert.rows[0],
+      writingCorrection: null,
+      correctionPending: isWritingSimulation(insert.rows[0]),
+    });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ ok: false, error: "Server error" });

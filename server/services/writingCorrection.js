@@ -796,15 +796,14 @@ const correctWritingSimulation = async (pool, simulation, options = {}) => {
 
   const apiKey = process.env.GEMINI_API_KEY?.trim();
   const deadlineAt = Date.now() + WRITING_CORRECTION_DEADLINE_MS;
-  const taskResults = [];
-  let aiSuccessCount = 0;
-  let aiFailureCount = 0;
 
-  for (const task of tasks) {
+  const correctTask = async (task) => {
     const taskHash = hashValue({ requestHash, taskIndex: task.index });
     const hasResponse = Boolean(task.candidateResponse.trim());
     let logId = null;
     let evaluation;
+    let aiSucceeded = false;
+    let aiFailed = false;
 
     try {
       logId = await insertLog(pool, {
@@ -830,7 +829,7 @@ const correctWritingSimulation = async (pool, simulation, options = {}) => {
           responseMetadata: { reason: "empty_response" },
         });
       } else if (!apiKey) {
-        aiFailureCount += 1;
+        aiFailed = true;
         evaluation = buildUnavailableEvaluation(task);
         await finishLog(pool, logId, {
           status: "failed",
@@ -839,7 +838,7 @@ const correctWritingSimulation = async (pool, simulation, options = {}) => {
       } else {
         const result = await evaluateTaskWithRetry({ apiKey, model, task, deadlineAt });
         evaluation = result.evaluation;
-        aiSuccessCount += 1;
+        aiSucceeded = true;
         await finishLog(pool, logId, {
           status: "completed",
           attemptCount: result.attempts,
@@ -851,7 +850,7 @@ const correctWritingSimulation = async (pool, simulation, options = {}) => {
         });
       }
     } catch (err) {
-      aiFailureCount += 1;
+      aiFailed = true;
       evaluation = buildUnavailableEvaluation(task);
       if (logId) {
         await finishLog(pool, logId, {
@@ -863,8 +862,12 @@ const correctWritingSimulation = async (pool, simulation, options = {}) => {
     }
 
     await upsertTaskCorrection(pool, correction, task, evaluation, model, taskHash);
-    taskResults.push({ task, evaluation });
-  }
+    return { task, evaluation, aiSucceeded, aiFailed };
+  };
+
+  const taskResults = await Promise.all(tasks.map((task) => correctTask(task)));
+  const aiSuccessCount = taskResults.filter((item) => item.aiSucceeded).length;
+  const aiFailureCount = taskResults.filter((item) => item.aiFailed).length;
 
   const nonEmptyTasks = tasks.filter((task) => task.candidateResponse.trim()).length;
   const status =
