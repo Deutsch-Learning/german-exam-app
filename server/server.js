@@ -737,6 +737,11 @@ const PUBLIC_EXAM_META = {
     examName: "Goethe-Zertifikat",
     accent: "#c10016",
   },
+  osd: {
+    examId: "osd",
+    examName: "OSD Zertifikat",
+    accent: "#2563eb",
+  },
   telc: {
     examId: "telc",
     examName: "TELC Deutsch",
@@ -793,9 +798,14 @@ const PUBLIC_MODULE_META = {
 const MODULE_ORDER = ["read", "listen", "write", "speak"];
 
 const normalizeProviderId = (value) => {
-  const normalized = String(value ?? "")
+  const raw = String(value ?? "")
     .trim()
     .toLowerCase()
+    .replace(/ã¶|ã–/g, "o");
+  const normalized = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
   if (normalized.includes("goethe")) return "goethe";
@@ -807,14 +817,31 @@ const normalizeProviderId = (value) => {
   return normalized;
 };
 
+const applyExamAlias = (value, routeMeta = {}) => {
+  if (!value || routeMeta.publicProvider !== "osd" || routeMeta.provider !== "goethe") return value;
+  return String(value)
+    .replace(/Goethe-Zertifikat\s+B1/gi, routeMeta.publicExamType || "OSD Zertifikat B1")
+    .replace(/Goethe\s+B1/gi, "OSD B1")
+    .replace(/Goethe/gi, "OSD");
+};
+
 const getProviderRouteMeta = (value) => {
   const raw = String(value ?? "").trim();
   const levelMatch = raw.match(/\b(A1|A2|B1|B2|C1|C2)\b/i);
-  const normalizedRaw = raw.toLowerCase();
   const level = levelMatch ? levelMatch[1].toUpperCase() : null;
+  const routeProvider = normalizeProviderId(raw);
+  if (routeProvider === "osd" && level === "B1") {
+    return {
+      provider: "goethe",
+      level,
+      publicProvider: "osd",
+      publicExamType: "OSD Zertifikat B1",
+    };
+  }
   return {
-    provider: normalizedRaw.includes("osd") && level === "B1" ? "goethe" : normalizeProviderId(raw),
+    provider: routeProvider,
     level,
+    publicProvider: routeProvider,
   };
 };
 
@@ -864,16 +891,17 @@ const normalizeChoiceOptions = (options) => {
     .filter((option) => option.value && option.label);
 };
 
-const toPublicSeriesList = (rows) => {
+const toPublicSeriesList = (rows, routeMeta = {}) => {
   const groups = new Map();
 
   for (const row of rows) {
-    const provider = normalizeProviderId(row.provider);
+    const provider = normalizeProviderId(routeMeta.publicProvider || row.provider);
     const meta = PUBLIC_EXAM_META[provider] ?? {
       examId: provider,
       examName: row.exam_type || provider,
       accent: "#111827",
     };
+    const examName = routeMeta.publicExamType || row.exam_type || meta.examName;
     const seriesNumber = Number(row.series_number);
     if (!Number.isFinite(seriesNumber)) continue;
 
@@ -885,9 +913,9 @@ const toPublicSeriesList = (rows) => {
         level: row.level || "B1",
         duration: "Imported modules",
         theme: "",
-        setting: row.exam_type || meta.examName,
+        setting: examName,
         examId: meta.examId,
-        examName: row.exam_type || meta.examName,
+        examName,
         accent: meta.accent,
         isFree: seriesNumber === 1,
         isImported: true,
@@ -903,7 +931,7 @@ const toPublicSeriesList = (rows) => {
     const moduleMeta = PUBLIC_MODULE_META[moduleId];
     if (!moduleMeta) continue;
 
-    const title = cleanText(metadata.title || metadata.sourceLabel || row.name);
+    const title = cleanText(applyExamAlias(metadata.title || metadata.sourceLabel || row.name, routeMeta));
     if (!series.title && title) series.title = title;
     if (!series.theme && title) series.theme = title;
 
@@ -912,7 +940,7 @@ const toPublicSeriesList = (rows) => {
       available: true,
       sourceExamId: row.id,
       sourceCode: row.code,
-      sourceLabel: metadata.sourceLabel || row.name,
+      sourceLabel: applyExamAlias(metadata.sourceLabel || row.name, routeMeta),
       title: title || moduleMeta.label,
       questionCount: Number(row.question_count) || 0,
       sectionCount: Number(row.section_count) || 0,
@@ -1114,19 +1142,23 @@ const buildSpeakingTask = (question, index) => {
   };
 };
 
-const buildImportedModuleContent = ({ exam, sections, questions }) => {
+const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {} }) => {
   const moduleId = exam.section_type;
   const moduleMeta = PUBLIC_MODULE_META[moduleId] ?? PUBLIC_MODULE_META.read;
   const metadata = asJsonObject(exam.metadata);
-  const sourceLabel = metadata.sourceLabel || `Series ${String(exam.series_number).padStart(2, "0")}`;
-  const title = metadata.title || sourceLabel || exam.name;
+  const sourceLabel = applyExamAlias(
+    metadata.sourceLabel || `Series ${String(exam.series_number).padStart(2, "0")}`,
+    routeMeta
+  );
+  const title = applyExamAlias(metadata.title || sourceLabel || exam.name, routeMeta);
+  const examType = routeMeta.publicExamType || exam.exam_type || "Goethe-Zertifikat";
   const sectionSummaries = sections.map((section) => ({
     id: `part-${section.part_number || section.position}`,
     label: `Teil ${section.part_number || section.position}`,
     number: Number(section.part_number) || Number(section.position) || null,
-    heading: section.title,
-    text: clipText(section.instructions || section.title, 2600),
-    instructions: clipText(section.instructions || section.title, 5200),
+    heading: applyExamAlias(section.title, routeMeta),
+    text: clipText(applyExamAlias(section.instructions || section.title, routeMeta), 2600),
+    instructions: clipText(applyExamAlias(section.instructions || section.title, routeMeta), 5200),
     durationMinutes: Number(section.duration_minutes) || null,
     points: Number(section.points) || null,
   }));
@@ -1147,7 +1179,7 @@ const buildImportedModuleContent = ({ exam, sections, questions }) => {
     shortLabel: moduleMeta.shortLabel,
     theme: title,
     focus: [
-      exam.exam_type || "Goethe-Zertifikat",
+      examType,
       sourceLabel,
       moduleMeta.label,
       `${tasks.length} question${tasks.length > 1 ? "s" : ""}`,
@@ -1163,7 +1195,7 @@ const buildImportedModuleContent = ({ exam, sections, questions }) => {
       moduleId === "read"
         ? {
             title: `${sourceLabel}: ${title}`,
-            intro: metadata.instructions || "Lisez les textes et répondez aux questions.",
+            intro: applyExamAlias(metadata.instructions || "Lisez les textes et répondez aux questions.", routeMeta),
             paragraphs: sectionSummaries.length
               ? sectionSummaries
               : [{ id: "A", text: "Texte importé depuis le document source." }],
@@ -1177,11 +1209,12 @@ const buildImportedModuleContent = ({ exam, sections, questions }) => {
 
 app.get("/api/exams/:provider/series", async (req, res) => {
   try {
-    const { provider, level } = getProviderRouteMeta(req.params.provider);
+    const routeMeta = getProviderRouteMeta(req.params.provider);
+    const { provider, level } = routeMeta;
     if (!provider) return res.status(400).json({ ok: false, error: "Invalid exam provider" });
 
     const importedRows = await queryImportedExamRows(provider, null, level);
-    const series = toPublicSeriesList(importedRows.rows);
+    const series = toPublicSeriesList(importedRows.rows, routeMeta);
     return res.json({ ok: true, source: "database", series });
   } catch (err) {
     console.error("Imported series lookup failed", err);
@@ -1191,7 +1224,8 @@ app.get("/api/exams/:provider/series", async (req, res) => {
 
 app.get("/api/exams/:provider/series/:seriesId/:moduleId", async (req, res) => {
   try {
-    const { provider, level } = getProviderRouteMeta(req.params.provider);
+    const routeMeta = getProviderRouteMeta(req.params.provider);
+    const { provider, level } = routeMeta;
     const seriesNumber = parseSeriesNumber(req.params.seriesId);
     const moduleId = String(req.params.moduleId || "").trim().toLowerCase();
     if (!provider || !seriesNumber || !PUBLIC_MODULE_META[moduleId]) {
@@ -1199,7 +1233,7 @@ app.get("/api/exams/:provider/series/:seriesId/:moduleId", async (req, res) => {
     }
 
     const importedRows = await queryImportedExamRows(provider, seriesNumber, level);
-    const series = toPublicSeriesList(importedRows.rows)[0];
+    const series = toPublicSeriesList(importedRows.rows, routeMeta)[0];
     const exam = importedRows.rows.find((row) => row.section_type === moduleId);
     if (!series || !exam) {
       return res.status(404).json({ ok: false, error: "Imported module not found" });
@@ -1232,6 +1266,7 @@ app.get("/api/exams/:provider/series/:seriesId/:moduleId", async (req, res) => {
       exam,
       sections: sections.rows,
       questions: questions.rows,
+      routeMeta,
     });
     return res.json({ ok: true, source: "database", series, content });
   } catch (err) {
