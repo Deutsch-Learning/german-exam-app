@@ -2159,7 +2159,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
         }
 
         const response = await API.post(
-          "/simulations",
+          "/api/user/simulations",
           {
             examName: `${examHeading} - ${moduleTitle} - ${simulationMode ? "Simulation" : "Entraînement"}`,
             scorePct: finalScore,
