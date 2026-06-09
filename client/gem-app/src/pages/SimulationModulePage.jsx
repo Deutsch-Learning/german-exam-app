@@ -550,6 +550,87 @@ const withMinimumWritingWords = (tasks) =>
     maxWords: null,
   }));
 
+const CORRECTION_CRITERION_LABELS = {
+  instructions: "Consignes",
+  taskCompletion: "Tache",
+  coherence: "Coherence",
+  grammar: "Grammaire",
+  spelling: "Orthographe",
+  vocabulary: "Vocabulaire",
+  register: "Registre",
+};
+
+const firstPositiveNumber = (...values) => {
+  for (const value of values) {
+    const number = Number(value);
+    if (Number.isFinite(number) && number > 0) return number;
+  }
+  return null;
+};
+
+const getConfiguredWritingMaxScore = (task, totalTasks) => {
+  const explicit = firstPositiveNumber(
+    task?.maxScore,
+    task?.taskMaxScore,
+    task?.points,
+    task?.partPoints,
+    task?.scoring?.points
+  );
+  if (explicit) return Math.round(explicit * 100) / 100;
+  return Math.round((100 / Math.max(1, totalTasks)) * 100) / 100;
+};
+
+const uniqueTextValues = (values) => {
+  const seen = new Set();
+  return values
+    .map((value) => String(value ?? "").trim())
+    .filter((value) => {
+      if (!value) return false;
+      const key = value.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+};
+
+const formatCorrectionScore = (value) => {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "-";
+  return Number.isInteger(number) ? String(number) : number.toFixed(1).replace(/\.0$/, "");
+};
+
+const buildWritingCorrectionTasks = (module, answers, examParts, context) => {
+  if (module.id !== "write") return [];
+  return module.tasks.map((task, index) => {
+    const part = examParts.find((item) => item.taskIndexes.includes(index));
+    const maxScore = getConfiguredWritingMaxScore(task, module.tasks.length);
+    const instructions = uniqueTextValues([
+      part?.sourceText || part?.instructions,
+      task.partInstructions,
+      task.prompt || task.question,
+    ]).join("\n\n");
+
+    return {
+      taskId: task.sourceQuestionId || task.id,
+      title: task.title || task.question || `Tache ${index + 1}`,
+      instructions,
+      subtitles: uniqueTextValues([part?.displayTitle, part?.title, task.typeLabel, task.partTitle]),
+      examType: context.examHeading,
+      moduleType: context.moduleTitle,
+      durationMinutes: firstPositiveNumber(task.durationMinutes, task.partDurationMinutes, part?.durationMinutes),
+      maxScore,
+      taskWeight: maxScore,
+      level: task.level || context.level,
+      minWords: getWritingMinimumWords(task),
+      targetWords: Number(task.targetWords) || null,
+      register: task.register || "",
+      criteria: task.criteria || [],
+      candidateResponse: String(answers[index] ?? ""),
+      responseWordCount: countWords(answers[index]),
+    };
+  });
+};
+
 const speakingTasks = [
   {
     id: "speak-1",
@@ -1893,6 +1974,9 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const [navPanelOpen, setNavPanelOpen] = useState(false);
   const [, setSaveStatus] = useState("");
   const [resultStatus, setResultStatus] = useState("");
+  const [writingCorrection, setWritingCorrection] = useState(null);
+  const [writingCorrectionLoading, setWritingCorrectionLoading] = useState(false);
+  const [writingCorrectionError, setWritingCorrectionError] = useState("");
   const [writingVersions, setWritingVersions] = useState([]);
   const [audioTimestamp, setAudioTimestamp] = useState(0);
   const [audioPlaying, setAudioPlaying] = useState(false);
@@ -1959,6 +2043,9 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       setCompleted(false);
       setPartIntroVisible(true);
       setWritingVersions([]);
+      setWritingCorrection(null);
+      setWritingCorrectionLoading(false);
+      setWritingCorrectionError("");
       setSaveStatus("Mode visiteur : la progression n'est pas sauvegardée.");
       setRestoredKey(progressKey);
       return;
@@ -1995,6 +2082,9 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setAudioPlaying(false);
     setAudioSessionActive(false);
     setResultStatus("");
+    setWritingCorrection(null);
+    setWritingCorrectionLoading(false);
+    setWritingCorrectionError("");
     setSaveStatus(stored?.savedAt ? `Dernière sauvegarde ${formatClock(new Date(stored.savedAt))}` : "Sauvegarde locale prête");
     setRestoredKey(progressKey);
   }, [examParts, module, progressKey, shouldPersistProgress, totalExamDuration, totalTasks]);
@@ -2009,14 +2099,66 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
   const saveResultToBackend = useCallback(
     async (finalScore) => {
+      const isWritingModule = module.id === "write";
       if (!auth?.id) {
+        if (isWritingModule) {
+          setWritingCorrectionLoading(false);
+          setWritingCorrectionError("Connectez-vous pour lancer la correction automatique.");
+        }
         setResultStatus("Résultat gardé en local. Connectez-vous pour l'ajouter au dashboard.");
         return;
       }
 
+      if (isWritingModule) {
+        setWritingCorrection(null);
+        setWritingCorrectionError("");
+        setWritingCorrectionLoading(true);
+      }
+
       try {
         const summary = buildResultSummary(module, answers);
-        await API.post(
+        const writingTasksForCorrection = buildWritingCorrectionTasks(module, answers, examParts, {
+          examHeading,
+          moduleTitle,
+          level,
+        });
+        const writingMaxScore = writingTasksForCorrection.reduce((sum, task) => sum + (Number(task.maxScore) || 0), 0);
+        const resultDetails = {
+          examName: examHeading,
+          examCode: selectedSeries?.examId ?? null,
+          moduleId: module.id,
+          moduleTitle,
+          moduleType: module.examPart,
+          mode: simulationMode ? "simulation" : "training",
+          level,
+          correct: summary.correctCount,
+          wrong: summary.wrongCount,
+          total: totalTasks,
+          totalTasks,
+          answeredCount,
+          correctCount: summary.correctCount,
+          wrongCount: summary.wrongCount,
+          score: finalScore,
+          summary,
+          series: selectedSeries
+            ? {
+                id: selectedSeries.id,
+                code: selectedSeries.code,
+                examId: selectedSeries.examId,
+                examName: selectedSeries.examName,
+                level: selectedSeries.level,
+                title: selectedSeries.title,
+              }
+            : null,
+        };
+
+        if (isWritingModule) {
+          resultDetails.answers = answers;
+          resultDetails.writingTasks = writingTasksForCorrection;
+          resultDetails.writingMaxScore = writingMaxScore || 100;
+        }
+
+        const response = await API.post(
           "/simulations",
           {
             examName: `${examHeading} - ${moduleTitle} - ${simulationMode ? "Simulation" : "Entraînement"}`,
@@ -2028,20 +2170,41 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               mode: simulationMode ? "simulation" : "training",
               recommendations: module.focus.map((item) => `Renforcer : ${item}`),
             },
-            resultDetails: {
-              correct: summary.correctCount,
-              wrong: summary.wrongCount,
-              total: totalTasks,
-            },
+            resultDetails,
             durationSeconds: elapsedSeconds,
           }
         );
+        const correction = response.data?.writingCorrection ?? null;
+        if (isWritingModule) {
+          setWritingCorrection(correction);
+          if (correction?.status === "partial" || correction?.status === "failed") {
+            setWritingCorrectionError(correction.errorMessage || "Correction IA indisponible pour le moment.");
+          }
+        }
         setResultStatus("Résultat enregistré dans le dashboard.");
       } catch {
+        if (isWritingModule) {
+          setWritingCorrectionError("Correction IA indisponible: le resultat n'a pas pu etre envoye au backend.");
+        }
         setResultStatus("Résultat gardé en local. Le backend n'est pas joignable pour le moment.");
+      } finally {
+        if (isWritingModule) setWritingCorrectionLoading(false);
       }
     },
-    [answers, auth?.id, elapsedSeconds, examHeading, level, module, moduleTitle, simulationMode, totalTasks]
+    [
+      answeredCount,
+      answers,
+      auth?.id,
+      elapsedSeconds,
+      examHeading,
+      examParts,
+      level,
+      module,
+      moduleTitle,
+      selectedSeries,
+      simulationMode,
+      totalTasks,
+    ]
   );
 
   const finishModule = useCallback(() => {
@@ -2263,6 +2426,9 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setCompleted(false);
     setPartIntroVisible(true);
     setWritingVersions([]);
+    setWritingCorrection(null);
+    setWritingCorrectionLoading(false);
+    setWritingCorrectionError("");
     setAudioTimestamp(0);
     audioTimestampRef.current = 0;
     audioStartOffsetRef.current = 0;
@@ -3683,16 +3849,154 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     );
   };
 
+  const renderWritingCorrectionPanel = () => {
+    if (module.id !== "write") return null;
+
+    if (writingCorrectionLoading) {
+      return (
+        <section className={styles.aiCorrectionPanel}>
+          <div className={styles.aiCorrectionHeader}>
+            <span><WandSparkles size={18} /> Correction IA</span>
+            <strong>En cours</strong>
+          </div>
+          <p className={styles.aiCorrectionMessage}>Correction automatique en cours. Les scores apparaitront ici des que l'examinateur IA aura termine.</p>
+        </section>
+      );
+    }
+
+    if (!writingCorrection) {
+      return writingCorrectionError ? (
+        <section className={styles.aiCorrectionPanel} data-status="failed">
+          <div className={styles.aiCorrectionHeader}>
+            <span><AlertCircle size={18} /> Correction IA</span>
+            <strong>Indisponible</strong>
+          </div>
+          <p className={styles.aiCorrectionMessage}>{writingCorrectionError}</p>
+        </section>
+      ) : null;
+    }
+
+    const tasks = Array.isArray(writingCorrection.tasks) ? writingCorrection.tasks : [];
+    const statusLabel =
+      writingCorrection.status === "completed"
+        ? "Terminee"
+        : writingCorrection.status === "partial"
+          ? "Partielle"
+          : writingCorrection.status === "failed"
+            ? "Echec"
+            : "En cours";
+
+    return (
+      <section className={styles.aiCorrectionPanel} data-status={writingCorrection.status}>
+        <div className={styles.aiCorrectionHeader}>
+          <span><WandSparkles size={18} /> Correction IA Expression Ecrite</span>
+          <strong>{statusLabel}</strong>
+        </div>
+
+        <div className={styles.aiScoreGrid}>
+          <div>
+            <span>Score total</span>
+            <strong>{formatCorrectionScore(writingCorrection.totalScore)} / {formatCorrectionScore(writingCorrection.maxScore)}</strong>
+          </div>
+          <div>
+            <span>Pourcentage</span>
+            <strong>{formatCorrectionScore(writingCorrection.percentage)}%</strong>
+          </div>
+          <div>
+            <span>Modele</span>
+            <strong>{writingCorrection.model || "Gemini"}</strong>
+          </div>
+        </div>
+
+        {writingCorrection.overallFeedback ? (
+          <p className={styles.aiCorrectionMessage}>{writingCorrection.overallFeedback}</p>
+        ) : null}
+
+        <div className={styles.aiSummaryGrid}>
+          <div>
+            <h3><CheckCircle2 size={17} /> Points forts</h3>
+            {writingCorrection.overallStrengths?.length ? (
+              <ul>{writingCorrection.overallStrengths.map((item) => <li key={item}>{item}</li>)}</ul>
+            ) : (
+              <p>Aucun point fort specifique n'a ete identifie.</p>
+            )}
+          </div>
+          <div>
+            <h3><AlertCircle size={17} /> A ameliorer</h3>
+            {writingCorrection.overallWeaknesses?.length ? (
+              <ul>{writingCorrection.overallWeaknesses.map((item) => <li key={item}>{item}</li>)}</ul>
+            ) : (
+              <p>Aucun point faible majeur n'a ete signale.</p>
+            )}
+          </div>
+        </div>
+
+        <div className={styles.aiTaskList}>
+          {tasks.map((task) => {
+            const criteria = Object.keys(CORRECTION_CRITERION_LABELS)
+              .map((key) => [key, task.criterionScores?.[key]])
+              .filter(([, value]) => value !== undefined && value !== null);
+            return (
+              <article key={`${task.taskId || task.id}-${task.taskIndex}`} className={styles.aiTaskCard}>
+                <div className={styles.aiTaskHeader}>
+                  <span><ClipboardCheck size={16} /> Tache {Number(task.taskIndex) + 1}</span>
+                  <strong>{formatCorrectionScore(task.score)} / {formatCorrectionScore(task.maxScore)}</strong>
+                </div>
+                <h3>{task.title}</h3>
+                {criteria.length ? (
+                  <div className={styles.aiCriteriaGrid}>
+                    {criteria.map(([key, value]) => (
+                      <span key={key}>
+                        <small>{CORRECTION_CRITERION_LABELS[key] || key}</small>
+                        <b>{formatCorrectionScore(value)}/10</b>
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+                <div className={styles.aiTaskFeedbackGrid}>
+                  <div>
+                    <h4><ShieldCheck size={15} /> Forces</h4>
+                    {task.strengths?.length ? (
+                      <ul>{task.strengths.map((item) => <li key={item}>{item}</li>)}</ul>
+                    ) : (
+                      <p>Aucune force specifique.</p>
+                    )}
+                  </div>
+                  <div>
+                    <h4><Gauge size={15} /> Faiblesses</h4>
+                    {task.weaknesses?.length ? (
+                      <ul>{task.weaknesses.map((item) => <li key={item}>{item}</li>)}</ul>
+                    ) : (
+                      <p>Aucune faiblesse specifique.</p>
+                    )}
+                  </div>
+                </div>
+                {task.feedback ? <p className={styles.aiExaminerComment}>{task.feedback}</p> : null}
+              </article>
+            );
+          })}
+        </div>
+
+        {writingCorrectionError ? <p className={styles.aiCorrectionWarning}>{writingCorrectionError}</p> : null}
+      </section>
+    );
+  };
+
   const renderModuleContent = () => {
     if (completed) {
-      const unlocked = score >= PASS_SCORE;
       const resultSummary = buildResultSummary(module, answers);
+      const correctionScoreReady =
+        module.id === "write" &&
+        ["completed", "partial"].includes(writingCorrection?.status) &&
+        Number.isFinite(Number(writingCorrection?.percentage));
+      const displayedScore = correctionScoreReady ? Number(writingCorrection.percentage) : score;
+      const unlocked = displayedScore >= PASS_SCORE;
       if (module?.id) {
         return (
           <section className={styles.resultPanel}>
             <Trophy size={44} />
             <p className={styles.sectionLabel}>{t.modulePage.result}</p>
-            <h2>{score}%</h2>
+            <h2>{displayedScore}%</h2>
             <p>
               {unlocked
                 ? `Gut gemacht. Das naechste empfohlene Niveau ist ${getNextLevel(level)}.`
@@ -3705,6 +4009,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               <span><Flag size={16} /> {Object.values(flagged).filter(Boolean).length} markiert</span>
               <span><Clock3 size={16} /> {formatTime(elapsedSeconds)} Arbeitszeit</span>
             </div>
+            {renderWritingCorrectionPanel()}
             <div className={styles.finalReviewList}>
               {resultSummary.rows.map((row) => (
                 <article key={row.id} className={styles.finalReviewItem} data-correct={row.isCorrect ? "true" : "false"}>
@@ -3745,7 +4050,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
         <section className={styles.resultPanel}>
           <Trophy size={44} />
           <p className={styles.sectionLabel}>{t.modulePage.result}</p>
-          <h2>{score}%</h2>
+          <h2>{displayedScore}%</h2>
           <p>
             {unlocked
               ? `Bravo, le prochain niveau conseillé est ${getNextLevel(level)}.`
@@ -3758,6 +4063,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             <span><Flag size={16} /> {Object.values(flagged).filter(Boolean).length} signalée(s)</span>
             <span><Clock3 size={16} /> {formatTime(elapsedSeconds)} de travail</span>
           </div>
+          {renderWritingCorrectionPanel()}
           <div className={styles.finalReviewList}>
             {resultSummary.rows.map((row) => (
               <article key={row.id} className={styles.finalReviewItem} data-correct={row.isCorrect ? "true" : "false"}>
