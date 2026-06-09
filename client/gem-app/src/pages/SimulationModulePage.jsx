@@ -60,8 +60,8 @@ import ComingSoonPage from "./ComingSoonPage";
 const LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"];
 const PASS_SCORE = 70;
 
-const ImportedLoadingDots = () => (
-  <span className={styles.importedLoadingDots} aria-label="Importierte Aufgaben werden geladen">
+const ImportedLoadingDots = ({ label = "Importierte Aufgaben werden geladen" }) => (
+  <span className={styles.importedLoadingDots} role="status" aria-label={label}>
     <span />
     <span />
     <span />
@@ -1779,16 +1779,15 @@ const getCorrectLabel = (task) => {
 const buildResultSummary = (module, answers) => {
   const rows = module.tasks.map((task, index) => {
     if (module.id === "write") {
-      const taskScore = evaluateWriting(task, answers[index]);
       return {
         id: task.id,
         number: index + 1,
         title: task.title ?? task.question,
         typeLabel: task.typeLabel,
-        isCorrect: taskScore >= PASS_SCORE,
+        isCorrect: null,
         userAnswer: `${countWords(answers[index])} Woerter`,
         correctAnswer: formatWritingRequirementGerman(task),
-        explanation: `Geschaetzte Punktzahl: ${taskScore}%`,
+        explanation: "Antwort gespeichert. Die finale Bewertung kommt aus der KI-Korrektur.",
       };
     }
 
@@ -1807,16 +1806,15 @@ const buildResultSummary = (module, answers) => {
     }
 
     if (module.id === "write") {
-      const taskScore = evaluateWriting(task, answers[index]);
       return {
         id: task.id,
         number: index + 1,
         title: task.title ?? task.question,
         typeLabel: task.typeLabel,
-        isCorrect: taskScore >= PASS_SCORE,
+        isCorrect: null,
         userAnswer: `${countWords(answers[index])} mots`,
         correctAnswer: formatWritingRequirementFrench(task),
-        explanation: `Score estimé: ${taskScore}%`,
+        explanation: "Reponse enregistree. La note finale vient de la correction IA.",
       };
     }
 
@@ -1847,11 +1845,12 @@ const buildResultSummary = (module, answers) => {
     };
   });
 
-  const correctCount = rows.filter((row) => row.isCorrect).length;
+  const correctCount = rows.filter((row) => row.isCorrect === true).length;
+  const wrongCount = rows.filter((row) => row.isCorrect === false).length;
   return {
     rows,
     correctCount,
-    wrongCount: rows.length - correctCount,
+    wrongCount,
   };
 };
 
@@ -4039,44 +4038,74 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const renderModuleContent = () => {
     if (completed) {
       const resultSummary = buildResultSummary(module, answers);
+      const isWritingResult = module.id === "write";
       const correctionScoreReady =
-        module.id === "write" &&
+        isWritingResult &&
         ["completed", "partial"].includes(writingCorrection?.status) &&
         Number.isFinite(Number(writingCorrection?.percentage));
-      const displayedScore = correctionScoreReady ? Number(writingCorrection.percentage) : score;
-      const unlocked = displayedScore >= PASS_SCORE;
+      const correctionFailed =
+        isWritingResult &&
+        !correctionScoreReady &&
+        (writingCorrection?.status === "failed" || Boolean(writingCorrectionError));
+      const displayedScore = correctionScoreReady ? Number(writingCorrection.percentage) : isWritingResult ? null : score;
+      const unlocked = displayedScore !== null && displayedScore >= PASS_SCORE;
+      const scoreHeading = displayedScore === null
+        ? correctionFailed
+          ? "Correction IA"
+          : <ImportedLoadingDots label="Correction IA en cours" />
+        : `${displayedScore}%`;
+      const germanResultMessage = isWritingResult
+        ? correctionScoreReady
+          ? `KI-Korrektur abgeschlossen. Das ist der finale Schreibscore: ${displayedScore}%.`
+          : correctionFailed
+            ? "Die KI-Korrektur konnte nicht abgeschlossen werden. Ihre Antworten sind gespeichert; starten Sie die Korrektur erneut."
+            : "Ihre Antworten sind gespeichert. Der finale Score erscheint, sobald die KI-Korrektur abgeschlossen ist."
+        : unlocked
+          ? `Gut gemacht. Das naechste empfohlene Niveau ist ${getNextLevel(level)}.`
+          : `Arbeiten Sie weiter auf ${level}, bevor Sie die Schwierigkeit erhoehen.`;
+      const germanCorrectionState = correctionScoreReady
+        ? "KI-Korrektur abgeschlossen"
+        : correctionFailed
+          ? "KI-Korrektur ausstehend"
+          : "KI-Korrektur laeuft";
       if (module?.id) {
         return (
           <section className={styles.resultPanel}>
             <Trophy size={44} />
             <p className={styles.sectionLabel}>{t.modulePage.result}</p>
-            <h2>{displayedScore}%</h2>
-            <p>
-              {unlocked
-                ? `Gut gemacht. Das naechste empfohlene Niveau ist ${getNextLevel(level)}.`
-                : `Arbeiten Sie weiter auf ${level}, bevor Sie die Schwierigkeit erhoehen.`}
-            </p>
+            <h2>{scoreHeading}</h2>
+            <p>{germanResultMessage}</p>
             <div className={styles.resultStats}>
               <span><CheckCircle2 size={16} /> {answeredCount}/{totalTasks} Aufgaben bearbeitet</span>
-              <span><CheckCircle2 size={16} /> {resultSummary.correctCount} richtig</span>
-              <span><XCircle size={16} /> {resultSummary.wrongCount} falsch</span>
+              {isWritingResult ? (
+                <span><WandSparkles size={16} /> {germanCorrectionState}</span>
+              ) : (
+                <>
+                  <span><CheckCircle2 size={16} /> {resultSummary.correctCount} richtig</span>
+                  <span><XCircle size={16} /> {resultSummary.wrongCount} falsch</span>
+                </>
+              )}
               <span><Flag size={16} /> {Object.values(flagged).filter(Boolean).length} markiert</span>
               <span><Clock3 size={16} /> {formatTime(elapsedSeconds)} Arbeitszeit</span>
             </div>
             {renderWritingCorrectionPanel()}
             <div className={styles.finalReviewList}>
-              {resultSummary.rows.map((row) => (
-                <article key={row.id} className={styles.finalReviewItem} data-correct={row.isCorrect ? "true" : "false"}>
-                  <div className={styles.finalReviewHeader}>
-                    <span>Frage {row.number}</span>
-                    <strong>{row.isCorrect ? "Richtig" : "Noch einmal pruefen"}</strong>
-                  </div>
-                  <h3>{row.title}</h3>
-                  <p><b>Ihre Antwort:</b> {row.userAnswer}</p>
-                  {!module.isImported ? <p><b>Erwartete Antwort:</b> <span translate="no">{row.correctAnswer}</span></p> : null}
-                  {!module.isImported && row.explanation ? <p className={styles.finalExplanation}>{row.explanation}</p> : null}
-                </article>
-              ))}
+              {resultSummary.rows.map((row) => {
+                const reviewState = isWritingResult ? "neutral" : row.isCorrect ? "true" : "false";
+                const reviewLabel = isWritingResult ? "Antwort gespeichert" : row.isCorrect ? "Richtig" : "Noch einmal pruefen";
+                return (
+                  <article key={row.id} className={styles.finalReviewItem} data-correct={reviewState}>
+                    <div className={styles.finalReviewHeader}>
+                      <span>Frage {row.number}</span>
+                      <strong>{reviewLabel}</strong>
+                    </div>
+                    <h3>{row.title}</h3>
+                    <p><b>Ihre Antwort:</b> {row.userAnswer}</p>
+                    {!isWritingResult && !module.isImported ? <p><b>Erwartete Antwort:</b> <span translate="no">{row.correctAnswer}</span></p> : null}
+                    {!isWritingResult && !module.isImported && row.explanation ? <p className={styles.finalExplanation}>{row.explanation}</p> : null}
+                  </article>
+                );
+              })}
             </div>
             {resultStatus ? <p className={styles.statusLine}>{toGermanStatus(resultStatus)}</p> : null}
             <div className={styles.resultActions}>

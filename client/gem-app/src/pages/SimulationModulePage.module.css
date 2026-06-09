@@ -1232,6 +1232,11 @@
   border-left-color: #16a34a;
 }
 
+.finalReviewItem[data-correct="neutral"] {
+  border-color: #dbeafe;
+  border-left-color: var(--module-accent);
+}
+
 .finalReviewHeader {
   display: flex;
   align-items: center;
