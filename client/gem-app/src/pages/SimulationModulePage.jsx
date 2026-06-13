@@ -56,6 +56,7 @@ import {
 } from "../utils/audio";
 import NotFoundPage from "./NotFoundPage";
 import ComingSoonPage from "./ComingSoonPage";
+import { getModuleCountLabel, isTopicModule } from "./SimulationSelectionPage";
 
 const LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"];
 const PASS_SCORE = 70;
@@ -1091,7 +1092,7 @@ const MODULES = {
 
 const GERMAN_MODULE_OVERRIDES = {
   read: {
-    title: "Leseverstehen",
+    title: "Lesen",
     eyebrow: "Aktives Lesen",
     tasks: withGermanTaskCopy(readingTasks),
     focus: ["Informationen finden", "Richtig/Falsch", "Titel zuordnen", "Wortschatz im Kontext"],
@@ -1110,14 +1111,14 @@ const GERMAN_MODULE_OVERRIDES = {
     advancement: ["Schnelleres Tempo", "Regionale Akzente", "Laengere Audioaufnahmen", "Weniger Wiederholungen"],
   },
   write: {
-    title: "Schriftlicher Ausdruck",
+    title: "Schreiben",
     eyebrow: "Strukturierte Produktion",
     tasks: withMinimumWritingWords(withGermanTaskCopy(writingTasks)),
     focus: ["Klarer Plan", "Passendes Register", "Konnektoren", "Grammatische Korrektheit"],
     advancement: ["Abstraktere Themen", "Hoehere Wortgrenzen", "Formelles Register", "Nuancierte Argumentation"],
   },
   speak: {
-    title: "Muendlicher Ausdruck",
+    title: "Sprechen",
     eyebrow: "Sprechen",
     tasks: withGermanTaskCopy(speakingTasks),
     focus: ["Aussprache", "Fluessigkeit", "Interaktion", "Gedanken ordnen"],
@@ -2016,6 +2017,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const currentPart = examParts[currentPartIndex] ?? examParts[0];
   const currentPartQuestionIndex = currentPart ? Math.max(0, currentPart.taskIndexes.indexOf(currentIndex)) : 0;
   const currentPartQuestionTotal = currentPart?.taskIndexes.length ?? totalTasks;
+  const moduleItemSingular = isTopicModule(module.id) ? "Thema" : "Frage";
+  const moduleItemPlural = getModuleCountLabel(module.id);
   const currentTaskDuration = getTaskDuration(module, currentTask);
   const currentAudioDuration = module.id === "listen" ? getEstimatedAudioDuration(module.audio) : 0;
   const answeredCount = module.tasks.filter((task, index) => getTaskAnswered(module, task, answers[index])).length;
@@ -2930,7 +2933,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             );
           })
         ) : (
-          <p className={styles.examTextInstruction} translate="no">Die Anweisungen fuer diesen Teil stehen in der aktiven Frage.</p>
+          <p className={styles.examTextInstruction} translate="no">Die Anweisungen fuer diesen Teil stehen im aktiven {moduleItemSingular}.</p>
         )}
       </div>
     );
@@ -3007,7 +3010,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             Teil {currentPart?.number ?? currentPartIndex + 1}: {currentPart?.displayTitle ?? moduleTitle}
           </p>
           <p className={styles.navStatusText}>
-            Frage {currentPartQuestionIndex + 1} von {currentPartQuestionTotal} in diesem Teil
+            {moduleItemSingular} {currentPartQuestionIndex + 1} von {currentPartQuestionTotal} in diesem Teil
           </p>
           <div className={styles.sectionProgressList}>
             {examParts.map((part, index) => {
@@ -3037,9 +3040,9 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           </div>
         </section>
 
-        <section className={styles.navCard} aria-label="Fragen-Navigator">
+        <section className={styles.navCard} aria-label={`${moduleItemPlural}-Navigator`}>
           <div className={styles.navCardHeader}>
-            <span><ClipboardCheck size={16} /> Question Navigator</span>
+            <span><ClipboardCheck size={16} /> {moduleItemPlural}-Navigator</span>
           </div>
           <div className={styles.questionNav}>
             {module.tasks.map((task, index) => {
@@ -3060,7 +3063,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
                   onClick={() => jumpToQuestion(index)}
                   disabled={isRecording}
                   aria-current={isCurrent ? "step" : undefined}
-                  aria-label={`Frage ${index + 1}${answered ? ", beantwortet" : ", offen"}${isFlagged ? ", markiert" : ""}`}
+                  aria-label={`${moduleItemSingular} ${index + 1}${answered ? ", beantwortet" : ", offen"}${isFlagged ? ", markiert" : ""}`}
                 >
                   <span>{index + 1}</span>
                   {answered ? <CheckCircle2 size={14} /> : isSkipped ? <SkipForward size={14} /> : <Circle size={14} />}
@@ -3086,11 +3089,11 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           <p className={styles.sectionLabel}>Teil {currentPart?.number ?? currentPartIndex + 1}</p>
           <h2>{currentPart?.displayTitle ?? "Einleitung zum Teil"}</h2>
           <p className={styles.examTextIntroInstruction}>
-            Lesen Sie zuerst die Anweisungen und das Quellenmaterial. Wenn Sie bereit sind, starten Sie die Fragen dieses Teils.
+            Lesen Sie zuerst die Anweisungen und das Quellenmaterial. Wenn Sie bereit sind, starten Sie die {moduleItemPlural} dieses Teils.
           </p>
         </div>
         <div className={styles.partMetaStack}>
-          <span><ClipboardCheck size={16} /> {currentPartQuestionTotal} Frage{currentPartQuestionTotal > 1 ? "n" : ""}</span>
+          <span><ClipboardCheck size={16} /> {currentPartQuestionTotal} {currentPartQuestionTotal === 1 ? moduleItemSingular : moduleItemPlural}</span>
           {currentPart?.durationMinutes ? <span><Clock3 size={16} /> {currentPart.durationMinutes} min</span> : null}
           {currentPart?.points ? <span><ShieldCheck size={16} /> {currentPart.points} pts</span> : null}
         </div>
@@ -3102,7 +3105,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
       <div className={styles.partIntroActions}>
         <button type="button" className={styles.primaryButton} onClick={startCurrentPart}>
-          Fragen starten
+          {moduleItemPlural} starten
           <ChevronRight size={16} />
         </button>
       </div>
@@ -3513,7 +3516,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
         <div className={styles.writingLayout}>
           <section className={styles.promptPanel}>
             <div className={styles.questionTopline}>
-              <span className={styles.questionStep}>Frage {currentIndex + 1} von {totalTasks}</span>
+              <span className={styles.questionStep}>Thema {currentIndex + 1} von {totalTasks}</span>
               <span>{level}</span>
             </div>
             <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
@@ -3674,7 +3677,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
         <div className={styles.speakingLayout}>
           <section className={styles.promptPanel}>
             <div className={styles.questionTopline}>
-              <span className={styles.questionStep}>Frage {currentIndex + 1} von {totalTasks}</span>
+              <span className={styles.questionStep}>Thema {currentIndex + 1} von {totalTasks}</span>
               <span>{level}</span>
             </div>
             <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
@@ -4105,7 +4108,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
                 return (
                   <article key={row.id} className={styles.finalReviewItem} data-correct={reviewState}>
                     <div className={styles.finalReviewHeader}>
-                      <span>Frage {row.number}</span>
+                      <span>{moduleItemSingular} {row.number}</span>
                       <strong>{reviewLabel}</strong>
                     </div>
                     <h3>{row.title}</h3>

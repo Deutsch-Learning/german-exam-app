@@ -20,6 +20,7 @@ import {
   SimulationDisciplineCard,
   StartConfirmationModal,
   SimulationTopNav,
+  getModuleCountLabel,
 } from "./SimulationSelectionPage";
 
 const moduleAssets = {
@@ -171,6 +172,7 @@ export default function SeriesSimulationPage() {
       moduleType: t.modules?.[moduleId] ?? content.label ?? baseModule?.label ?? "Modul",
       examType: series.examName ?? examId,
       questionCount,
+      itemLabel: getModuleCountLabel(moduleId, t.simulations.questions),
       durationMinutes,
     };
   };
@@ -217,7 +219,7 @@ export default function SeriesSimulationPage() {
                   questions={content.questionCount ?? 39}
                   accent={content.accent ?? module.accent ?? series.accent}
                   minuteLabel={t.simulations.minutes}
-                  questionLabel={t.simulations.questions}
+                  questionLabel={getModuleCountLabel(module.id, t.simulations.questions)}
                   onClick={() => requestStartModule(module.id)}
                 />
               );
