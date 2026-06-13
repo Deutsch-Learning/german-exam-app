@@ -1091,7 +1091,7 @@ const MODULES = {
 
 const GERMAN_MODULE_OVERRIDES = {
   read: {
-    title: "Leseverstehen",
+    title: "Lesen",
     eyebrow: "Aktives Lesen",
     tasks: withGermanTaskCopy(readingTasks),
     focus: ["Informationen finden", "Richtig/Falsch", "Titel zuordnen", "Wortschatz im Kontext"],
@@ -1110,14 +1110,14 @@ const GERMAN_MODULE_OVERRIDES = {
     advancement: ["Schnelleres Tempo", "Regionale Akzente", "Laengere Audioaufnahmen", "Weniger Wiederholungen"],
   },
   write: {
-    title: "Schriftlicher Ausdruck",
+    title: "Schreiben",
     eyebrow: "Strukturierte Produktion",
     tasks: withMinimumWritingWords(withGermanTaskCopy(writingTasks)),
     focus: ["Klarer Plan", "Passendes Register", "Konnektoren", "Grammatische Korrektheit"],
     advancement: ["Abstraktere Themen", "Hoehere Wortgrenzen", "Formelles Register", "Nuancierte Argumentation"],
   },
   speak: {
-    title: "Muendlicher Ausdruck",
+    title: "Sprechen",
     eyebrow: "Sprechen",
     tasks: withGermanTaskCopy(speakingTasks),
     focus: ["Aussprache", "Fluessigkeit", "Interaktion", "Gedanken ordnen"],

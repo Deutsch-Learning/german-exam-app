@@ -26,10 +26,10 @@ const moduleNames = {
     vocabulary: "Vocabulary",
   },
   de: {
-    read: "Leseverstehen",
+    read: "Lesen",
     listen: "Hörverstehen",
-    write: "Schriftlicher Ausdruck",
-    speak: "Mündlicher Ausdruck",
+    write: "Schreiben",
+    speak: "Sprechen",
     grammar: "Grammatik",
     vocabulary: "Wortschatz",
   },
@@ -691,9 +691,9 @@ const translations = {
       subscriptionIntro: "Schalten Sie alle Premium-Serien, vollständige Prüfungsmodule und strukturierte Korrekturen in einem klaren Vorbereitungsbereich frei.",
       subscriptionFeatures: [
         "Vollständige Tests unter realen Bedingungen mit Korrektur",
-        "Online-Tests für schriftlichen Ausdruck",
+        "Online-Tests für Schreiben",
         "Effektive Begleitung während der Vorbereitung",
-        "Online-Training für mündlichen Ausdruck",
+        "Online-Training für Sprechen",
       ],
       viewOffers: "Angebote ansehen",
       tryFree: "Kostenlos testen",
@@ -769,7 +769,7 @@ const translations = {
           text: "10 neue Simulationen zu Grammatik und Hörverstehen sind verfügbar.",
         },
         {
-          title: "Live-Workshop: schriftlicher Ausdruck",
+          title: "Live-Workshop: Schreiben",
           date: "April 2026",
           text: "Wöchentliches Webinar mit Textkorrektur und Prüfungsmethodik.",
         },
@@ -838,7 +838,7 @@ const translations = {
         },
         {
           id: "reading",
-          title: "Methode für das Leseverstehen",
+          title: "Methode für Lesen",
           topic: "Suchen, Schlussfolgern und Zeitmanagement",
           level: "B1-C1",
           minutes: "22 min",
@@ -851,7 +851,7 @@ const translations = {
         },
         {
           id: "writing",
-          title: "Strukturierter schriftlicher Ausdruck",
+          title: "Strukturiertes Schreiben",
           topic: "E-Mails, Aufsätze und Argumentation",
           level: "A2-C1",
           minutes: "25 min",
@@ -864,7 +864,7 @@ const translations = {
         },
         {
           id: "speaking",
-          title: "Mündlicher Ausdruck in der Prüfung",
+          title: "Sprechen in der Prüfung",
           topic: "Vorbereitung, Flüssigkeit und Rückfragen",
           level: "A1-C2",
           minutes: "20 min",
