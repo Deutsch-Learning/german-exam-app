@@ -56,7 +56,7 @@ const detectProvider = (text) => {
   const haystack = text.toLowerCase();
   const scores = [
     ["goethe", ["goethe-zertifikat", "goethe", "zertifikat b1"]],
-    ["osd", ["osd", "oesd", "ösd", "oesterreichisches sprachdiplom", "österreichisches sprachdiplom"]],
+    ["ösd", ["ösd", "öesd", "ösd", "öesterreichisches sprachdiplom", "österreichisches sprachdiplom"]],
     ["telc", ["telc"]],
     ["ecl", ["ecl"]],
     ["testdaf", ["testdaf"]],

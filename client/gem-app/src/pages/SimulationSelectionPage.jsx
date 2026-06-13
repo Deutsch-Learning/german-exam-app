@@ -47,6 +47,11 @@ const LoadingDots = () => (
   </span>
 );
 
+export const isTopicModule = (moduleId) => moduleId === "write" || moduleId === "speak";
+
+export const getModuleCountLabel = (moduleId, fallback = "Fragen") =>
+  isTopicModule(moduleId) ? "Themen" : fallback;
+
 export const OpenBookIcon = () => (
   <BookOpenCheck size={52} strokeWidth={1.8} />
 );
@@ -206,6 +211,7 @@ export const StartConfirmationModal = ({
   moduleType,
   questionCount,
   durationMinutes,
+  itemLabel = "Fragen",
   cancelLabel = "Abbrechen",
   startLabel = "Beginnen",
   busy = false,
@@ -216,6 +222,7 @@ export const StartConfirmationModal = ({
   const safeExamType = examType || examName || "diese Pruefung";
   const safeQuestionCount = Math.max(0, Math.round(Number(questionCount) || 0));
   const safeDuration = Math.max(0, Math.round(Number(durationMinutes) || 0));
+  const safeItemLabel = itemLabel || "Fragen";
 
   const handleCancel = () => {
     if (!busy) onCancel?.();
@@ -238,10 +245,10 @@ export const StartConfirmationModal = ({
         >
           <h2 id="start-confirm-title">Testbeginn</h2>
           <p id="start-confirm-description" className={styles.modalBody}>
-            Sie beginnen gleich einen Test im Modul {safeModuleType} fuer die Pruefung {safeExamType}. Er enthaelt {safeQuestionCount} Fragen und dauert genau {safeDuration} Minuten.
+            Sie beginnen gleich einen Test im Modul {safeModuleType} fuer die Pruefung {safeExamType}. Er enthaelt {safeQuestionCount} {safeItemLabel} und dauert genau {safeDuration} Minuten.
           </p>
           <p className={styles.modalBody}>
-            Lesen Sie die Fragen und Anweisungen sorgfaeltig, bevor Sie antworten.
+            Lesen Sie die {safeItemLabel} und Anweisungen sorgfaeltig, bevor Sie antworten.
           </p>
           <p className={styles.modalConfirmation}>SIND SIE BEREIT ZU BEGINNEN?</p>
           <div className={styles.modalActions}>
