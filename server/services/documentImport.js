@@ -118,10 +118,10 @@ const detectSectionType = (text) => {
   };
 
   [
-    ["read", ["leseverstehen", "prufungsteil: lesen", "prüfungsteil: lesen", " lesen ", "richtig/falsch"]],
+    ["read", ["leseverstehen", "prufungsteil: lesen", "prüfungsteil: lesen", " lesen ", "richtig/falsch", "compréhension écrite", "comprehension ecrite"]],
     ["listen", ["horverstehen", "hörverstehen", "hoeren", "hören", "audio", "transkript"]],
-    ["write", ["schreiben", "private e-mail", "diskussionsbeitrag", "musterloesung teil", "musterlösung teil"]],
-    ["speak", ["sprechen", "mundliche pruefung", "mündliche prüfung", "kandidat a", "gemeinsam planen"]],
+    ["write", ["schreiben", "schriftliche kommunikation", "expression écrite", "expression ecrite", "private e-mail", "diskussionsbeitrag", "musterloesung teil", "musterlösung teil"]],
+    ["speak", ["sprechen", "mündliche kommunikation", "mundliche kommunikation", "mündliche prüfung", "mundliche pruefung", "gelenktes gespräch", "gelenktes gesprach", "selbständige äußerung", "selbstandige ausserung", "kandidat a", "gemeinsam planen"]],
   ].forEach(([section, tokens]) => {
     tokens.forEach((token) => {
       if (haystack.includes(token)) scores[section] += 1;
@@ -896,6 +896,330 @@ const parseOsdSpeakingSeries = (text, metadata) => {
   });
 };
 
+const findEclCorrectionStart = (text) => {
+  const index = String(text ?? "").search(/CORRIG\S*\s+(?:OFFICIEL|COMPLET)/i);
+  return index >= 0 ? index : -1;
+};
+
+const normalizeEclSeriesTitle = (block, initialTitle) => {
+  const continuationLines = block.text
+    .slice(block.match[0].length)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const continuation = [];
+  for (const line of continuationLines) {
+    if (/^(Niveau|Durée|Dictionnaire|Points|Aufgabe|TEIL|Teil)\b/i.test(line)) break;
+    continuation.push(line);
+  }
+  return compactText([initialTitle, ...continuation].join(" "));
+};
+
+const stripEclResponseMarker = (value) =>
+  String(value ?? "").replace(/\n?\s*Votre réponse\s+—\s+Aufgabe\s+\d+[^\n]*/gi, "\n");
+
+const extractEclWordTarget = (value) => {
+  const match = String(value ?? "").match(/(?:ca\.|environ)\s*(\d+)\s*W\S*rter/i);
+  return match ? Number(match[1]) : null;
+};
+
+const parseEclReadingAnswerMap = (solutionText) => {
+  const answers = new Map();
+  const part1 = getBetweenMarkers(solutionText, /Aufgabe\s+1\b/i, [/Aufgabe\s+2\b/i]);
+  for (const match of part1.matchAll(/\bItem\s+(\d{1,2})\s+(R|F|NT)\b/gi)) {
+    answers.set(Number(match[1]), match[2].toUpperCase());
+  }
+
+  const part2 = getBetweenMarkers(solutionText, /Aufgabe\s+2\b/i, []);
+  for (const match of part2.matchAll(/\bItem\s+(\d{1,2})\s+([abc])\b/gi)) {
+    answers.set(10 + Number(match[1]), match[2].toLowerCase());
+  }
+  return answers;
+};
+
+const parseEclReadingAnswerKeys = (solutionText) => {
+  const blocks = splitByMatches(solutionText, /(?:^|\n)Sujet\s+0?(\d{1,2})\s+[-–—]\s*([^\n]+)/gi);
+  return new Map(
+    blocks.map((block) => [
+      Number(block.match[1]),
+      {
+        title: compactText(block.match[2]),
+        answers: parseEclReadingAnswerMap(block.text),
+      },
+    ])
+  );
+};
+
+const extractEclRfntQuestions = (partText, answerMap) => {
+  const questions = [];
+  const body = compactText(stripPdfPageMarkers(partText));
+  for (const match of body.matchAll(/(?:^|\n)\s*(\d{1,2})\s+(.+?)\s*n\s+n\s+n\s*(?=\n|$)/gi)) {
+    const position = Number(match[1]);
+    questions.push({
+      questionType: "multiple_choice",
+      prompt: trimForDb(match[2]),
+      options: [
+        { value: "R", label: "Richtig" },
+        { value: "F", label: "Falsch" },
+        { value: "NT", label: "Steht nicht im Text" },
+      ],
+      correctAnswer: answerMap.get(position) ? { value: answerMap.get(position) } : {},
+      explanation: null,
+      position,
+      scoring: { points: 1.25 },
+      metadata: { sourceQuestionNumber: position, eclPart: 1 },
+      sectionType: "read",
+    });
+  }
+  return questions;
+};
+
+const extractEclMultipleChoiceQuestions = (partText, answerMap, offset, eclPart) => {
+  const questions = [];
+  const body = compactText(stripPdfPageMarkers(partText));
+  const blocks = splitByMatches(body, /(?:^|\n)\s*(\d{1,2})\.\s+/g);
+  for (const block of blocks) {
+    const sourceNumber = Number(block.match[1]);
+    const raw = block.text.slice(block.match[0].length).trim();
+    const optionStart = raw.search(/(?:^|\n)\s*n?\s*a\)/i);
+    if (optionStart < 0) continue;
+    const prompt = raw.slice(0, optionStart).trim();
+    const optionsText = raw.slice(optionStart);
+    const options = [...optionsText.matchAll(/(?:^|\n)\s*n?\s*([abc])\)\s*([\s\S]*?)(?=\n\s*n?\s*[abc]\)|$)/gi)]
+      .map((optionMatch) => ({
+        value: optionMatch[1].toLowerCase(),
+        label: compactText(optionMatch[2]),
+      }))
+      .filter((option) => option.label);
+    if (options.length < 2) continue;
+    const position = offset + sourceNumber;
+    questions.push({
+      questionType: "multiple_choice",
+      prompt: trimForDb(compactText(prompt)),
+      options,
+      correctAnswer: answerMap.get(position) ? { value: answerMap.get(position) } : {},
+      explanation: null,
+      position,
+      scoring: { points: 1.25 },
+      metadata: { sourceQuestionNumber: sourceNumber, eclPart },
+      sectionType: "read",
+    });
+  }
+  return questions;
+};
+
+const parseEclReadingSeries = (text, metadata) => {
+  const clean = stripPdfPageMarkers(text);
+  const correctionStart = findEclCorrectionStart(clean);
+  const taskText = correctionStart >= 0 ? clean.slice(0, correctionStart) : clean;
+  const solutionText = correctionStart >= 0 ? clean.slice(correctionStart) : "";
+  const answerKey = parseEclReadingAnswerKeys(solutionText);
+  const blocks = splitByMatches(taskText, /(?:^|\n)Sujet\s+0?(\d{1,2})\s+[-–—]\s*([^\n]+)/gi);
+
+  return blocks.map((block) => {
+    const seriesNumber = Number(block.match[1]);
+    const title = normalizeEclSeriesTitle(block, block.match[2]) || `Sujet ${String(seriesNumber).padStart(2, "0")}`;
+    const answers = answerKey.get(seriesNumber)?.answers || new Map();
+    const partMatches = [...block.text.matchAll(/(?:^|\n)Aufgabe\s+([12])\s+[-–—]\s*([^\n]+)/gi)];
+    const sections = partMatches.map((match, index) => {
+      const next = partMatches[index + 1];
+      const partNumber = Number(match[1]);
+      const body = block.text.slice(match.index + match[0].length, next ? next.index : block.text.length);
+      const questions =
+        partNumber === 1
+          ? extractEclRfntQuestions(body, answers)
+          : extractEclMultipleChoiceQuestions(body, answers, 10, 2);
+      return {
+        sectionType: "read",
+        partNumber,
+        title: `Aufgabe ${partNumber}: ${compactText(match[2])}`,
+        instructions: trimForDb([compactText(match[0]), body].join("\n"), 8000),
+        durationMinutes: partNumber === 1 ? 18 : 17,
+        points: partNumber === 1 ? 13 : 12,
+        scoring: { points: partNumber === 1 ? 12.5 : 12.5, durationMinutes: partNumber === 1 ? 18 : 17 },
+        metadata: { sourceHeader: compactText(match[2]), eclFormat: true },
+        questions,
+      };
+    });
+    return {
+      seriesNumber,
+      title,
+      sourceLabel: `Sujet ${String(seriesNumber).padStart(2, "0")}`,
+      instructions: "ECL B1 Leseverstehen: zwei Leseteile, 35 Minuten, 25 Punkte.",
+      scoring: { totalPoints: 25, parts: { 1: 12.5, 2: 12.5 } },
+      metadata: { ...metadata, eclFormat: true, answerKeyDetected: answers.size > 0 },
+      sections,
+    };
+  });
+};
+
+const parseEclWritingSolutionBody = (body) => {
+  const clean = compactText(body);
+  const criteriaIndex = clean.search(/(?:^|\n)\s*3\s+/);
+  const sampleAnswer = criteriaIndex >= 0 ? clean.slice(0, criteriaIndex).trim() : clean;
+  const criteria = criteriaIndex >= 0 ? clean.slice(criteriaIndex).replace(/(?:^|\n)\s*3\s+/g, "\n- ").trim() : "";
+  return {
+    sampleAnswer,
+    criteria,
+  };
+};
+
+const parseEclWritingSolutions = (solutionText) => {
+  const seriesBlocks = splitByMatches(solutionText, /(?:^|\n)Sujet\s+0?(\d{1,2})\s+[-–—]\s*([^\n]+)/gi);
+  return new Map(
+    seriesBlocks.map((seriesBlock) => {
+      const parts = new Map();
+      const partBlocks = splitByMatches(seriesBlock.text, /(?:^|\n)Aufgabe\s+([12])\s+[-–—]\s*([^\n]+)/gi);
+      partBlocks.forEach((partBlock) => {
+        const body = partBlock.text.slice(partBlock.match[0].length);
+        parts.set(Number(partBlock.match[1]), {
+          title: compactText(partBlock.match[2]),
+          ...parseEclWritingSolutionBody(body),
+        });
+      });
+      return [Number(seriesBlock.match[1]), parts];
+    })
+  );
+};
+
+const getEclWritingQuestionType = (title) =>
+  /forum|blog|leserbrief|kommentar|beitrag|artikel|bewertung/i.test(title) ? "writing_forum_post" : "writing_email";
+
+const parseEclWritingSeries = (text, metadata) => {
+  const clean = stripPdfPageMarkers(text);
+  const correctionStart = findEclCorrectionStart(clean);
+  const taskText = correctionStart >= 0 ? clean.slice(0, correctionStart) : clean;
+  const solutionText = correctionStart >= 0 ? clean.slice(correctionStart) : "";
+  const solutionMap = parseEclWritingSolutions(solutionText);
+  const blocks = splitByMatches(taskText, /(?:^|\n)Sujet\s+0?(\d{1,2})\s+[-–—]\s*([^\n]+)/gi);
+
+  return blocks.map((block) => {
+    const seriesNumber = Number(block.match[1]);
+    const title = normalizeEclSeriesTitle(block, block.match[2]) || `Sujet ${String(seriesNumber).padStart(2, "0")}`;
+    const solutions = solutionMap.get(seriesNumber) || new Map();
+    const partMatches = [...block.text.matchAll(/(?:^|\n)Aufgabe\s+([12])\s+[-–—]\s*([^\n]+)/gi)];
+    const sections = partMatches.map((match, index) => {
+      const next = partMatches[index + 1];
+      const partNumber = Number(match[1]);
+      const header = compactText(match[2]);
+      const body = stripEclResponseMarker(block.text.slice(match.index + match[0].length, next ? next.index : block.text.length));
+      const solution = solutions.get(partNumber) || {};
+      const durationMinutes = 20;
+      const correctAnswer = {};
+      if (solution.sampleAnswer) correctAnswer.sampleAnswer = solution.sampleAnswer;
+      if (solution.criteria) correctAnswer.expectedPerformance = solution.criteria;
+      return {
+        sectionType: "write",
+        partNumber,
+        title: `Aufgabe ${partNumber}: ${header}`,
+        instructions: trimForDb(body, 4000),
+        durationMinutes,
+        points: null,
+        scoring: { durationMinutes, totalPoints: 25 },
+        metadata: { sourceHeader: header, eclFormat: true },
+        questions: [
+          {
+            questionType: getEclWritingQuestionType(header),
+            prompt: trimForDb([compactText(match[0]), body].join("\n")),
+            options: [],
+            correctAnswer,
+            explanation: solution.criteria || solution.sampleAnswer || null,
+            position: partNumber,
+            scoring: { durationMinutes, totalPoints: 25 },
+            metadata: { wordTarget: extractEclWordTarget(body) || 100, eclPart: partNumber },
+            sectionType: "write",
+          },
+        ],
+      };
+    });
+    return {
+      seriesNumber,
+      title,
+      sourceLabel: `Sujet ${String(seriesNumber).padStart(2, "0")}`,
+      instructions: "ECL B1 Schriftliche Kommunikation: zwei Schreibaufgaben, 40 Minuten, 25 Punkte.",
+      scoring: { totalPoints: 25, parts: { 1: null, 2: null } },
+      metadata: { ...metadata, eclFormat: true },
+      sections,
+    };
+  });
+};
+
+const parseEclSpeakingSolutions = (solutionText) => {
+  const seriesBlocks = splitByMatches(solutionText, /(?:^|\n)Kombination\s+0?(\d{1,2})\s+[-–—]\s*([^\n]+)/gi);
+  return new Map(
+    seriesBlocks.map((seriesBlock) => {
+      const parts = new Map();
+      const part2 = getBetweenMarkers(seriesBlock.text, /Teil\s+2\b/i, [/Teil\s+3\b/i]);
+      const part3 = getBetweenMarkers(seriesBlock.text, /Teil\s+3\b/i, []);
+      if (part2) parts.set(2, compactText(part2.replace(/^Teil\s+2[^\n]*\n?/i, "")));
+      if (part3) parts.set(3, compactText(part3.replace(/^Teil\s+3[^\n]*\n?/i, "")));
+      return [Number(seriesBlock.match[1]), parts];
+    })
+  );
+};
+
+const parseEclSpeakingSeries = (text, metadata) => {
+  const clean = stripPdfPageMarkers(text);
+  const correctionStart = findEclCorrectionStart(clean);
+  const taskText = correctionStart >= 0 ? clean.slice(0, correctionStart) : clean;
+  const solutionText = correctionStart >= 0 ? clean.slice(correctionStart) : "";
+  const solutionMap = parseEclSpeakingSolutions(solutionText);
+  const blocks = splitByMatches(taskText, /(?:^|\n)Kombination\s+0?(\d{1,2})\s+[-–—]\s*([^\n]+)/gi);
+  const questionTypes = {
+    1: "speaking_intro",
+    2: "speaking_guided_conversation",
+    3: "speaking_monologue",
+  };
+
+  return blocks.map((block) => {
+    const seriesNumber = Number(block.match[1]);
+    const title = normalizeEclSeriesTitle(block, block.match[2]) || `Kombination ${String(seriesNumber).padStart(2, "0")}`;
+    const solutions = solutionMap.get(seriesNumber) || new Map();
+    const partMatches = [...block.text.matchAll(/(?:^|\n)TEIL\s+([123])\s+[-–—]\s*([^\n]+)/gi)];
+    const sections = partMatches.map((match, index) => {
+      const next = partMatches[index + 1];
+      const partNumber = Number(match[1]);
+      const header = compactText(match[2]);
+      const body = block.text.slice(match.index + match[0].length, next ? next.index : block.text.length);
+      const durationMinutes = extractDurationMinutes(header) || (partNumber === 1 ? 2 : 8);
+      const solution = solutions.get(partNumber) || "";
+      const correctAnswer = solution ? { expectedPerformance: solution } : {};
+      return {
+        sectionType: "speak",
+        partNumber,
+        title: `Teil ${partNumber}: ${header.split("·")[0].trim() || "Sprechen"}`,
+        instructions: trimForDb(body, 5000),
+        durationMinutes,
+        points: null,
+        scoring: { durationMinutes, totalPoints: 25 },
+        metadata: { sourceHeader: header, eclFormat: true, evaluated: partNumber > 1 },
+        questions: [
+          {
+            questionType: questionTypes[partNumber] || "speaking_prompt",
+            prompt: trimForDb([compactText(match[0]), body].join("\n")),
+            options: [],
+            correctAnswer,
+            explanation: solution || null,
+            position: partNumber,
+            scoring: { durationMinutes, totalPoints: 25 },
+            metadata: { eclPart: partNumber, evaluated: partNumber > 1 },
+            sectionType: "speak",
+          },
+        ],
+      };
+    });
+    return {
+      seriesNumber,
+      title,
+      sourceLabel: `Kombination ${String(seriesNumber).padStart(2, "0")}`,
+      instructions: "ECL B1 Mündliche Kommunikation: Vorstellung, gelenktes Gespräch und selbständige Äußerung.",
+      scoring: { totalPoints: 25, parts: { 1: null, 2: null, 3: null } },
+      metadata: { ...metadata, eclFormat: true },
+      sections,
+    };
+  });
+};
+
 const parseGenericSeries = (text, metadata) => [
   {
     seriesNumber: 1,
@@ -923,6 +1247,20 @@ const parseGenericSeries = (text, metadata) => [
 const parseStructuredContent = (text, metadata) => {
   const provider = normalizeDetectedProvider(metadata.provider);
   const hasOsdSujets = /(?:^|\n)SUJET\s+0?\d{1,2}\b/i.test(text);
+  const hasEclSujets = /(?:^|\n)Sujet\s+0?\d{1,2}\s+[-–—]/i.test(text);
+  const hasEclCombinations = /(?:^|\n)Kombination\s+0?\d{1,2}\s+[-–—]/i.test(text);
+  if ((provider === "ecl" || hasEclSujets) && metadata.sectionType === "read") {
+    const series = parseEclReadingSeries(text, metadata);
+    if (series.length) return series;
+  }
+  if ((provider === "ecl" || hasEclSujets) && metadata.sectionType === "write") {
+    const series = parseEclWritingSeries(text, metadata);
+    if (series.length) return series;
+  }
+  if ((provider === "ecl" || hasEclCombinations) && metadata.sectionType === "speak") {
+    const series = parseEclSpeakingSeries(text, metadata);
+    if (series.length) return series;
+  }
   if ((provider === "osd" || hasOsdSujets) && metadata.sectionType === "read") {
     const series = parseOsdReadingSeries(text, metadata);
     if (series.length) return series;
