@@ -36,6 +36,7 @@ import {
   XCircle,
 } from "lucide-react";
 import API from "../services/api";
+import { clearDashboardCache } from "../services/dashboard";
 import styles from "./SimulationModulePage.module.css";
 import logo from "../assets/images/logo.png";
 import speakingImage from "../assets/images/active_people.png";
@@ -56,7 +57,7 @@ import {
 } from "../utils/audio";
 import NotFoundPage from "./NotFoundPage";
 import ComingSoonPage from "./ComingSoonPage";
-import { getModuleCountLabel, isTopicModule } from "./SimulationSelectionPage";
+import { getModuleCountLabel, isTopicModule } from "../utils/moduleLabels";
 
 const LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"];
 const PASS_SCORE = 70;
@@ -2006,6 +2007,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const recordingSecondsRef = useRef(0);
   const recordingTaskIndexRef = useRef(0);
   const fallbackRecordingRef = useRef(false);
+  const levelActivityKeyRef = useRef("");
 
   const currentTask = module.tasks[Math.min(currentIndex, totalTasks - 1)];
   const currentAnswer = answers[currentIndex];
@@ -2029,7 +2031,19 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const progressPercent = totalTasks ? ((answeredCount / totalTasks) * 100).toFixed(1) : "0";
   const score = calculateModuleScore(module, answers);
   const currentAnswered = getTaskAnswered(module, currentTask, currentAnswer);
-  const level = currentTask?.level ?? "A1";
+  const level = selectedSeries?.level ?? currentTask?.level ?? "A1";
+
+  useEffect(() => {
+    if (!auth?.id || !level) return;
+    const key = `${auth.id}:${progressScopeId}:${module.id}:${level}`;
+    if (levelActivityKeyRef.current === key) return;
+    levelActivityKeyRef.current = key;
+    API.post("/api/user/level-activity", { level }).then(() => {
+      clearDashboardCache();
+    }).catch(() => {
+      // Starting-level tracking is helpful but should never block an exercise.
+    });
+  }, [auth?.id, level, module.id, progressScopeId]);
   const audioAtSessionEnd = module.id === "listen" && audioTimestamp >= currentAudioDuration;
   const audioReplayBlocked = module.id === "listen" && replaysUsed >= AUDIO_REPLAY_LIMIT && (!audioSessionActive || audioAtSessionEnd);
 
@@ -2180,6 +2194,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             durationSeconds: elapsedSeconds,
           }
         );
+        clearDashboardCache();
         let correction = response.data?.writingCorrection ?? null;
         if (isWritingModule) {
           const simulationId = response.data?.simulation?.id;
@@ -4246,7 +4261,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           onClick={() => navigate(loggedIn ? "/dashboard" : "/")}
           aria-label="Zurueck"
         >
-          <img src={logo} alt="Deutsch Lernen" />
+          <img src={logo} alt="Deutsch Prüfungen" />
         </button>
         <div className={styles.navActions}>
           {!loggedIn ? (

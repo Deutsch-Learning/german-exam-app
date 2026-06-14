@@ -47,11 +47,6 @@ const LoadingDots = () => (
   </span>
 );
 
-export const isTopicModule = (moduleId) => moduleId === "write" || moduleId === "speak";
-
-export const getModuleCountLabel = (moduleId, fallback = "Fragen") =>
-  isTopicModule(moduleId) ? "Themen" : fallback;
-
 export const OpenBookIcon = () => (
   <BookOpenCheck size={52} strokeWidth={1.8} />
 );
@@ -69,7 +64,7 @@ export const SimulationTopNav = ({ onGoHome, onGoAbout, onGoProfile, onGoDashboa
       <div className={styles.navLeft}>
         <img
           src={logo}
-          alt="Deutsch Lernen Logo"
+          alt="Deutsch Prüfungen Logo"
           className={styles.logo}
           onClick={loggedIn ? onGoDashboard : onGoHome}
           style={{ cursor: "pointer" }}

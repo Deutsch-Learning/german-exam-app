@@ -38,7 +38,7 @@ export default function Footer() {
           <span>Deutsch</span> Prüfung
         </div>
         <div className="footer-bottom">
-          <p>Copyright &copy; 2026- Deutsch Prüfung. All rights reserved.</p>
+          <p>Copyright &copy; 2026- Deutsch Prüfungen. All rights reserved.</p>
           <div className="footer-socials" aria-label="Social media">
             {socialLinks.map((item) => (
               <a key={item.id} href={item.href} aria-label={item.label} target="_blank" rel="noreferrer">

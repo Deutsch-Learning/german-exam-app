@@ -102,7 +102,7 @@ export default function RegisterPage() {
         <div className="brand-content">
           <div className="brand-logo-placeholder">
             <img src={logo} alt="" width={32} height={32} />
-            <span>Deutsch Learning</span>
+            <span>Deutsch Prüfungen</span>
           </div>
           <div className="brand-text">
             <h2>{t.auth.registerBrandTitle}</h2>

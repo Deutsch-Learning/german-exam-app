@@ -96,8 +96,8 @@ function AppRoutes() {
     <MotionShell>
       <Suspense fallback={<RouteFallback />}>
       <Routes location={location}>
-        <Route path="/" element={<PublicOnlyRoute><Landing /></PublicOnlyRoute>} />
-        <Route path="/landing" element={<PublicOnlyRoute><Landing /></PublicOnlyRoute>} />
+        <Route path="/" element={<Landing />} />
+        <Route path="/landing" element={<Landing />} />
         <Route path="/login" element={<PublicOnlyRoute><LoginPage /></PublicOnlyRoute>} />
         <Route path="/register" element={<PublicOnlyRoute><RegisterPage /></PublicOnlyRoute>} />
         <Route path="/verify-email" element={<VerifyEmailPage />} />

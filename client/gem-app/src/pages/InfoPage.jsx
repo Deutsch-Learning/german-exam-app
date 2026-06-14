@@ -71,7 +71,7 @@ export default function InfoPage({ type }) {
         <div className="simple-topbar">
           <Link className="simple-logo" to="/">
             <img src={logo} alt="" />
-            Deutsch Learning
+            Deutsch Prüfungen
           </Link>
           <Link className="simple-home-link" to="/">
             Home

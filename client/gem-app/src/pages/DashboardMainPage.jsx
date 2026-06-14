@@ -103,7 +103,7 @@ const TopNav = ({ onToggleMenu, onGoDashboard, onGoProfile, onGoActualites, onGo
     <nav className={styles.topNav}>
       <div className={styles.navLeft}>
         <button className={styles.mobileMenuBtn} onClick={onToggleMenu} type="button"><MenuIcon /></button>
-        <img src={logo} alt="Deutsch Lernen" className={styles.logo} />
+        <img src={logo} alt="Deutsch Prüfungen" className={styles.logo} />
       </div>
       <div className={styles.navLinks}>
         <button type="button" className={styles.linkBtn} onClick={onGoDashboard}>{labels.dashboard}</button>
@@ -169,7 +169,7 @@ const Sidebar = ({ isOpen, onClose, onGoProfile, onGoSimulations, onGoProgress, 
 
 const ProgressCard = ({ progress, labels }) => {
   const percent = progress?.percent ?? 0;
-  const level = progress?.currentLevel ?? "B2";
+  const level = progress?.currentLevel ?? "Not specified";
   return (
     <div className={styles.card}>
       <h3 className={styles.cardTitle}>{labels.certificationProgress}</h3>
@@ -181,7 +181,7 @@ const ProgressCard = ({ progress, labels }) => {
         </svg>
       </div>
       <div className={styles.legendContainer}>
-        <div className={styles.legendItem}><div className={styles.legendBox} style={{ backgroundColor: "#facc15" }} /><span>{labels.currentLevel} {level}</span></div>
+        <div className={styles.legendItem}><div className={styles.legendBox} style={{ backgroundColor: "#facc15" }} /><span>Level: {level}</span></div>
         <div className={styles.legendItem}><div className={styles.legendBox} style={{ backgroundColor: "#e5e7eb" }} /><span>{labels.target}</span></div>
       </div>
     </div>

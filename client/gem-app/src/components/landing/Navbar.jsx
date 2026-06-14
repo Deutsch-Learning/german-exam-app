@@ -3,13 +3,18 @@ import { Link } from "react-router-dom";
 import { ChevronDown, Menu, X } from "lucide-react";
 import { aboutTestSections, pageLinks } from "../../data/siteContent";
 import { languageOptions } from "../../utils/language";
-import { isLoggedIn } from "../../utils/access";
+import { getAuthUser, isLoggedIn } from "../../utils/access";
 
 export default function Navbar({ logo, language = "fr", onChangeLanguage, labels }) {
   const [openLang, setOpenLang] = useState(false);
   const [openDropdown, setOpenDropdown] = useState("");
   const [mobileOpen, setMobileOpen] = useState(false);
   const loggedIn = isLoggedIn();
+  const authUser = getAuthUser();
+  const userName = [
+    authUser?.first_name,
+    authUser?.last_name,
+  ].filter(Boolean).join(" ").trim() || authUser?.username || authUser?.email || "User";
 
   const selected = useMemo(
     () => languageOptions.find((item) => item.id === language) ?? languageOptions[0],
@@ -94,7 +99,7 @@ export default function Navbar({ logo, language = "fr", onChangeLanguage, labels
     <>
       <header className={`top-nav ${mobileOpen ? "menu-open" : ""}`}>
         <div className="container nav-container">
-          <Link className="logo" to="/" aria-label="Deutsch Learning home">
+          <Link className="logo" to="/" aria-label="Deutsch Prüfungen home" onClick={closeMenus}>
             <img src={logo} alt="Logo" />
           </Link>
           <button
@@ -146,9 +151,14 @@ export default function Navbar({ logo, language = "fr", onChangeLanguage, labels
             </div>
             <div className="auth-nav-actions">
               {loggedIn ? (
-                <Link className="btn-register-nav" to="/dashboard" onClick={closeMenus}>
-                  {labels.dashboard ?? "Dashboard"}
-                </Link>
+                <>
+                  <span className="nav-user-name" title={userName}>
+                    {userName}
+                  </span>
+                  <Link className="btn-register-nav" to="/dashboard" onClick={closeMenus}>
+                    {labels.returnToDashboard ?? "Return to Dashboard"}
+                  </Link>
+                </>
               ) : (
                 <>
                   <Link className="btn-login" to="/login" onClick={closeMenus}>

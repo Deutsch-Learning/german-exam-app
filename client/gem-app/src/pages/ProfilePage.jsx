@@ -165,8 +165,8 @@ export default function ProfilePage() {
     return {
       testsCompleted,
       avgScore,
-      currentLevel: progress.currentLevel ?? "B2",
-      targetLevel: progress.targetLevel ?? "C1",
+      currentLevel: progress.currentLevel ?? "Not specified",
+      targetLevel: progress.targetLevel ?? null,
       progressPercent: Number(progress.percent ?? progress.percentage ?? 0),
       totalTime: formatMinutes(totalSeconds),
       inProgress,

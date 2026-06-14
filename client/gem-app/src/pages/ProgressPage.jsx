@@ -6,7 +6,13 @@ import API from "../services/api";
 
 export default function ProgressPage() {
   const { t } = useLanguage();
-  const [progress, setProgress] = useState({ completed: 0, total: 0, percentage: 0 });
+  const [progress, setProgress] = useState({
+    completed: 0,
+    total: 0,
+    percentage: 0,
+    currentLevel: "Not specified",
+    targetLevel: null,
+  });
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -19,6 +25,8 @@ export default function ProgressPage() {
           completed: Number(res.data?.completed ?? 0),
           total: Number(res.data?.total ?? 0),
           percentage: Number(res.data?.percentage ?? 0),
+          currentLevel: res.data?.currentLevel ?? "Not specified",
+          targetLevel: res.data?.targetLevel ?? null,
         });
       })
       .catch(() => {
@@ -56,6 +64,8 @@ export default function ProgressPage() {
           <p className={styles.meta}>
             {progress.completed}/{progress.total} exams completed
           </p>
+          <p className={styles.meta}>Level: {progress.currentLevel}</p>
+          {progress.targetLevel ? <p className={styles.meta}>Target: {progress.targetLevel}</p> : null}
         </article>
       </div>
     </div>
