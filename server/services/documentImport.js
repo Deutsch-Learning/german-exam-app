@@ -5,7 +5,6 @@ const path = require("path");
 const { execFile } = require("child_process");
 const { promisify } = require("util");
 const mammoth = require("mammoth");
-const { PDFParse } = require("pdf-parse");
 
 const execFileAsync = promisify(execFile);
 
@@ -572,6 +571,7 @@ const extractDocumentText = async ({ buffer, filename, mimetype }) => {
       warnings.push(...result.messages.map((message) => String(message.message || message)));
     }
   } else if (extension === "pdf" || mime.includes("pdf")) {
+    const { PDFParse } = require("pdf-parse");
     const parser = new PDFParse({ data: buffer });
     try {
       const result = await parser.getText({

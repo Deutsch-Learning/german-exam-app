@@ -1,8 +1,20 @@
 const { app, ensureSchema } = require("../server/server");
 
+let schemaReadyPromise;
+
+const ensureSchemaOnce = () => {
+  if (!schemaReadyPromise) {
+    schemaReadyPromise = ensureSchema().catch((err) => {
+      schemaReadyPromise = undefined;
+      throw err;
+    });
+  }
+  return schemaReadyPromise;
+};
+
 module.exports = async function handler(req, res) {
   try {
-    await ensureSchema();
+    await ensureSchemaOnce();
     return app(req, res);
   } catch (err) {
     console.error("API handler failed", err);

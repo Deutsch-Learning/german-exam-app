@@ -1,6 +1,6 @@
 const crypto = require("crypto");
 const path = require("path");
-require("dotenv").config({ path: path.join(__dirname, ".env") });
+require("dotenv").config({ path: path.join(__dirname, ".env"), quiet: true });
 const express = require("express");
 const multer = require("multer");
 const pool = require("./db");
