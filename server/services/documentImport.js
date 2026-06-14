@@ -33,6 +33,15 @@ const compactText = (value) =>
     .join("\n")
     .trim();
 
+const foldForSearch = (value) =>
+  String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+const stripPdfPageMarkers = (value) =>
+  String(value ?? "").replace(/\n?\s*---\s*PAGE\s+\d+\s*\/\s*\d+\s*---\s*\n?/gi, "\n");
+
 const slugify = (value) =>
   String(value ?? "")
     .normalize("NFD")
@@ -51,11 +60,29 @@ const parseNumber = (value) => {
   return Number.isFinite(n) ? n : null;
 };
 
+const normalizeDetectedProvider = (value) => {
+  const normalized = slugify(
+    String(value ?? "")
+      .replace(/Ã¶|Ã–|ã¶|ã–/g, "o")
+      .replace(/Ã¶sterreichisch|Ã–sterreichisch|ã¶sterreichisch|ã–sterreichisch/gi, "osterreichisch")
+  );
+  if (normalized.includes("goethe")) return "goethe";
+  if (normalized.includes("osd") || normalized.includes("oesd")) return "osd";
+  if (normalized.includes("testdaf")) return "testdaf";
+  if (normalized.includes("telc")) return "telc";
+  if (normalized.includes("ecl")) return "ecl";
+  if (normalized.includes("dsh")) return "dsh";
+  if (normalized.includes("delf")) return "delf";
+  if (normalized.includes("dalf")) return "dalf";
+  return normalized || "custom";
+};
+
 const detectProvider = (text) => {
-  const haystack = text.toLowerCase();
+  const rawHaystack = String(text ?? "").toLowerCase();
+  const haystack = foldForSearch(text);
   const scores = [
     ["goethe", ["goethe-zertifikat", "goethe", "zertifikat b1"]],
-    ["ösd", ["ösd", "öesd", "ösd", "öesterreichisches sprachdiplom", "österreichisches sprachdiplom"]],
+    ["osd", ["osd", "oesd", "ösd", "österreichisches sprachdiplom", "osterreichisches sprachdiplom", "Ã¶sd"]],
     ["telc", ["telc"]],
     ["ecl", ["ecl"]],
     ["testdaf", ["testdaf"]],
@@ -64,10 +91,14 @@ const detectProvider = (text) => {
     ["dalf", ["dalf"]],
   ].map(([provider, tokens]) => ({
     provider,
-    score: tokens.reduce((sum, token) => sum + (haystack.includes(token) ? 1 : 0), 0),
+    score: tokens.reduce((sum, token) => {
+      const rawToken = String(token).toLowerCase();
+      const foldedToken = foldForSearch(token);
+      return sum + (haystack.includes(foldedToken) || rawHaystack.includes(rawToken) ? 1 : 0);
+    }, 0),
   }));
   scores.sort((a, b) => b.score - a.score);
-  return scores[0]?.score > 0 ? scores[0].provider : "custom";
+  return normalizeDetectedProvider(scores[0]?.score > 0 ? scores[0].provider : "custom");
 };
 
 const detectLevel = (text) => {
@@ -105,6 +136,7 @@ const detectSectionType = (text) => {
 const detectExamType = (text, provider, level) => {
   const firstLines = compactText(text).split("\n").slice(0, 8).join(" ");
   if (provider === "goethe" && level) return `Goethe-Zertifikat ${level}`;
+  if (provider === "osd" && level) return `ÖSD Zertifikat ${level}`;
   if (provider === "testdaf") return "TestDaF";
   if (provider === "telc" && level) return `telc Deutsch ${level}`;
   if (provider === "ecl" && level) return `ECL Deutsch ${level}`;
@@ -503,6 +535,367 @@ const parseReadingSeries = (text, metadata) => {
   });
 };
 
+const extractOsdHeaderTitle = (header, marker = "") => {
+  let title = compactText(header)
+    .replace(/^SUJET\s+0?\d+\b/i, "")
+    .trim();
+  if (marker) {
+    title = title.replace(new RegExp(`^.*?\\b${marker}\\b`, "i"), "").trim();
+  }
+  return title.replace(/^[\s|:;.,\-–—]+/g, "").trim();
+};
+
+const extractOsdPartHeader = (header) =>
+  compactText(header)
+    .replace(/^TEIL\s+\d+\b/i, "")
+    .replace(/^[\s|:;.,\-–—]+/g, "")
+    .trim();
+
+const extractWordTarget = (value) => {
+  const match = String(value ?? "").match(/ca\.\s*(\d+)\s*W\S*rter/i);
+  return match ? Number(match[1]) : null;
+};
+
+const getOsdPartText = (text, partNumber) => {
+  const endMarkers = partNumber < 5 ? [new RegExp(`TEIL\\s+${partNumber + 1}\\b`, "i")] : [];
+  return getBetweenMarkers(text, new RegExp(`TEIL\\s+${partNumber}\\b`, "i"), endMarkers);
+};
+
+const normalizeOsdMcValue = (value) => String(value ?? "").trim().slice(0, 1).toLowerCase();
+
+const parseOsdReadingAnswerMap = (solutionText) => {
+  const answers = new Map();
+  const part1 = compactText(getOsdPartText(solutionText, 1));
+  part1.split("\n").forEach((line) => {
+    const match = line.match(/^(\d{1,2})\s+.+\s+(Richtig|Falsch)$/i);
+    if (match) answers.set(Number(match[1]), match[2]);
+  });
+
+  const part2 = getOsdPartText(solutionText, 2);
+  for (const match of part2.matchAll(/\bQ\s*(\d{1,2})\s*:\s*([ABC])/gi)) {
+    answers.set(6 + Number(match[1]), normalizeOsdMcValue(match[2]));
+  }
+
+  const part3 = getOsdPartText(solutionText, 3);
+  for (const match of part3.matchAll(/\bSit\.\s*(\d{1,2})\s*:\s*([A-JX])/gi)) {
+    answers.set(12 + Number(match[1]), normalizeOsdMcValue(match[2]));
+  }
+
+  const part4 = compactText(getOsdPartText(solutionText, 4));
+  part4.split("\n").forEach((line) => {
+    const match = line.match(/^(\d{1,2})\s+Brief\s+\d+\b.+\s+(Daf\S*r|Dagegen|Beides)$/i);
+    if (match) answers.set(19 + Number(match[1]), compactText(match[2]));
+  });
+
+  const part5 = getOsdPartText(solutionText, 5);
+  for (const match of part5.matchAll(/\bQ\s*(\d{1,2})\s*:\s*([ABC])/gi)) {
+    answers.set(26 + Number(match[1]), normalizeOsdMcValue(match[2]));
+  }
+
+  return answers;
+};
+
+const extractOsdTrueFalseQuestions = (partText, answerMap) => {
+  const questions = [];
+  const body = compactText(stripPdfPageMarkers(partText));
+  for (const match of body.matchAll(/(?:^|\n)\s*(\d{1,2})\s+(.+?)\s+n\s+n\s*(?=\n|$)/gi)) {
+    const position = Number(match[1]);
+    questions.push({
+      questionType: "true_false",
+      prompt: trimForDb(match[2]),
+      options: [{ value: "Richtig", label: "Richtig" }, { value: "Falsch", label: "Falsch" }],
+      correctAnswer: answerMap.get(position) ? { value: answerMap.get(position) } : {},
+      explanation: null,
+      position,
+      scoring: { points: 1 },
+      metadata: { sourceQuestionNumber: position, osdPart: 1 },
+      sectionType: "read",
+    });
+  }
+  return questions;
+};
+
+const extractOsdMultipleChoiceQuestions = (partText, answerMap, offset, osdPart) => {
+  const questions = [];
+  const body = compactText(stripPdfPageMarkers(partText));
+  const questionRegex = /(?:^|\n)\s*(\d{1,2})\.\s*([^\n]+(?:\n(?!\s*(?:[abc]\)|\d{1,2}\.|TEIL\s+\d))[^\n]+)*)\n\s*a\)\s*([\s\S]*?)(?=\n\s*\d{1,2}\.\s|\n\s*TEIL\s+\d|$)/gi;
+  for (const match of body.matchAll(questionRegex)) {
+    const sourceNumber = Number(match[1]);
+    const fullQuestion = match[0];
+    const options = [...fullQuestion.matchAll(/(?:^|\n)\s*([abc])\)\s*([^\n]+(?:\n(?!\s*[abc]\)|\s*\d{1,2}\.)[^\n]+)*)/gi)].map(
+      (optionMatch) => ({
+        value: optionMatch[1].toLowerCase(),
+        label: compactText(optionMatch[2]),
+      })
+    );
+    if (options.length < 2) continue;
+    const position = offset + sourceNumber;
+    questions.push({
+      questionType: "multiple_choice",
+      prompt: trimForDb(compactText(match[2])),
+      options,
+      correctAnswer: answerMap.get(position) ? { value: answerMap.get(position) } : {},
+      explanation: null,
+      position,
+      scoring: { points: 1 },
+      metadata: { sourceQuestionNumber: sourceNumber, osdPart },
+      sectionType: "read",
+    });
+  }
+  return questions;
+};
+
+const extractOsdMatchingOptions = (partText) => {
+  const clean = compactText(stripPdfPageMarkers(partText));
+  const AnzeigenIndex = clean.search(/(?:^|\n)Anzeigen\s*\([A-J]/i);
+  if (AnzeigenIndex < 0) return [];
+  const optionText = clean.slice(AnzeigenIndex);
+  return [...optionText.matchAll(/(?:^|\n)\s*([A-J])\s+([\s\S]*?)(?=\n\s*[A-J]\s+|\n\s*TEIL\s+\d|$)/g)].map((match) => ({
+    value: match[1].toLowerCase(),
+    label: `${match[1]} - ${compactText(match[2])}`,
+  }));
+};
+
+const extractOsdMatchingQuestions = (partText, answerMap) => {
+  const clean = compactText(stripPdfPageMarkers(partText));
+  const AnzeigenIndex = clean.search(/(?:^|\n)Anzeigen\s*\([A-J]/i);
+  const situationText = AnzeigenIndex >= 0 ? clean.slice(0, AnzeigenIndex) : clean;
+  const options = extractOsdMatchingOptions(partText);
+  const questions = [];
+  for (const match of situationText.matchAll(/(?:^|\n)\s*(\d{1,2})\.\s*([\s\S]*?)\s*_{2,}/g)) {
+    const sourceNumber = Number(match[1]);
+    const position = 12 + sourceNumber;
+    questions.push({
+      questionType: "matching",
+      prompt: trimForDb(compactText(match[2])),
+      options,
+      correctAnswer: answerMap.get(position) ? { value: answerMap.get(position) } : {},
+      explanation: null,
+      position,
+      scoring: { points: 1 },
+      metadata: { sourceQuestionNumber: sourceNumber, osdPart: 3, matchingOptionsIncludedInSectionText: true },
+      sectionType: "read",
+    });
+  }
+  return questions;
+};
+
+const extractOsdOpinionQuestions = (partText, answerMap) => {
+  const questions = [];
+  const clean = compactText(stripPdfPageMarkers(partText));
+  const tableIndex = clean.search(/(?:^|\n)Nr\.\s+Leserbrief/i);
+  const tableText = tableIndex >= 0 ? clean.slice(tableIndex) : clean;
+  for (const match of tableText.matchAll(/(?:^|\n)\s*(\d{1,2})\s+(Brief\s+\d+\s+[^\n]+?)\s+n\s+n\s+n\s*(?=\n|$)/gi)) {
+    const sourceNumber = Number(match[1]);
+    const position = 19 + sourceNumber;
+    questions.push({
+      questionType: "multiple_choice",
+      prompt: trimForDb(compactText(match[2])),
+      options: [
+        { value: "Dafür", label: "Dafür" },
+        { value: "Dagegen", label: "Dagegen" },
+        { value: "Beides", label: "Beides" },
+      ],
+      correctAnswer: answerMap.get(position) ? { value: answerMap.get(position) } : {},
+      explanation: null,
+      position,
+      scoring: { points: 1 },
+      metadata: { sourceQuestionNumber: sourceNumber, osdPart: 4 },
+      sectionType: "read",
+    });
+  }
+  return questions;
+};
+
+const parseOsdReadingPartQuestions = (partNumber, partText, answerMap) => {
+  if (partNumber === 1) return extractOsdTrueFalseQuestions(partText, answerMap);
+  if (partNumber === 2) return extractOsdMultipleChoiceQuestions(partText, answerMap, 6, 2);
+  if (partNumber === 3) return extractOsdMatchingQuestions(partText, answerMap);
+  if (partNumber === 4) return extractOsdOpinionQuestions(partText, answerMap);
+  if (partNumber === 5) return extractOsdMultipleChoiceQuestions(partText, answerMap, 26, 5);
+  return [];
+};
+
+const parseOsdReadingSeries = (text, metadata) => {
+  const clean = stripPdfPageMarkers(text);
+  const blocks = splitByMatches(clean, /(?:^|\n)SUJET\s+0?(\d{1,2})\b[^\n]*\bLESEN\b[^\n]*/gi);
+  return blocks.map((block) => {
+    const seriesNumber = Number(block.match[1]);
+    const title = extractOsdHeaderTitle(block.match[0], "LESEN") || `Sujet ${String(seriesNumber).padStart(2, "0")}`;
+    const correctionIndex = block.text.search(/(?:^|\n)CORRECTION\s+COMPLETE\b/i);
+    const taskText = correctionIndex >= 0 ? block.text.slice(0, correctionIndex) : block.text;
+    const solutionText = correctionIndex >= 0 ? block.text.slice(correctionIndex) : "";
+    const answers = parseOsdReadingAnswerMap(solutionText);
+    const partMatches = [...taskText.matchAll(/(?:^|\n)TEIL\s+([1-5])\b[^\n]*/gi)];
+    const sections = partMatches.map((match, index) => {
+      const next = partMatches[index + 1];
+      const partNumber = Number(match[1]);
+      const header = extractOsdPartHeader(match[0]);
+      const body = taskText.slice(match.index + match[0].length, next ? next.index : taskText.length);
+      const questions = parseOsdReadingPartQuestions(partNumber, body, answers);
+      const points = partNumber === 5 ? 4 : partNumber === 1 || partNumber === 2 ? 6 : 7;
+      return {
+        sectionType: "read",
+        partNumber,
+        title: `Teil ${partNumber}: ${header.split(/[|—–-]/)[0].trim() || "Lesen"}`,
+        instructions: trimForDb([compactText(match[0]), body].join("\n"), 8000),
+        durationMinutes: null,
+        points,
+        scoring: { points },
+        metadata: { sourceHeader: header, osdFormat: true },
+        questions,
+      };
+    });
+    return {
+      seriesNumber,
+      title,
+      sourceLabel: `Sujet ${String(seriesNumber).padStart(2, "0")}`,
+      instructions: "ÖSD B1 Lesen: 5 Teile, 30 Aufgaben.",
+      scoring: { totalPoints: 30, parts: { 1: 6, 2: 6, 3: 7, 4: 7, 5: 4 } },
+      metadata: {
+        ...metadata,
+        osdFormat: true,
+        answerKeyDetected: answers.size > 0,
+      },
+      sections,
+    };
+  });
+};
+
+const splitOsdCorrection = (partBody) => {
+  const correctionMatch = partBody.match(/(?:^|\n)\s*4\s+Corrig\S*\s*(?:[\/\-–—]\s*)?(?:Erwartete\s+Leistungen|Bewertungshinweise)?\s*:/i);
+  if (!correctionMatch) {
+    return {
+      prompt: compactText(partBody),
+      expectedPerformance: "",
+      sampleAnswer: "",
+    };
+  }
+  const prompt = partBody.slice(0, correctionMatch.index).trim();
+  const correction = partBody.slice(correctionMatch.index + correctionMatch[0].length).trim();
+  const sampleMatch = correction.match(/(?:^|\n)\s*\.?\s*Musterantwort[\s\S]*?:\s*/i);
+  const expectedPerformance = sampleMatch ? correction.slice(0, sampleMatch.index).trim() : correction;
+  const sampleAnswer = sampleMatch ? correction.slice(sampleMatch.index + sampleMatch[0].length).trim() : "";
+  return {
+    prompt: compactText(prompt),
+    expectedPerformance: compactText(expectedPerformance),
+    sampleAnswer: compactText(sampleAnswer),
+  };
+};
+
+const parseOsdWritingSeries = (text, metadata) => {
+  const clean = stripPdfPageMarkers(text);
+  const blocks = splitByMatches(clean, /(?:^|\n)SUJET\s+0?(\d{1,2})\s*\|\s*([^\n]+)/gi);
+  return blocks.map((block) => {
+    const seriesNumber = Number(block.match[1]);
+    const title = compactText(block.match[2]) || `Sujet ${String(seriesNumber).padStart(2, "0")}`;
+    const partMatches = [...block.text.matchAll(/(?:^|\n)TEIL\s+([123])\b[^\n]*/gi)];
+    const sections = partMatches.map((match, index) => {
+      const next = partMatches[index + 1];
+      const partNumber = Number(match[1]);
+      const header = extractOsdPartHeader(match[0]);
+      const body = block.text.slice(match.index + match[0].length, next ? next.index : block.text.length);
+      const correction = splitOsdCorrection(body);
+      const points = extractPoints(header) || (partNumber === 3 ? 20 : 40);
+      const durationMinutes = extractDurationMinutes(header) || (partNumber === 3 ? 15 : partNumber === 2 ? 25 : 20);
+      const wordTarget = extractWordTarget(header) || (partNumber === 3 ? 40 : 80);
+      const correctAnswer = {};
+      if (correction.sampleAnswer) correctAnswer.sampleAnswer = correction.sampleAnswer;
+      if (correction.expectedPerformance) correctAnswer.expectedPerformance = correction.expectedPerformance;
+      return {
+        sectionType: "write",
+        partNumber,
+        title: `Teil ${partNumber}: ${header.split("|")[0].trim() || "Schreiben"}`,
+        instructions: trimForDb(correction.prompt || body, 4000),
+        durationMinutes,
+        points,
+        scoring: { points, durationMinutes },
+        metadata: { sourceHeader: header, osdFormat: true },
+        questions: [
+          {
+            questionType: partNumber === 2 ? "writing_forum_post" : "writing_email",
+            prompt: trimForDb([compactText(match[0]), correction.prompt || body].join("\n")),
+            options: [],
+            correctAnswer,
+            explanation: correction.expectedPerformance || correction.sampleAnswer || null,
+            position: partNumber,
+            scoring: { points, durationMinutes },
+            metadata: { wordTarget, osdPart: partNumber },
+            sectionType: "write",
+          },
+        ],
+      };
+    });
+    return {
+      seriesNumber,
+      title,
+      sourceLabel: `Sujet ${String(seriesNumber).padStart(2, "0")}`,
+      instructions: "ÖSD B1 Schreiben: drei Schreibaufgaben in 60 Minuten.",
+      scoring: { totalPoints: 100, parts: { 1: 40, 2: 40, 3: 20 } },
+      metadata: { ...metadata, osdFormat: true },
+      sections,
+    };
+  });
+};
+
+const parseOsdSpeakingSeries = (text, metadata) => {
+  const clean = stripPdfPageMarkers(text);
+  const blocks = splitByMatches(clean, /(?:^|\n)SUJET\s+0?(\d{1,2})\s*\|\s*([^\n]+)/gi);
+  const partTypes = {
+    1: "speaking_partner_planning",
+    2: "speaking_presentation",
+    3: "speaking_discussion",
+  };
+  return blocks.map((block) => {
+    const seriesNumber = Number(block.match[1]);
+    const title = compactText(block.match[2]) || `Sujet ${String(seriesNumber).padStart(2, "0")}`;
+    const partMatches = [...block.text.matchAll(/(?:^|\n)TEIL\s+([123])\b[^\n]*/gi)];
+    const sections = partMatches.map((match, index) => {
+      const next = partMatches[index + 1];
+      const partNumber = Number(match[1]);
+      const header = extractOsdPartHeader(match[0]);
+      const body = block.text.slice(match.index + match[0].length, next ? next.index : block.text.length);
+      const correction = splitOsdCorrection(body);
+      const points = extractPoints(header) || (partNumber === 1 ? 28 : partNumber === 2 ? 40 : 16);
+      const durationMinutes = extractDurationMinutes(header) || (partNumber === 1 || partNumber === 2 ? 3 : 2);
+      const correctAnswer = {};
+      if (correction.expectedPerformance) correctAnswer.expectedPerformance = correction.expectedPerformance;
+      return {
+        sectionType: "speak",
+        partNumber,
+        title: `Teil ${partNumber}: ${header.split("|")[0].trim() || "Sprechen"}`,
+        instructions: trimForDb(correction.prompt || body, 4000),
+        durationMinutes,
+        points,
+        scoring: { points, durationMinutes },
+        metadata: { sourceHeader: header, osdFormat: true },
+        questions: [
+          {
+            questionType: partTypes[partNumber] || "speaking_prompt",
+            prompt: trimForDb([compactText(match[0]), correction.prompt || body].join("\n")),
+            options: [],
+            correctAnswer,
+            explanation: correction.expectedPerformance || null,
+            position: partNumber,
+            scoring: { points, durationMinutes },
+            metadata: { osdPart: partNumber },
+            sectionType: "speak",
+          },
+        ],
+      };
+    });
+    return {
+      seriesNumber,
+      title,
+      sourceLabel: `Sujet ${String(seriesNumber).padStart(2, "0")}`,
+      instructions: "ÖSD B1 Sprechen: drei mündliche Aufgaben.",
+      scoring: { totalPoints: 84, parts: { 1: 28, 2: 40, 3: 16 } },
+      metadata: { ...metadata, osdFormat: true },
+      sections,
+    };
+  });
+};
+
 const parseGenericSeries = (text, metadata) => [
   {
     seriesNumber: 1,
@@ -528,6 +921,20 @@ const parseGenericSeries = (text, metadata) => [
 ];
 
 const parseStructuredContent = (text, metadata) => {
+  const provider = normalizeDetectedProvider(metadata.provider);
+  const hasOsdSujets = /(?:^|\n)SUJET\s+0?\d{1,2}\b/i.test(text);
+  if ((provider === "osd" || hasOsdSujets) && metadata.sectionType === "read") {
+    const series = parseOsdReadingSeries(text, metadata);
+    if (series.length) return series;
+  }
+  if ((provider === "osd" || hasOsdSujets) && metadata.sectionType === "write") {
+    const series = parseOsdWritingSeries(text, metadata);
+    if (series.length) return series;
+  }
+  if ((provider === "osd" || hasOsdSujets) && metadata.sectionType === "speak") {
+    const series = parseOsdSpeakingSeries(text, metadata);
+    if (series.length) return series;
+  }
   if (metadata.sectionType === "speak" && /Thema\s+\d+\s*:/i.test(text)) {
     return parseSpeakingSeries(text, metadata);
   }
@@ -634,7 +1041,8 @@ const validateParsedDocument = (parsed) => {
 const analyzeExamDocument = async ({ buffer, filename, mimetype }) => {
   if (!buffer?.length) throw new Error("Document buffer is empty");
   const { text, extraction } = await extractDocumentText({ buffer, filename, mimetype });
-  const provider = detectProvider(text);
+  let provider = detectProvider(text);
+  if (provider === "custom" && /(?:^|\n)SUJET\s+0?\d{1,2}\b/i.test(text)) provider = "osd";
   const level = detectLevel(text);
   const sectionType = detectSectionType(text);
   const examType = detectExamType(text, provider, level);

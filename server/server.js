@@ -846,10 +846,10 @@ const getProviderRouteMeta = (value) => {
   const routeProvider = normalizeProviderId(raw);
   if (routeProvider === "osd" && level === "B1") {
     return {
-      provider: "goethe",
+      provider: "osd",
       level,
       publicProvider: "osd",
-      publicExamType: "OSD Zertifikat B1",
+      publicExamType: "ÖSD Zertifikat B1",
     };
   }
   return {
@@ -1079,15 +1079,18 @@ const buildReadingTask = (question, index = 0) => {
 
   if (questionType.includes("matching")) {
     const correct = correctValue || "x";
+    const matchingOptions = options.length
+      ? options
+      : "abcdefghijx".split("").map((value) => ({
+          value,
+          label: value === "x" ? "X - Keine passende Anzeige" : value.toUpperCase(),
+        }));
     return {
       ...base,
       type: "select",
       typeLabel: `${base.typeLabel} - Zuordnung`,
       question: `${base.question}\n\nWählen Sie die passende Anzeige. X = keine passende Anzeige.`,
-      options: "abcdefghijx".split("").map((value) => ({
-        value,
-        label: value === "x" ? "X - Keine passende Anzeige" : value.toUpperCase(),
-      })),
+      options: matchingOptions,
       correct,
       alternatives: [correct.toUpperCase(), correct.toLowerCase()],
     };
