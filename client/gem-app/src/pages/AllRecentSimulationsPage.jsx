@@ -57,7 +57,7 @@ export default function AllRecentSimulationsPage() {
     <div className={styles.historyPage}>
       <nav className={styles.historyNav}>
         <button type="button" className={styles.historyLogoButton} onClick={() => navigate("/dashboard")}>
-          <img src={logo} alt="Deutsch Lernen" />
+          <img src={logo} alt="Deutsch Prüfungen" />
         </button>
         <button type="button" className={styles.moreButton} onClick={() => navigate("/dashboard")}>
           Dashboard

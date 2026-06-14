@@ -520,6 +520,13 @@
   padding: 22px;
 }
 
+.passagePane {
+  max-height: min(68vh, 720px);
+  overflow-y: auto;
+  overscroll-behavior-y: auto;
+  scrollbar-gutter: stable;
+}
+
 .partIntroPanel {
   display: grid;
   gap: 22px;
@@ -567,6 +574,10 @@
   border-radius: 12px;
   background: #fbfcfe;
   padding: 18px;
+  max-height: min(58vh, 620px);
+  overflow-y: auto;
+  overscroll-behavior-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .partIntroActions {
@@ -1799,6 +1810,13 @@
   padding: 24px;
 }
 
+.passagePane {
+  max-height: min(68vh, 720px);
+  overflow-y: auto;
+  overscroll-behavior-y: auto;
+  scrollbar-gutter: stable;
+}
+
 .questionPane {
   animation: questionReveal 0.22s ease-out both;
 }
@@ -1819,6 +1837,8 @@
     top: 98px;
     max-height: calc(100vh - 132px);
     overflow: auto;
+    overscroll-behavior-y: auto;
+    scrollbar-gutter: stable;
   }
 }
 

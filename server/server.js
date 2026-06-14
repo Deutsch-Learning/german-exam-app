@@ -87,6 +87,8 @@ const REFRESH_MAX_AGE_MS = REFRESH_DAYS * 24 * 60 * 60 * 1000;
 const COOKIE_SECURE = isProduction;
 const DEFAULT_TOTAL_AVAILABLE_EXAMS = Number(process.env.TOTAL_AVAILABLE_EXAMS || 20);
 const EMAIL_VERIFICATION_REQUIRED = process.env.EMAIL_VERIFICATION_REQUIRED === "true";
+const LEVEL_ORDER = ["A1", "A2", "B1", "B2", "C1", "C2"];
+const NOT_SPECIFIED_LEVEL = "Not specified";
 
 if (!process.env.JWT_SECRET && isProduction) {
   throw new Error("JWT_SECRET is required in production");
@@ -155,6 +157,8 @@ const sanitizeUser = (user) => ({
   email_verified: Boolean(user.email_verified),
   has_full_access: Boolean(user.has_full_access),
   partial_access: normalizePartialAccess(user.partial_access),
+  current_level: user.current_level || NOT_SPECIFIED_LEVEL,
+  target_level: user.target_level || null,
   created_at: user.created_at,
   last_login_at: user.last_login_at,
 });
@@ -329,7 +333,7 @@ const sendTransactionalEmail = async ({ to, subject, text, html }) => {
   }
 
   await transporter.sendMail({
-    from: `"Deutsch Learning" <${from}>`,
+    from: `"Deutsch Prüfungen" <${from}>`,
     to,
     subject,
     text,
@@ -346,12 +350,12 @@ const sendVerificationEmail = async (user, token) => {
     text: [
       `Bonjour ${user.first_name || user.username || ""},`,
       "",
-      "Confirmez votre adresse email pour activer votre compte Deutsch Learning.",
+      "Confirmez votre adresse email pour activer votre compte Deutsch Prüfungen.",
       link,
       "",
       `Ce lien expire dans ${VERIFICATION_HOURS} heures.`,
     ].join("\n"),
-    html: `<p>Confirmez votre adresse email pour activer votre compte Deutsch Learning.</p><p><a href="${link}">Confirmer mon email</a></p><p>Ce lien expire dans ${VERIFICATION_HOURS} heures.</p>`,
+    html: `<p>Confirmez votre adresse email pour activer votre compte Deutsch Prüfungen.</p><p><a href="${link}">Confirmer mon email</a></p><p>Ce lien expire dans ${VERIFICATION_HOURS} heures.</p>`,
   });
   return link;
 };
@@ -364,12 +368,12 @@ const sendResetEmail = async (user, token) => {
     text: [
       `Bonjour ${user.first_name || user.username || ""},`,
       "",
-      "Utilisez ce lien pour réinitialiser votre mot de passe Deutsch Learning.",
+      "Utilisez ce lien pour réinitialiser votre mot de passe Deutsch Prüfungen.",
       link,
       "",
       `Ce lien expire dans ${RESET_MINUTES} minutes. Si vous n'avez rien demandé, ignorez ce message.`,
     ].join("\n"),
-    html: `<p>Utilisez ce lien pour réinitialiser votre mot de passe Deutsch Learning.</p><p><a href="${link}">Réinitialiser mon mot de passe</a></p><p>Ce lien expire dans ${RESET_MINUTES} minutes.</p>`,
+    html: `<p>Utilisez ce lien pour réinitialiser votre mot de passe Deutsch Prüfungen.</p><p><a href="${link}">Réinitialiser mon mot de passe</a></p><p>Ce lien expire dans ${RESET_MINUTES} minutes.</p>`,
   });
   return link;
 };
@@ -417,6 +421,9 @@ async function ensureSchema() {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_expires_at TIMESTAMPTZ;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS has_full_access BOOLEAN NOT NULL DEFAULT FALSE;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS partial_access JSONB NOT NULL DEFAULT '[]'::jsonb;`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS current_level TEXT NOT NULL DEFAULT 'Not specified';`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS target_level TEXT;`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS level_updated_at TIMESTAMPTZ;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS suspended_at TIMESTAMPTZ;`);
   await pool.query(`UPDATE users SET role = 'user' WHERE role IS NULL OR role::text NOT IN ('user', 'admin');`);
@@ -1409,7 +1416,8 @@ const verifyEmailToken = async (token) => {
      WHERE verification_token_hash = $1
        AND verification_expires_at > NOW()
      RETURNING id, email, username, first_name, last_name, date_of_birth, role, status,
-               email_verified, has_full_access, partial_access, created_at, last_login_at`,
+               email_verified, has_full_access, partial_access, current_level, target_level,
+               created_at, last_login_at`,
     [tokenHash(token)]
   );
   return r.rows[0] ?? null;
@@ -1453,7 +1461,8 @@ const loginHandler = async (req, res) => {
 
     const userRes = await pool.query(
       `SELECT id, email, username, first_name, last_name, date_of_birth, password_hash, role, status,
-              email_verified, has_full_access, partial_access, created_at, last_login_at
+              email_verified, has_full_access, partial_access, current_level, target_level,
+              created_at, last_login_at
        FROM users
        WHERE email = $1`,
       [normalizeEmail(email)]
@@ -1506,7 +1515,8 @@ const refreshHandler = async (req, res) => {
     const tokenRes = await pool.query(
       `SELECT rt.id AS refresh_token_id, rt.user_id, rt.expires_at, rt.revoked_at,
               u.email, u.username, u.first_name, u.last_name, u.date_of_birth,
-              u.role, u.status, u.email_verified, u.has_full_access, u.partial_access, u.created_at, u.last_login_at
+              u.role, u.status, u.email_verified, u.has_full_access, u.partial_access,
+              u.current_level, u.target_level, u.created_at, u.last_login_at
        FROM refresh_tokens rt
        JOIN users u ON u.id = rt.user_id
        WHERE rt.token_hash = $1
@@ -1564,6 +1574,8 @@ const refreshHandler = async (req, res) => {
       email_verified: row.email_verified,
       has_full_access: row.has_full_access,
       partial_access: row.partial_access,
+      current_level: row.current_level,
+      target_level: row.target_level,
       created_at: row.created_at,
       last_login_at: row.last_login_at,
     };
@@ -1700,8 +1712,141 @@ const getTotalAvailableExams = async () => {
   return Math.max(Number(exams.rows[0]?.total ?? 0), Number(content.rows[0]?.total ?? 0), configuredTotal, 0);
 };
 
+const normalizeLevel = (value) => {
+  const match = String(value ?? "").match(/\b(A1|A2|B1|B2|C1|C2)\b/i);
+  return match ? match[1].toUpperCase() : null;
+};
+
+const getNextDisplayLevel = (level) => {
+  const normalized = normalizeLevel(level);
+  if (!normalized) return null;
+  const index = LEVEL_ORDER.indexOf(normalized);
+  return LEVEL_ORDER[Math.min(LEVEL_ORDER.length - 1, index + 1)] ?? normalized;
+};
+
+const getSimulationLevel = (row) =>
+  normalizeLevel(row?.level_current) ||
+  normalizeLevel(row?.result_details?.level) ||
+  normalizeLevel(row?.result_details?.series?.level) ||
+  normalizeLevel(row?.exam_name);
+
+const getExerciseKey = (row) => {
+  const details = row?.result_details || {};
+  return [
+    details.examCode || details.series?.examId || row?.exam_name || row?.id,
+    details.series?.id || details.series?.code || "",
+    details.moduleId || details.moduleTitle || "",
+  ]
+    .filter(Boolean)
+    .join(":")
+    .toLowerCase();
+};
+
+const getTotalAvailableExamsByLevel = async (level) => {
+  const normalized = normalizeLevel(level);
+  if (!normalized) return 0;
+  const configuredTotal = Math.max(1, Math.ceil((Number(DEFAULT_TOTAL_AVAILABLE_EXAMS) || 20) / 2));
+  const exams = await pool.query(
+    `SELECT COUNT(*)::int AS total FROM exams WHERE is_active = TRUE AND UPPER(COALESCE(level, '')) = $1`,
+    [normalized]
+  );
+  const content = await pool.query(
+    `SELECT COUNT(*)::int AS total FROM exam_content WHERE UPPER(COALESCE(level, '')) = $1`,
+    [normalized]
+  );
+  return Math.max(
+    Number(exams.rows[0]?.total ?? 0),
+    Number(content.rows[0]?.total ?? 0),
+    configuredTotal
+  );
+};
+
+const getUserLevelSnapshot = async (userId, options = {}) => {
+  const [result, userResult] = await Promise.all([
+    pool.query(
+    `SELECT id, exam_name, score_pct, level_current, level_target, result_details, created_at
+     FROM simulations
+     WHERE user_id = $1
+     ORDER BY created_at ASC, id ASC`,
+    [userId]
+    ),
+    pool.query(`SELECT current_level, target_level FROM users WHERE id = $1`, [userId]),
+  ]);
+  const storedLevel = normalizeLevel(userResult.rows[0]?.current_level);
+
+  const rows = result.rows
+    .map((row) => ({ ...row, activityLevel: getSimulationLevel(row) }))
+    .filter((row) => row.activityLevel);
+  const additionalLevel = normalizeLevel(options.additionalLevel);
+  if (additionalLevel) {
+    rows.push({
+      id: `activity-${additionalLevel}-${Date.now()}`,
+      exam_name: `${additionalLevel} activity`,
+      score_pct: 0,
+      result_details: { moduleId: "started" },
+      activityLevel: additionalLevel,
+    });
+  }
+
+  if (!rows.length) {
+    const currentLevel = storedLevel || NOT_SPECIFIED_LEVEL;
+    return {
+      currentLevel,
+      targetLevel: getNextDisplayLevel(currentLevel),
+      b1MasteryPercent: 0,
+      totalActivities: 0,
+    };
+  }
+
+  const latestLevel = rows[rows.length - 1].activityLevel;
+  const hasB1Activity = rows.some((row) => row.activityLevel === "B1");
+  const hasB2Activity = rows.some((row) => row.activityLevel === "B2");
+  const masteredB1Keys = new Set(
+    rows
+      .filter((row) => row.activityLevel === "B1" && Number(row.score_pct) >= 70)
+      .map(getExerciseKey)
+  );
+  const attemptedB1Keys = new Set(
+    rows
+      .filter((row) => row.activityLevel === "B1")
+      .map(getExerciseKey)
+  );
+  const totalB1Available = Math.max(await getTotalAvailableExamsByLevel("B1"), attemptedB1Keys.size, 1);
+  const b1MasteryPercent = Math.min(100, Math.round((masteredB1Keys.size / totalB1Available) * 100));
+
+  let currentLevel = latestLevel;
+  if (hasB1Activity) {
+    currentLevel = hasB2Activity && b1MasteryPercent >= 50 ? "B2" : "B1";
+  } else if (hasB2Activity) {
+    currentLevel = "B2";
+  }
+  if (storedLevel && LEVEL_ORDER.indexOf(storedLevel) > LEVEL_ORDER.indexOf(currentLevel)) {
+    currentLevel = storedLevel;
+  }
+
+  return {
+    currentLevel,
+    targetLevel: getNextDisplayLevel(currentLevel),
+    b1MasteryPercent,
+    totalActivities: rows.length,
+  };
+};
+
+const syncUserLevelSnapshot = async (userId, options = {}) => {
+  const snapshot = await getUserLevelSnapshot(userId, options);
+  await pool.query(
+    `UPDATE users
+     SET current_level = $2,
+         target_level = $3,
+         level_updated_at = NOW()
+     WHERE id = $1`,
+    [userId, snapshot.currentLevel, snapshot.targetLevel]
+  );
+  return snapshot;
+};
+
 const getUserProgressSnapshot = async (userId) => {
-  const [completedFromSimulations, completedFromResults, total] = await Promise.all([
+  const [completedFromSimulations, completedFromResults, total, levelSnapshot] = await Promise.all([
     pool.query(
       `SELECT COUNT(DISTINCT COALESCE(NULLIF(result_details->>'examCode', ''), NULLIF(exam_name, ''), id::text))::int AS completed
        FROM simulations
@@ -1715,6 +1860,7 @@ const getUserProgressSnapshot = async (userId) => {
       [userId]
     ),
     getTotalAvailableExams(),
+    getUserLevelSnapshot(userId),
   ]);
 
   const completed = Math.max(
@@ -1728,6 +1874,9 @@ const getUserProgressSnapshot = async (userId) => {
     completed,
     total,
     percentage,
+    currentLevel: levelSnapshot.currentLevel,
+    targetLevel: levelSnapshot.targetLevel,
+    b1MasteryPercent: levelSnapshot.b1MasteryPercent,
   };
 };
 
@@ -1743,6 +1892,22 @@ const userProgressHandler = async (req, res) => {
 
 app.get("/api/progress", requireAuth, userProgressHandler);
 app.get("/api/user/progress", requireAuth, userProgressHandler);
+
+const levelActivityHandler = async (req, res) => {
+  try {
+    const level = normalizeLevel(req.body?.level);
+    if (!level) {
+      return res.status(400).json({ ok: false, error: "A valid activity level is required" });
+    }
+    const snapshot = await syncUserLevelSnapshot(req.user.id, { additionalLevel: level });
+    return res.json({ ok: true, level: snapshot });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+};
+
+app.post("/api/user/level-activity", requireAuth, levelActivityHandler);
 
 const recentSimulationsHandler = async (req, res) => {
   try {
@@ -1813,14 +1978,19 @@ const dashboardHandler = async (req, res) => {
 
     return res.json({
       ok: true,
-      user: sanitizeUser(req.user),
+      user: sanitizeUser({
+        ...req.user,
+        current_level: progressSnapshot.currentLevel,
+        target_level: progressSnapshot.targetLevel,
+      }),
       progress: {
         percent: progressPct,
         completed: progressSnapshot.completed,
         total: progressSnapshot.total,
         percentage: progressSnapshot.percentage,
-        currentLevel: latest?.level_current ?? "B2",
-        targetLevel: latest?.level_target ?? "C1",
+        currentLevel: progressSnapshot.currentLevel,
+        targetLevel: progressSnapshot.targetLevel,
+        b1MasteryPercent: progressSnapshot.b1MasteryPercent,
         totalTests: stats.total_tests,
         avgScore: stats.avg_score,
       },
@@ -1889,7 +2059,8 @@ const updateProfileHandler = async (req, res) => {
            verification_expires_at = CASE WHEN $6 THEN $8 ELSE verification_expires_at END
        WHERE id = $9
        RETURNING id, email, username, first_name, last_name, date_of_birth, role, status,
-                 email_verified, has_full_access, partial_access, created_at, last_login_at`,
+                 email_verified, has_full_access, partial_access, current_level, target_level,
+                 created_at, last_login_at`,
       [
         safeUsername,
         safeFirst,
@@ -1961,11 +2132,13 @@ const createSimulationHandler = async (req, res) => {
        VALUES ($1, $2, $3, $4)`,
       [req.user.id, examName.trim().slice(0, 50), Math.round(score), insert.rows[0].created_at]
     );
+    const levelSnapshot = await syncUserLevelSnapshot(req.user.id);
     await logUserAction(req.user.id, "simulation.completed", req);
 
     return res.status(201).json({
       ok: true,
       simulation: insert.rows[0],
+      userLevel: levelSnapshot,
       writingCorrection: null,
       correctionPending: isWritingSimulation(insert.rows[0]),
     });

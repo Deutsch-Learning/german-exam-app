@@ -20,8 +20,8 @@ import {
   SimulationDisciplineCard,
   StartConfirmationModal,
   SimulationTopNav,
-  getModuleCountLabel,
 } from "./SimulationSelectionPage";
+import { getModuleCountLabel } from "../utils/moduleLabels";
 
 const moduleAssets = {
   read: { iconNode: <OpenBookIcon /> },
@@ -98,7 +98,7 @@ export default function SeriesSimulationPage() {
           <div className="simple-topbar">
             <Link className="simple-logo" to="/">
               <img src={logo} alt="" />
-              Deutsch Learning
+              Deutsch Prüfungen
             </Link>
             <Link className="simple-home-link" to={`/simulations/${examId}`}>
               Zurueck zu den Serien

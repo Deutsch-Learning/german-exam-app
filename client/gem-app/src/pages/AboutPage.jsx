@@ -39,7 +39,7 @@ const Navbar = () => {
       <div className={styles.navContainer}>
         <div className={styles.navLeft}>
           <button type="button" className={styles.logoButton} onClick={() => navigate(loggedIn ? "/dashboard" : "/")}>
-            <img src={logo} alt="Deutsch Lernen Logo" className={styles.logo} />
+            <img src={logo} alt="Deutsch Prüfungen Logo" className={styles.logo} />
           </button>
         </div>
 

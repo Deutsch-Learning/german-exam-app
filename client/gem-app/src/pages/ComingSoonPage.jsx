@@ -20,7 +20,7 @@ export default function ComingSoonPage({ examId: examIdProp, title }) {
         <div className="simple-topbar">
           <Link className="simple-logo" to={homePath}>
             <img src={logo} alt="" />
-            Deutsch Learning
+            Deutsch Prüfungen
           </Link>
           <Link className="simple-home-link" to={loggedIn ? "/simulations" : "/"}>
             {loggedIn ? "Zurueck zu den Tests" : "Startseite"}

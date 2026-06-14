@@ -123,7 +123,7 @@ const translations = {
       thousandsSatisfied: "Des milliers d'étudiants satisfaits",
       reviewsFollowup: "Rejoignez plus de 1000 candidats qui ont réussi avec nous",
       trustTitle: "Ils nous font confiance",
-      trustSubtitle: "Des étudiants du monde entier choisissent Deutsch Learning",
+      trustSubtitle: "Des étudiants du monde entier choisissent Deutsch Prüfungen",
       specialLaunch: "Lancement spécial",
       launchTitle: "Prêt à vous tester et à augmenter votre niveau ?",
       launchText: "Rejoignez des milliers d'étudiants qui ont réussi leurs examens grâce à notre plateforme.",
@@ -177,7 +177,7 @@ const translations = {
       title: "À propos de nous",
       subtitle: "Notre Mission : Votre Réussite",
       mission1:
-        "Nous avons créé le Deutsch Prüfung pour rendre les certifications allemandes moins stressantes et plus efficaces.",
+        "Nous avons créé le Deutsch Prüfungen pour rendre les certifications allemandes moins stressantes et plus efficaces.",
       mission2:
         "Notre simulation en conditions réelles, couplée à la correction par IA, vous guide pas à pas vers votre diplôme.",
       pillarsTitle: "Les trois piliers de notre solution",
@@ -415,7 +415,7 @@ const translations = {
       thousandsSatisfied: "Thousands of students satisfied",
       reviewsFollowup: "Join over 1000 successful candidates who succeeded with us",
       trustTitle: "They Trust Us",
-      trustSubtitle: "Students from all over the world choose Deutsch Learning",
+      trustSubtitle: "Students from all over the world choose Deutsch Prüfungen",
       specialLaunch: "Special launch",
       launchTitle: "Ready to test and increase your level?",
       launchText: "Join thousands of students who have passed their exams thanks to our platform.",
@@ -463,7 +463,7 @@ const translations = {
     about: {
       title: "About us",
       subtitle: "Our Mission: Your Success",
-      mission1: "We created Deutsch Prüfung to make German certifications less stressful and more effective.",
+      mission1: "We created Deutsch Prüfungen to make German certifications less stressful and more effective.",
       mission2: "Our real-exam simulations, combined with AI correction, guide you step by step toward your certificate.",
       pillarsTitle: "The three pillars of our solution",
       pillars: ["REAL SIMULATIONS", "AI CORRECTION", "PROGRESS TRACKING"],
@@ -700,7 +700,7 @@ const translations = {
       thousandsSatisfied: "Tausende zufriedene Lernende",
       reviewsFollowup: "Schließen Sie sich über 1000 erfolgreichen Kandidaten an",
       trustTitle: "Sie vertrauen uns",
-      trustSubtitle: "Lernende aus der ganzen Welt wählen Deutsch Learning",
+      trustSubtitle: "Lernende aus der ganzen Welt wählen Deutsch Prüfungen",
       specialLaunch: "Sonderstart",
       launchTitle: "Bereit, sich zu testen und Ihr Niveau zu steigern?",
       launchText: "Schließen Sie sich Tausenden von Lernenden an, die ihre Prüfungen dank unserer Plattform bestanden haben.",
@@ -748,7 +748,7 @@ const translations = {
     about: {
       title: "Über uns",
       subtitle: "Unsere Mission: Ihr Erfolg",
-      mission1: "Wir haben Deutsch Prüfung entwickelt, um deutsche Zertifizierungen weniger stressig und wirksamer zu machen.",
+      mission1: "Wir haben Deutsch Prüfungen entwickelt, um deutsche Zertifizierungen weniger stressig und wirksamer zu machen.",
       mission2: "Unsere realistischen Simulationen mit KI-Korrektur begleiten Sie Schritt für Schritt zum Zertifikat.",
       pillarsTitle: "Die drei Säulen unserer Lösung",
       pillars: ["ECHTE SIMULATIONEN", "KI-KORREKTUR", "FORTSCHRITTSVERFOLGUNG"],
@@ -908,7 +908,7 @@ export function LanguageProvider({ children }) {
 
   const value = useMemo(
     () => ({ language, setLanguage, t: getTranslations(language) }),
-    [language]
+    [language, setLanguage]
   );
 
   return <LanguageContext.Provider value={value}>{children}</LanguageContext.Provider>;
