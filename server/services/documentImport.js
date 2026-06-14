@@ -83,7 +83,7 @@ const detectProvider = (text) => {
   const scores = [
     ["goethe", ["goethe-zertifikat", "goethe", "zertifikat b1"]],
     ["osd", ["osd", "oesd", "ösd", "österreichisches sprachdiplom", "osterreichisches sprachdiplom", "Ã¶sd"]],
-    ["telc", ["telc"]],
+    ["telc", ["telc deutsch", "format telc", "telc"]],
     ["ecl", ["ecl"]],
     ["testdaf", ["testdaf"]],
     ["dsh", ["dsh"]],
@@ -120,8 +120,8 @@ const detectSectionType = (text) => {
   [
     ["read", ["leseverstehen", "prufungsteil: lesen", "prüfungsteil: lesen", " lesen ", "richtig/falsch", "compréhension écrite", "comprehension ecrite"]],
     ["listen", ["horverstehen", "hörverstehen", "hoeren", "hören", "audio", "transkript"]],
-    ["write", ["schreiben", "schriftliche kommunikation", "expression écrite", "expression ecrite", "private e-mail", "diskussionsbeitrag", "musterloesung teil", "musterlösung teil"]],
-    ["speak", ["sprechen", "mündliche kommunikation", "mundliche kommunikation", "mündliche prüfung", "mundliche pruefung", "gelenktes gespräch", "gelenktes gesprach", "selbständige äußerung", "selbstandige ausserung", "kandidat a", "gemeinsam planen"]],
+    ["write", ["schreiben", "schriftlicher ausdruck", "schriftliche kommunikation", "expression écrite", "expression ecrite", "private e-mail", "diskussionsbeitrag", "musterloesung teil", "musterlösung teil"]],
+    ["speak", ["sprechen", "mündlicher ausdruck", "muendlicher ausdruck", "mündliche kommunikation", "mundliche kommunikation", "mündliche prüfung", "mundliche pruefung", "gelenktes gespräch", "gelenktes gesprach", "selbständige äußerung", "selbstandige ausserung", "kandidat a", "gemeinsam planen"]],
   ].forEach(([section, tokens]) => {
     tokens.forEach((token) => {
       if (haystack.includes(token)) scores[section] += 1;
@@ -1220,6 +1220,401 @@ const parseEclSpeakingSeries = (text, metadata) => {
   });
 };
 
+const stripTelcPageDecorations = (value) =>
+  stripPdfPageMarkers(value)
+    .replace(/(?:^|\n)\s*telc Deutsch B1\s*\|[^\n]*/gi, "\n")
+    .replace(/(?:^|\n)\s*Seite\s+\d+\s*\|[^\n]*/gi, "\n");
+
+const normalizeTelcText = (value) => compactText(stripTelcPageDecorations(value));
+
+const splitTelcSujetBlocks = (text) =>
+  splitByMatches(
+    text,
+    /(?:^|\n)(?:SUJET|Sujet)\s+0?(\d{1,2})\s*\/\s*20\s*(?:(?:[·\u00b7]|\s*[-\u2010-\u2015]\s*)\s*(?:Th[eè]me\s*:\s*)?([^\n]*))?/gi
+  ).filter((block) => {
+    const number = Number(block.match[1]);
+    return number >= 1 && number <= 20;
+  });
+
+const sliceAfterBlockMatch = (block) => {
+  const marker = compactText(block.match?.[0] || "");
+  if (!marker) return block.text;
+  const offset = block.text.indexOf(marker);
+  if (offset >= 0) return block.text.slice(offset + marker.length);
+  return block.text.slice(block.match?.[0]?.length || 0);
+};
+
+const extractTelcSujetTitle = (block, fallback = "") => {
+  const inlineTitle = compactText(block.match?.[2] || fallback).replace(/^Th[eè]me\s*:\s*/i, "");
+  if (inlineTitle) return inlineTitle;
+
+  const lines = stripTelcPageDecorations(sliceAfterBlockMatch(block))
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  for (const line of lines) {
+    if (/^(Situation|Muendliche|Mundliche|Pruefung|TEIL|Teil|Aufgabe|An:|Von:|Betreff:|Hinweise|Ihr Text|Dauer|Ziel)\b/i.test(line)) {
+      break;
+    }
+    return compactText(line);
+  }
+  return `Sujet ${String(Number(block.match?.[1]) || 1).padStart(2, "0")}`;
+};
+
+const findTelcModelSolutionStart = (text) => {
+  const sectionStart = String(text ?? "").search(/(?:^|\n)\s*TEIL\s+II\s*[-\u2010-\u2015]\s*MUSTERLOESUNGEN/i);
+  if (sectionStart >= 0) return sectionStart;
+  const firstSolution = String(text ?? "").search(/(?:^|\n)\s*Musterloesung[^\n]*Sujet\s+0?1\s*:/i);
+  return firstSolution >= 0 ? firstSolution : -1;
+};
+
+const splitTelcTaskAndSolution = (text) => {
+  const clean = stripTelcPageDecorations(text);
+  const solutionStart = findTelcModelSolutionStart(clean);
+  return {
+    taskText: solutionStart >= 0 ? clean.slice(0, solutionStart) : clean,
+    solutionText: solutionStart >= 0 ? clean.slice(solutionStart) : "",
+  };
+};
+
+const parseTelcSolutionSampleAndTips = (body) => {
+  const clean = normalizeTelcText(body);
+  const tipsIndex = clean.search(/(?:^|\n)\s*(?:Tipps\s*&\s*)?(?:Sprachliche\s+Hinweise|Sprachliche\s+Tipps)\s*:/i);
+  return {
+    sampleAnswer: tipsIndex >= 0 ? clean.slice(0, tipsIndex).trim() : clean,
+    tips: tipsIndex >= 0 ? clean.slice(tipsIndex).trim() : "",
+  };
+};
+
+const parseTelcWritingSolutions = (solutionText) => {
+  const blocks = splitByMatches(solutionText, /(?:^|\n)\s*Musterloesung[^\n]*Sujet\s+0?(\d{1,2})\s*:\s*([^\n]+)/gi);
+  return new Map(
+    blocks.map((block) => {
+      const body = sliceAfterBlockMatch(block);
+      return [
+        Number(block.match[1]),
+        {
+          title: compactText(block.match[2]),
+          ...parseTelcSolutionSampleAndTips(body),
+        },
+      ];
+    })
+  );
+};
+
+const parseTelcSpeakingSolutions = (solutionText) => {
+  const seriesBlocks = splitByMatches(solutionText, /(?:^|\n)\s*Musterloesung[^\n]*Sujet\s+0?(\d{1,2})\s*:\s*([^\n]+)/gi);
+  return new Map(
+    seriesBlocks.map((seriesBlock) => {
+      const parts = new Map();
+      const partBlocks = splitByMatches(seriesBlock.text, /(?:^|\n)\s*TEIL\s+([123])\s*[-\u2010-\u2015]\s*(Musterantwort|Musterdialog)/gi);
+      partBlocks.forEach((partBlock) => {
+        const body = sliceAfterBlockMatch(partBlock);
+        parts.set(Number(partBlock.match[1]), parseTelcSolutionSampleAndTips(body));
+      });
+      return [
+        Number(seriesBlock.match[1]),
+        {
+          title: compactText(seriesBlock.match[2]),
+          parts,
+        },
+      ];
+    })
+  );
+};
+
+const findTelcReadingCorrectionStart = (text) => {
+  const index = String(text ?? "").search(/(?:^|\n)\s*\d+\s+CORRIG\S*\s*[-\u2010-\u2015]\s*Sujet/i);
+  return index >= 0 ? index : -1;
+};
+
+const parseTelcReadingAnswerMap = (correctionText) => {
+  const answers = new Map();
+  const clean = normalizeTelcText(correctionText);
+  const part1 = getBetweenMarkers(clean, /Teil\s+1\s*:/i, [/Teil\s+2\s*:/i]);
+  for (const match of part1.matchAll(/Text\s+([1-5])\s*(?:→|->|=>|>)\s*([A-G])/gi)) {
+    answers.set(Number(match[1]), match[2].toLowerCase());
+  }
+
+  const part2 = getBetweenMarkers(clean, /Teil\s+2\s*:/i, [/Teil\s+3\s*:/i]);
+  for (const match of part2.matchAll(/\bF\s*([1-5])\s*:\s*([ABC])\b/gi)) {
+    answers.set(5 + Number(match[1]), match[2].toLowerCase());
+  }
+
+  const part3 = getBetweenMarkers(clean, /Teil\s+3\s*:/i, []);
+  for (const match of part3.matchAll(/\b(10|[1-9])\s*:\s*([A-T])\b/gi)) {
+    answers.set(10 + Number(match[1]), match[2].toLowerCase());
+  }
+  return answers;
+};
+
+const extractTelcHeadingOptions = (partText) =>
+  [...normalizeTelcText(partText).matchAll(/(?:^|\n)\s*([A-G])\s*[-\u2010-\u2015]\s*([^\n]+)/g)]
+    .map((match) => ({
+      value: match[1].toLowerCase(),
+      label: `${match[1].toUpperCase()} - ${compactText(match[2])}`,
+    }))
+    .filter((option) => option.label);
+
+const extractTelcReadingPart1Questions = (partText, answerMap) => {
+  const clean = stripTelcPageDecorations(partText);
+  const options = extractTelcHeadingOptions(clean);
+  const blocks = splitByMatches(clean, /(?:^|\n)\s*Text\s+([1-5])\b/gi);
+  return blocks.map((block) => {
+    const sourceNumber = Number(block.match[1]);
+    const body = sliceAfterBlockMatch(block).replace(/\n?\s*L[oö]sung\s+Text[\s\S]*$/i, "");
+    const correct = answerMap.get(sourceNumber);
+    return {
+      questionType: "matching",
+      prompt: trimForDb(`Text ${sourceNumber}\n${body}`),
+      options,
+      correctAnswer: correct ? { value: correct } : {},
+      explanation: null,
+      position: sourceNumber,
+      scoring: { points: 5 },
+      metadata: {
+        sourceQuestionNumber: sourceNumber,
+        telcPart: 1,
+        matchingPrompt: "Wählen Sie die passende Überschrift.",
+      },
+      sectionType: "read",
+    };
+  });
+};
+
+const extractTelcReadingPart2Questions = (partText, answerMap) => {
+  const clean = stripTelcPageDecorations(partText);
+  const blocks = splitByMatches(clean, /(?:^|\n)\s*Frage\s+([1-5])\s*:\s*/gi);
+  return blocks
+    .map((block) => {
+      const sourceNumber = Number(block.match[1]);
+      const raw = stripTelcPageDecorations(sliceAfterBlockMatch(block));
+      const optionStart = raw.search(/\b[abc]\)/i);
+      if (optionStart < 0) return null;
+      const prompt = raw.slice(0, optionStart);
+      const optionArea = raw.slice(optionStart).replace(/\s+/g, " ").trim();
+      const options = [...optionArea.matchAll(/\b([abc])\)\s*([\s\S]*?)(?=\s+\b[abc]\)|$)/gi)]
+        .map((match) => ({
+          value: match[1].toLowerCase(),
+          label: compactText(match[2]),
+        }))
+        .filter((option) => option.label);
+      const position = 5 + sourceNumber;
+      const correct = answerMap.get(position);
+      return {
+        questionType: "multiple_choice",
+        prompt: trimForDb(`Frage ${sourceNumber}: ${prompt}`),
+        options,
+        correctAnswer: correct ? { value: correct } : {},
+        explanation: null,
+        position,
+        scoring: { points: 5 },
+        metadata: { sourceQuestionNumber: sourceNumber, telcPart: 2 },
+        sectionType: "read",
+      };
+    })
+    .filter(Boolean);
+};
+
+const extractTelcAdOptions = (adsArea) =>
+  [...stripTelcPageDecorations(adsArea).matchAll(/(?:^|\n)\s*Anzeige\s+([A-T])\s*:\s*([\s\S]*?)(?=(?:^|\n)\s*Anzeige\s+[A-T]\s*:|(?:^|\n)\s*(?:1:\s*___|\d+\s+CORRIG|Teil\s+[123]\s*:|SUJET\s+\d|$))/gim)]
+    .map((match) => ({
+      value: match[1].toLowerCase(),
+      label: `${match[1].toUpperCase()} - ${compactText(match[2])}`,
+    }))
+    .filter((option) => option.label);
+
+const extractTelcReadingPart3Questions = (partText, answerMap) => {
+  const clean = stripTelcPageDecorations(partText);
+  const situationsIndex = clean.search(/(?:^|\n)\s*Situationen\s*(?:\n|$)/i);
+  const adsMatch = /(?:^|\n)\s*Anzeigen\s*(?:\n|$)/i.exec(clean);
+  if (situationsIndex < 0 || !adsMatch) return [];
+
+  const situationsArea = clean.slice(situationsIndex, adsMatch.index);
+  const adsArea = clean.slice(adsMatch.index);
+  const options = extractTelcAdOptions(adsArea);
+  return [...situationsArea.matchAll(/(?:^|\n)\s*(10|[1-9])\.\s*([\s\S]*?)(?=\n\s*(?:10|[1-9])\.|$)/g)]
+    .map((match) => {
+      const sourceNumber = Number(match[1]);
+      const position = 10 + sourceNumber;
+      const correct = answerMap.get(position);
+      return {
+        questionType: "matching",
+        prompt: trimForDb(`Situation ${sourceNumber}: ${match[2]}`),
+        options,
+        correctAnswer: correct ? { value: correct } : {},
+        explanation: null,
+        position,
+        scoring: { points: 2.5 },
+        metadata: {
+          sourceQuestionNumber: sourceNumber,
+          telcPart: 3,
+          matchingPrompt: "Wählen Sie die passende Anzeige.",
+        },
+        sectionType: "read",
+      };
+    })
+    .filter((question) => question.prompt);
+};
+
+const parseTelcReadingPartQuestions = (partNumber, partText, answerMap) => {
+  if (partNumber === 1) return extractTelcReadingPart1Questions(partText, answerMap);
+  if (partNumber === 2) return extractTelcReadingPart2Questions(partText, answerMap);
+  if (partNumber === 3) return extractTelcReadingPart3Questions(partText, answerMap);
+  return [];
+};
+
+const parseTelcReadingSeries = (text, metadata) => {
+  const clean = stripTelcPageDecorations(text);
+  const blocks = splitTelcSujetBlocks(clean);
+  return blocks.map((block) => {
+    const seriesNumber = Number(block.match[1]);
+    const title = extractTelcSujetTitle(block);
+    const correctionStart = findTelcReadingCorrectionStart(block.text);
+    const taskText = correctionStart >= 0 ? block.text.slice(0, correctionStart) : block.text;
+    const correctionText = correctionStart >= 0 ? block.text.slice(correctionStart) : "";
+    const answers = parseTelcReadingAnswerMap(correctionText);
+    const partMatches = [...taskText.matchAll(/(?:^|\n)\s*Teil\s+([123])\s*[-\u2010-\u2015]\s*([^\n]+)/gi)];
+    const sections = partMatches.map((match, index) => {
+      const next = partMatches[index + 1];
+      const partNumber = Number(match[1]);
+      const header = compactText(match[2]);
+      const body = taskText.slice(match.index + match[0].length, next ? next.index : taskText.length);
+      const questions = parseTelcReadingPartQuestions(partNumber, body, answers);
+      return {
+        sectionType: "read",
+        partNumber,
+        title: `Teil ${partNumber}: ${header}`,
+        instructions: trimForDb([match[0], body].join("\n"), 8000),
+        durationMinutes: partNumber === 1 ? 15 : partNumber === 2 ? 25 : 20,
+        points: 25,
+        scoring: { points: 25 },
+        metadata: { sourceHeader: header, telcFormat: true },
+        questions,
+      };
+    });
+    return {
+      seriesNumber,
+      title,
+      sourceLabel: `Sujet ${String(seriesNumber).padStart(2, "0")}`,
+      instructions: "telc Deutsch B1 Lesen: drei Leseteile, 60 Minuten, 75 Punkte.",
+      scoring: { totalPoints: 75, parts: { 1: 25, 2: 25, 3: 25 } },
+      metadata: { ...metadata, telcFormat: true, answerKeyDetected: answers.size > 0 },
+      sections,
+    };
+  });
+};
+
+const parseTelcWritingSeries = (text, metadata) => {
+  const { taskText, solutionText } = splitTelcTaskAndSolution(text);
+  const solutionMap = parseTelcWritingSolutions(solutionText);
+  const blocks = splitTelcSujetBlocks(taskText);
+  return blocks.map((block) => {
+    const seriesNumber = Number(block.match[1]);
+    const title = extractTelcSujetTitle(block);
+    const body = stripTelcPageDecorations(sliceAfterBlockMatch(block)).replace(/\n?\s*Ihr Text:\s*$/i, "");
+    const solution = solutionMap.get(seriesNumber) || {};
+    const correctAnswer = {};
+    if (solution.sampleAnswer) correctAnswer.sampleAnswer = solution.sampleAnswer;
+    if (solution.tips) correctAnswer.expectedPerformance = solution.tips;
+    return {
+      seriesNumber,
+      title,
+      sourceLabel: `Sujet ${String(seriesNumber).padStart(2, "0")}`,
+      instructions: "telc Deutsch B1 Schreiben: eine E-Mail oder ein Brief mit vier Inhaltspunkten.",
+      scoring: { totalPoints: 45, parts: { 1: 45 } },
+      metadata: { ...metadata, telcFormat: true },
+      sections: [
+        {
+          sectionType: "write",
+          partNumber: 1,
+          title: `Schreiben: ${title}`,
+          instructions: trimForDb(body, 5000),
+          durationMinutes: 30,
+          points: 45,
+          scoring: { points: 45, durationMinutes: 30 },
+          metadata: { sourceHeader: title, telcFormat: true },
+          questions: [
+            {
+              questionType: "writing_email",
+              prompt: trimForDb([`Sujet ${String(seriesNumber).padStart(2, "0")}: ${title}`, body].join("\n")),
+              options: [],
+              correctAnswer,
+              explanation: solution.tips || solution.sampleAnswer || null,
+              position: 1,
+              scoring: { points: 45, durationMinutes: 30 },
+              metadata: { wordTarget: extractEclWordTarget(body) || 100, telcPart: 1 },
+              sectionType: "write",
+            },
+          ],
+        },
+      ],
+    };
+  });
+};
+
+const parseTelcSpeakingSeries = (text, metadata) => {
+  const { taskText, solutionText } = splitTelcTaskAndSolution(text);
+  const solutionMap = parseTelcSpeakingSolutions(solutionText);
+  const blocks = splitTelcSujetBlocks(taskText);
+  const questionTypes = {
+    1: "speaking_intro",
+    2: "speaking_topic_discussion",
+    3: "speaking_partner_planning",
+  };
+  const fallbackDurations = { 1: 4, 2: 5, 3: 6 };
+
+  return blocks.map((block) => {
+    const seriesNumber = Number(block.match[1]);
+    const title = extractTelcSujetTitle(block);
+    const solutions = solutionMap.get(seriesNumber)?.parts || new Map();
+    const partMatches = [...block.text.matchAll(/(?:^|\n)\s*TEIL\s+([123])\s*[-\u2010-\u2015]\s*([^\n]+)/gi)];
+    const sections = partMatches.map((match, index) => {
+      const next = partMatches[index + 1];
+      const partNumber = Number(match[1]);
+      const header = compactText(match[2]);
+      const body = block.text.slice(match.index + match[0].length, next ? next.index : block.text.length);
+      const durationMinutes = extractDurationMinutes([header, body].join(" ")) || fallbackDurations[partNumber] || null;
+      const solution = solutions.get(partNumber) || {};
+      const correctAnswer = {};
+      if (solution.sampleAnswer) correctAnswer.sampleAnswer = solution.sampleAnswer;
+      if (solution.tips) correctAnswer.expectedPerformance = solution.tips;
+      return {
+        sectionType: "speak",
+        partNumber,
+        title: `Teil ${partNumber}: ${header}`,
+        instructions: trimForDb(body, 5000),
+        durationMinutes,
+        points: 25,
+        scoring: { points: 25, durationMinutes },
+        metadata: { sourceHeader: header, telcFormat: true },
+        questions: [
+          {
+            questionType: questionTypes[partNumber] || "speaking_prompt",
+            prompt: trimForDb([compactText(match[0]), body].join("\n")),
+            options: [],
+            correctAnswer,
+            explanation: solution.tips || solution.sampleAnswer || null,
+            position: partNumber,
+            scoring: { points: 25, durationMinutes },
+            metadata: { telcPart: partNumber },
+            sectionType: "speak",
+          },
+        ],
+      };
+    });
+    return {
+      seriesNumber,
+      title,
+      sourceLabel: `Sujet ${String(seriesNumber).padStart(2, "0")}`,
+      instructions: "telc Deutsch B1 Sprechen: drei mündliche Teile in einer Paarprüfung.",
+      scoring: { totalPoints: 75, parts: { 1: 25, 2: 25, 3: 25 } },
+      metadata: { ...metadata, telcFormat: true },
+      sections,
+    };
+  });
+};
+
 const parseGenericSeries = (text, metadata) => [
   {
     seriesNumber: 1,
@@ -1247,8 +1642,21 @@ const parseGenericSeries = (text, metadata) => [
 const parseStructuredContent = (text, metadata) => {
   const provider = normalizeDetectedProvider(metadata.provider);
   const hasOsdSujets = /(?:^|\n)SUJET\s+0?\d{1,2}\b/i.test(text);
+  const hasTelcSujets = /(?:^|\n)(?:SUJET|Sujet)\s+0?\d{1,2}\s*\/\s*20\b/i.test(text);
   const hasEclSujets = /(?:^|\n)Sujet\s+0?\d{1,2}\s+[-–—]/i.test(text);
   const hasEclCombinations = /(?:^|\n)Kombination\s+0?\d{1,2}\s+[-–—]/i.test(text);
+  if ((provider === "telc" || hasTelcSujets) && metadata.sectionType === "read") {
+    const series = parseTelcReadingSeries(text, metadata);
+    if (series.length) return series;
+  }
+  if ((provider === "telc" || hasTelcSujets) && metadata.sectionType === "write") {
+    const series = parseTelcWritingSeries(text, metadata);
+    if (series.length) return series;
+  }
+  if ((provider === "telc" || hasTelcSujets) && metadata.sectionType === "speak") {
+    const series = parseTelcSpeakingSeries(text, metadata);
+    if (series.length) return series;
+  }
   if ((provider === "ecl" || hasEclSujets) && metadata.sectionType === "read") {
     const series = parseEclReadingSeries(text, metadata);
     if (series.length) return series;
@@ -1380,6 +1788,9 @@ const analyzeExamDocument = async ({ buffer, filename, mimetype }) => {
   if (!buffer?.length) throw new Error("Document buffer is empty");
   const { text, extraction } = await extractDocumentText({ buffer, filename, mimetype });
   let provider = detectProvider(text);
+  if (provider === "custom" && /(?:^|\n)(?:SUJET|Sujet)\s+0?\d{1,2}\s*\/\s*20\b/i.test(text) && /\btelc\b/i.test(text)) {
+    provider = "telc";
+  }
   if (provider === "custom" && /(?:^|\n)SUJET\s+0?\d{1,2}\b/i.test(text)) provider = "osd";
   const level = detectLevel(text);
   const sectionType = detectSectionType(text);
