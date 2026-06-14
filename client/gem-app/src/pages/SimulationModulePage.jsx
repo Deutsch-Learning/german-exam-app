@@ -561,6 +561,15 @@ const CORRECTION_CRITERION_LABELS = {
   vocabulary: "Vocabulaire",
   register: "Registre",
 };
+const INVALID_WRITING_STATUSES = new Set(["empty", "too_short", "meaningless", "off_topic"]);
+const WRITING_VALIDATION_LABELS = {
+  valid: "Reponse valide",
+  empty: "Reponse vide",
+  too_short: "Trop courte",
+  meaningless: "Texte incomprehensible",
+  off_topic: "Hors sujet",
+  unavailable: "Indisponible",
+};
 
 const firstPositiveNumber = (...values) => {
   for (const value of values) {
@@ -600,6 +609,18 @@ const formatCorrectionScore = (value) => {
   if (!Number.isFinite(number)) return "-";
   return Number.isInteger(number) ? String(number) : number.toFixed(1).replace(/\.0$/, "");
 };
+
+const normalizeWritingValidationStatus = (value) => {
+  const status = String(value ?? "valid").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return WRITING_VALIDATION_LABELS[status] ? status : "valid";
+};
+
+const getWritingValidationLabel = (value) => {
+  const status = normalizeWritingValidationStatus(value);
+  return WRITING_VALIDATION_LABELS[status] || WRITING_VALIDATION_LABELS.valid;
+};
+
+const isInvalidWritingStatus = (value) => INVALID_WRITING_STATUSES.has(normalizeWritingValidationStatus(value));
 
 const buildWritingCorrectionTasks = (module, answers, examParts, context) => {
   if (module.id !== "write") return [];
@@ -4030,6 +4051,17 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
         <div className={styles.aiTaskList}>
           {tasks.map((task) => {
+            const validationStatus = normalizeWritingValidationStatus(task.validationStatus);
+            const validationBadgeStatus = isInvalidWritingStatus(validationStatus)
+              ? "invalid"
+              : validationStatus === "unavailable"
+                ? "unavailable"
+                : "valid";
+            const sentenceCorrections = Array.isArray(task.sentenceCorrections) ? task.sentenceCorrections : [];
+            const nextSteps = Array.isArray(task.nextSteps) ? task.nextSteps : [];
+            const hasMainMessage = Boolean(task.mainMessage);
+            const hasDifferentFeedback = Boolean(task.feedback && task.feedback !== task.mainMessage);
+            const shouldShowImprovement = Boolean(task.shouldShowImprovement) && !isInvalidWritingStatus(validationStatus);
             const criteria = Object.keys(CORRECTION_CRITERION_LABELS)
               .map((key) => [key, task.criterionScores?.[key]])
               .filter(([, value]) => value !== undefined && value !== null);
@@ -4037,10 +4069,23 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               <article key={`${task.taskId || task.id}-${task.taskIndex}`} className={styles.aiTaskCard}>
                 <div className={styles.aiTaskHeader}>
                   <span><ClipboardCheck size={16} /> Tache {Number(task.taskIndex) + 1}</span>
-                  <strong>{formatCorrectionScore(task.score)} / {formatCorrectionScore(task.maxScore)}</strong>
+                  <div className={styles.aiTaskHeaderMeta}>
+                    <em className={styles.aiValidationBadge} data-status={validationBadgeStatus}>
+                      {getWritingValidationLabel(validationStatus)}
+                    </em>
+                    <strong>
+                      {formatCorrectionScore(task.score)} / {formatCorrectionScore(task.maxScore)}
+                      {Number.isFinite(Number(task.scorePercentage)) ? ` (${formatCorrectionScore(task.scorePercentage)}%)` : ""}
+                    </strong>
+                  </div>
                 </div>
                 <h3>{task.title}</h3>
-                {criteria.length ? (
+                {hasMainMessage ? (
+                  <p className={styles.aiValidationMessage} data-status={validationBadgeStatus}>
+                    {task.mainMessage}
+                  </p>
+                ) : null}
+                {criteria.length && !isInvalidWritingStatus(validationStatus) ? (
                   <div className={styles.aiCriteriaGrid}>
                     {criteria.map(([key, value]) => (
                       <span key={key}>
@@ -4050,25 +4095,68 @@ export default function SimulationModulePage({ moduleIdOverride }) {
                     ))}
                   </div>
                 ) : null}
-                <div className={styles.aiTaskFeedbackGrid}>
-                  <div>
-                    <h4><ShieldCheck size={15} /> Forces</h4>
-                    {task.strengths?.length ? (
-                      <ul>{task.strengths.map((item) => <li key={item}>{item}</li>)}</ul>
-                    ) : (
-                      <p>Aucune force specifique.</p>
-                    )}
+                {!isInvalidWritingStatus(validationStatus) ? (
+                  <div className={styles.aiTaskFeedbackGrid}>
+                    <div>
+                      <h4><ShieldCheck size={15} /> Forces</h4>
+                      {task.strengths?.length ? (
+                        <ul>{task.strengths.map((item) => <li key={item}>{item}</li>)}</ul>
+                      ) : (
+                        <p>Aucune force specifique.</p>
+                      )}
+                    </div>
+                    <div>
+                      <h4><Gauge size={15} /> Faiblesses</h4>
+                      {task.weaknesses?.length ? (
+                        <ul>{task.weaknesses.map((item) => <li key={item}>{item}</li>)}</ul>
+                      ) : (
+                        <p>Aucune faiblesse specifique.</p>
+                      )}
+                    </div>
                   </div>
-                  <div>
-                    <h4><Gauge size={15} /> Faiblesses</h4>
-                    {task.weaknesses?.length ? (
-                      <ul>{task.weaknesses.map((item) => <li key={item}>{item}</li>)}</ul>
-                    ) : (
-                      <p>Aucune faiblesse specifique.</p>
-                    )}
+                ) : task.weaknesses?.length ? (
+                  <div className={styles.aiNextSteps}>
+                    <h4><AlertCircle size={15} /> Pourquoi la correction est bloquee</h4>
+                    <ul>{task.weaknesses.map((item) => <li key={item}>{item}</li>)}</ul>
                   </div>
-                </div>
-                {task.feedback ? <p className={styles.aiExaminerComment}>{task.feedback}</p> : null}
+                ) : null}
+                {shouldShowImprovement && sentenceCorrections.length ? (
+                  <div className={styles.aiSentenceCorrections}>
+                    <h4><PencilLine size={15} /> Corrections basees sur votre texte</h4>
+                    <div className={styles.aiSentenceCorrectionList}>
+                      {sentenceCorrections.map((item, index) => (
+                        <div key={`${item.original || item.improved}-${index}`} className={styles.aiSentenceCorrection}>
+                          {item.original ? (
+                            <p>
+                              <span>Original</span>
+                              {item.original}
+                            </p>
+                          ) : null}
+                          {item.improved ? (
+                            <p>
+                              <span>Ameliore</span>
+                              {item.improved}
+                            </p>
+                          ) : null}
+                          {item.explanation ? <small>{item.explanation}</small> : null}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                {shouldShowImprovement && task.improvedVersion ? (
+                  <div className={styles.aiImprovedVersion}>
+                    <h4><WandSparkles size={15} /> Version amelioree de votre texte</h4>
+                    <p>{task.improvedVersion}</p>
+                  </div>
+                ) : null}
+                {nextSteps.length ? (
+                  <div className={styles.aiNextSteps}>
+                    <h4><Flag size={15} /> Prochaines etapes</h4>
+                    <ul>{nextSteps.map((item) => <li key={item}>{item}</li>)}</ul>
+                  </div>
+                ) : null}
+                {hasDifferentFeedback ? <p className={styles.aiExaminerComment}>{task.feedback}</p> : null}
               </article>
             );
           })}
@@ -4088,6 +4176,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       </section>
     );
   };
+
 
   const renderModuleContent = () => {
     if (completed) {
@@ -4185,59 +4274,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           </section>
         );
       }
-      return (
-        <section className={styles.resultPanel}>
-          <Trophy size={44} />
-          <p className={styles.sectionLabel}>{t.modulePage.result}</p>
-          <h2>{displayedScore}%</h2>
-          <p>
-            {unlocked
-              ? `Bravo, le prochain niveau conseillé est ${getNextLevel(level)}.`
-              : `Continuez sur ${level} avant d'augmenter la difficulté.`}
-          </p>
-          <div className={styles.resultStats}>
-            <span><CheckCircle2 size={16} /> {answeredCount}/{totalTasks} tâches traitées</span>
-            <span><CheckCircle2 size={16} /> {resultSummary.correctCount} correcte(s)</span>
-            <span><XCircle size={16} /> {resultSummary.wrongCount} incorrecte(s)</span>
-            <span><Flag size={16} /> {Object.values(flagged).filter(Boolean).length} signalée(s)</span>
-            <span><Clock3 size={16} /> {formatTime(elapsedSeconds)} de travail</span>
-          </div>
-          {renderWritingCorrectionPanel()}
-          <div className={styles.finalReviewList}>
-            {resultSummary.rows.map((row) => (
-              <article key={row.id} className={styles.finalReviewItem} data-correct={row.isCorrect ? "true" : "false"}>
-                <div className={styles.finalReviewHeader}>
-                  <span>Question {row.number}</span>
-                  <strong>{row.isCorrect ? "Correct" : "À revoir"}</strong>
-                </div>
-                <h3>{row.title}</h3>
-                <p><b>Votre réponse:</b> {row.userAnswer}</p>
-                {!module.isImported ? <p><b>Réponse attendue:</b> <span translate="no">{row.correctAnswer}</span></p> : null}
-                {!module.isImported && row.explanation ? <p className={styles.finalExplanation}>{row.explanation}</p> : null}
-              </article>
-            ))}
-          </div>
-          {resultStatus ? <p className={styles.statusLine}>{toGermanStatus(resultStatus)}</p> : null}
-          <div className={styles.resultActions}>
-            <button type="button" className={styles.secondaryButton} onClick={() => navigate(loggedIn ? "/dashboard" : "/")}>
-              <ChevronLeft size={16} />
-              Retour
-            </button>
-            <button type="button" className={styles.secondaryButton} onClick={startSimulation}>
-              <RotateCcw size={16} />
-              Recommencer
-            </button>
-            <button type="button" className={styles.secondaryButton} onClick={() => navigate(selectedSeries ? `/simulations/${selectedSeries.examId}` : "/simulations", { state: { fromResults: true } })}>
-              <ClipboardCheck size={16} />
-              Choisir une nouvelle série
-            </button>
-            <button type="button" className={styles.primaryButton} onClick={() => navigate(seriesRoute)}>
-              {t.modulePage.chooseModule}
-              <ChevronRight size={16} />
-            </button>
-          </div>
-        </section>
-      );
+
+      return null;
     }
 
     if (partIntroVisible && currentPart) return renderPartIntro();
