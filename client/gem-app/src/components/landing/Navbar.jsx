@@ -22,7 +22,7 @@ export default function Navbar({ logo, language = "fr", onChangeLanguage, labels
   );
 
   const dropdowns = [
-    { id: "about", label: labels.aboutTests ?? "About TestDaF/DSH", items: aboutTestSections },
+    { id: "about", label: labels.aboutTests ?? "About", items: aboutTestSections },
     { id: "pages", label: labels.pages ?? "Pages", items: pageLinks },
   ];
 
