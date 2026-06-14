@@ -445,7 +445,7 @@ export default function DashboardMainPage() {
           labels={labels}
         />
 
-        <main className={styles.contentArea}>
+        <main className={styles.contentArea} data-lenis-prevent-wheel>
           <header className={styles.pageHeader}>
             <h1>{t.dashboard.welcome} {loading ? "..." : displayName}</h1>
             {error ? <p className={styles.errorText}>{error}</p> : null}
