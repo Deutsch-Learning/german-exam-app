@@ -96,14 +96,16 @@ const LanguageDropdown = ({ language, setLanguage }) => {
   );
 };
 
-const TopNav = ({ onToggleMenu, onGoDashboard, onGoProfile, onGoActualites, onGoAbout, onGoContact, onGoModule, onGoLessons, onSwitchAdmin, onLogout, isAdminUser, language, setLanguage, labels }) => {
+const TopNav = ({ onToggleMenu, onGoHome, onGoDashboard, onGoProfile, onGoActualites, onGoAbout, onGoContact, onGoModule, onGoLessons, onSwitchAdmin, onLogout, isAdminUser, language, setLanguage, labels }) => {
   const [openFormation, setOpenFormation] = useState(false);
 
   return (
     <nav className={styles.topNav}>
       <div className={styles.navLeft}>
         <button className={styles.mobileMenuBtn} onClick={onToggleMenu} type="button"><MenuIcon /></button>
-        <img src={logo} alt="Deutsch Prüfungen" className={styles.logo} />
+        <button className={styles.logoButton} type="button" onClick={onGoHome} aria-label="Go to landing page">
+          <img src={logo} alt="Deutsch Prüfungen" className={styles.logo} />
+        </button>
       </div>
       <div className={styles.navLinks}>
         <button type="button" className={styles.linkBtn} onClick={onGoDashboard}>{labels.dashboard}</button>
@@ -416,6 +418,7 @@ export default function DashboardMainPage() {
     <div className={`${styles.appWrapper} ${sidebarOpen ? styles.menuOpen : ""}`}>
       <TopNav
         onToggleMenu={() => setSidebarOpen(true)}
+        onGoHome={() => navigate("/")}
         onGoDashboard={() => navigate("/dashboard?view=user")}
         onGoProfile={() => navigate("/profile")}
         onGoActualites={() => navigate("/actualites")}

@@ -54,6 +54,15 @@
   color: var(--text-main);
 }
 
+.logoButton {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
 .logo {
   height: 48px;
   width: auto;
