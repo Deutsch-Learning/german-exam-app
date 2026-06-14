@@ -21,6 +21,20 @@ const CRITERION_KEYS = [
   "vocabulary",
   "register",
 ];
+const VALIDATION_STATUSES = new Set(["valid", "empty", "too_short", "meaningless", "off_topic", "unavailable"]);
+const INVALID_VALIDATION_STATUSES = new Set(["empty", "too_short", "meaningless", "off_topic"]);
+const VALIDATION_MESSAGES = {
+  empty: "Vous n'avez pas encore ecrit de reponse. Veuillez rediger un texte en rapport avec le sujet avant de demander une correction.",
+  too_short: "Votre reponse est trop courte pour etre corrigee correctement. Veuillez ecrire un texte complet en rapport avec la consigne.",
+  meaningless: "Votre reponse ne semble pas etre un texte comprehensible. Nous ne pouvons pas proposer d'amelioration. Veuillez ecrire une reponse claire et structuree.",
+  off_topic: "Votre reponse est comprehensible, mais elle ne correspond pas au sujet demande. Nous ne pouvons pas proposer une amelioration fiable. Veuillez ecrire un texte qui repond directement a la consigne.",
+};
+const INVALID_NEXT_STEPS = {
+  empty: ["Relisez la consigne.", "Redigez une reponse complete avant de demander une correction."],
+  too_short: ["Developpez vos idees en plusieurs phrases.", "Repondez directement aux points demandes dans la consigne."],
+  meaningless: ["Ecrivez des phrases comprehensibles avec un sujet et un verbe.", "Structurez votre reponse avant de relancer la correction."],
+  off_topic: ["Comparez votre texte avec la consigne.", "Reecrivez une reponse qui traite directement le sujet demande."],
+};
 
 const RESPONSE_SCHEMA = {
   type: "object",
@@ -48,15 +62,45 @@ const RESPONSE_SCHEMA = {
       type: "array",
       items: { type: "string" },
     },
+    status: { type: "string" },
+    isOnTopic: { type: "boolean" },
+    isMeaningful: { type: "boolean" },
+    shouldShowImprovement: { type: "boolean" },
+    mainMessage: { type: "string" },
+    sentenceCorrections: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          original: { type: "string" },
+          improved: { type: "string" },
+          explanation: { type: "string" },
+        },
+        required: ["original", "improved", "explanation"],
+      },
+    },
+    improvedVersion: { type: "string" },
+    nextSteps: {
+      type: "array",
+      items: { type: "string" },
+    },
     feedback: { type: "string" },
     estimatedLevel: { type: "string" },
   },
   required: [
+    "status",
     "score",
     "maxScore",
+    "isOnTopic",
+    "isMeaningful",
+    "shouldShowImprovement",
+    "mainMessage",
     "criterionScores",
     "strengths",
     "weaknesses",
+    "sentenceCorrections",
+    "improvedVersion",
+    "nextSteps",
     "feedback",
     "estimatedLevel",
   ],
@@ -94,16 +138,46 @@ const BATCH_RESPONSE_SCHEMA = {
             type: "array",
             items: { type: "string" },
           },
+          status: { type: "string" },
+          isOnTopic: { type: "boolean" },
+          isMeaningful: { type: "boolean" },
+          shouldShowImprovement: { type: "boolean" },
+          mainMessage: { type: "string" },
+          sentenceCorrections: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                original: { type: "string" },
+                improved: { type: "string" },
+                explanation: { type: "string" },
+              },
+              required: ["original", "improved", "explanation"],
+            },
+          },
+          improvedVersion: { type: "string" },
+          nextSteps: {
+            type: "array",
+            items: { type: "string" },
+          },
           feedback: { type: "string" },
           estimatedLevel: { type: "string" },
         },
         required: [
           "taskIndex",
+          "status",
           "score",
           "maxScore",
+          "isOnTopic",
+          "isMeaningful",
+          "shouldShowImprovement",
+          "mainMessage",
           "criterionScores",
           "strengths",
           "weaknesses",
+          "sentenceCorrections",
+          "improvedVersion",
+          "nextSteps",
           "feedback",
           "estimatedLevel",
         ],
@@ -165,6 +239,99 @@ const uniqueStrings = (items, limit = 8) => {
 const normalizeArray = (value, limit = 8) => (Array.isArray(value) ? uniqueStrings(value, limit) : []);
 
 const getCandidateModels = (primaryModel) => uniqueStrings([primaryModel, ...FALLBACK_MODELS], 5);
+
+const getResponseWordCount = (text) => cleanText(text, 20000).split(/\s+/).filter(Boolean).length;
+
+const normalizeValidationStatus = (value) => {
+  const status = String(value ?? "valid").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return VALIDATION_STATUSES.has(status) ? status : "valid";
+};
+
+const isInvalidValidationStatus = (status) => INVALID_VALIDATION_STATUSES.has(normalizeValidationStatus(status));
+
+const getField = (data, camelName, snakeName, fallback = undefined) =>
+  data[camelName] !== undefined ? data[camelName] : data[snakeName] !== undefined ? data[snakeName] : fallback;
+
+const toBoolean = (value, fallback = false) => {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    if (/^(true|1|yes)$/i.test(value.trim())) return true;
+    if (/^(false|0|no)$/i.test(value.trim())) return false;
+  }
+  return fallback;
+};
+
+const normalizeSentenceCorrections = (value, limit = 6) => {
+  if (!Array.isArray(value)) return [];
+  const output = [];
+  const seen = new Set();
+  for (const item of value) {
+    const entry = asObject(item);
+    const original = cleanText(entry.original, 700);
+    const improved = cleanText(entry.improved, 700);
+    const explanation = cleanText(entry.explanation, 1000);
+    if (!original && !improved) continue;
+    const key = `${original}\n${improved}`.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    output.push({ original, improved, explanation });
+    if (output.length >= limit) break;
+  }
+  return output;
+};
+
+const isLikelyNoiseToken = (token) => {
+  const normalized = String(token ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z]/g, "");
+  if (normalized.length < 4) return false;
+  if (/^([a-z])\1{3,}$/.test(normalized)) return true;
+  if (/^([a-z]{1,3})\1{2,}$/.test(normalized)) return true;
+  if (!/[aeiouy]/.test(normalized) && normalized.length >= 5) return true;
+  const uniqueLetters = new Set(normalized).size;
+  return normalized.length >= 8 && uniqueLetters <= 3;
+};
+
+const getLocalValidationStatus = (task) => {
+  const text = cleanText(task.candidateResponse, 20000);
+  if (!text) return "empty";
+
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words.length < 4) return "too_short";
+
+  const lexicalTokens = words.map((word) => word.replace(/[^\p{L}]/gu, "")).filter(Boolean);
+  const noiseTokens = lexicalTokens.filter(isLikelyNoiseToken);
+  const uniqueTokens = new Set(lexicalTokens.map((word) => word.toLowerCase())).size;
+  if (lexicalTokens.length >= 2 && noiseTokens.length / lexicalTokens.length >= 0.6) return "meaningless";
+  if (lexicalTokens.length >= 5 && uniqueTokens / lexicalTokens.length <= 0.35) return "meaningless";
+
+  return "valid";
+};
+
+const buildValidationEvaluation = (task, status) => {
+  const normalizedStatus = normalizeValidationStatus(status);
+  const feedback = VALIDATION_MESSAGES[normalizedStatus] || VALIDATION_MESSAGES.meaningless;
+  return {
+    validationStatus: normalizedStatus,
+    score: 0,
+    scorePercentage: 0,
+    maxScore: roundScore(task.maxScore),
+    criterionScores: normalizeCriterionScores({}),
+    strengths: [],
+    weaknesses: [feedback],
+    feedback,
+    estimatedLevel: task.level || "",
+    isOnTopic: normalizedStatus !== "off_topic",
+    isMeaningful: !["empty", "too_short", "meaningless"].includes(normalizedStatus),
+    shouldShowImprovement: false,
+    mainMessage: feedback,
+    sentenceCorrections: [],
+    improvedVersion: "",
+    nextSteps: INVALID_NEXT_STEPS[normalizedStatus] || ["Reprenez la consigne puis redigez une reponse complete."],
+  };
+};
 
 const getFirstPositiveNumber = (...values) => {
   for (const value of values) {
@@ -305,12 +472,20 @@ const buildPrompt = (task) => {
   };
 
   return [
-    "You are a certified examiner for German Expression Ecrite tasks.",
-    "Evaluate only the candidate response against the task context. Do not invent missing content.",
+    "You are a strict but helpful German exam writing evaluator for Expression Ecrite / Schreiben tasks.",
+    "You receive the writing task, expected exam level, exam body, and learner response.",
+    "First classify the learner response as exactly one status: valid, empty, too_short, meaningless, or off_topic.",
+    "If the response is empty, too short, meaningless, random, or off-topic, do not generate a corrected model answer, sentence corrections, or improved version.",
+    "If the response is valid and related to the task, score it from 0 to 100 using German exam writing criteria.",
+    "The score field is a percentage from 0 to 100, not the task maximum. The application converts it to its stored max score.",
+    "For valid answers below 90, give suggestions and an improved version based mainly on the learner's own text. Preserve the learner's original ideas and do not write a completely new answer.",
+    "For valid answers of 90 or above, congratulate the learner and give only minor refinements if useful.",
     "Feedback must be in French, concise, practical, and examiner-style.",
-    `The score must be between 0 and ${task.maxScore} and must never exceed the maximum score.`,
     "Criterion scores are diagnostic values from 0 to 10 for each criterion.",
-    "Evaluate respect of instructions, task completion, coherence and organization, grammar and syntax, spelling and punctuation, vocabulary richness, register and tone.",
+    "Evaluate task relevance, completeness, coherence and organization, grammar and syntax, spelling and punctuation, vocabulary, sentence structure, and register/formality.",
+    "Set shouldShowImprovement to false for invalid statuses. Set it to true for valid answers below 90.",
+    "For invalid statuses, use mainMessage and nextSteps to explain what the learner must do next.",
+    "For valid answers below 90, include strengths, weaknesses, sentenceCorrections, improvedVersion, and nextSteps. The improvedVersion must be based on the learner's own text.",
     "Return strict JSON only, matching the response schema.",
     "Task context:",
     JSON.stringify(context, null, 2),
@@ -333,26 +508,52 @@ const normalizeCriterionScores = (value) => {
 const normalizeEvaluation = (raw, task) => {
   const data = asObject(raw);
   const maxScore = roundScore(task.maxScore);
+  const validationStatus = normalizeValidationStatus(getField(data, "status", "validation_status", data.validationStatus));
+  const invalid = isInvalidValidationStatus(validationStatus);
+  const rawScorePercentage = clamp(data.score, 0, 100);
+  const scorePercentage = invalid
+    ? validationStatus === "off_topic"
+      ? Math.min(rawScorePercentage, 20)
+      : 0
+    : rawScorePercentage;
+  const mainMessage = cleanText(
+    getField(data, "mainMessage", "main_message", data.feedback) ||
+      (scorePercentage >= 90
+        ? "Tres bon travail. Votre reponse est claire, pertinente et bien structuree. Quelques petites ameliorations peuvent encore rendre le texte plus naturel."
+        : "Correction terminee."),
+    4500
+  );
+  const shouldShowImprovement = !invalid && scorePercentage < 90;
   return {
-    score: roundScore(clamp(data.score, 0, maxScore)),
+    validationStatus,
+    score: roundScore((scorePercentage / 100) * maxScore),
+    scorePercentage: roundScore(scorePercentage),
     maxScore,
-    criterionScores: normalizeCriterionScores(data.criterionScores),
-    strengths: normalizeArray(data.strengths, 6),
-    weaknesses: normalizeArray(data.weaknesses, 6),
-    feedback: cleanText(data.feedback || "Correction terminee.", 4500),
+    criterionScores: invalid ? normalizeCriterionScores({}) : normalizeCriterionScores(data.criterionScores),
+    strengths: invalid ? [] : normalizeArray(data.strengths, 6),
+    weaknesses: invalid
+      ? uniqueStrings([mainMessage, ...normalizeArray(data.weaknesses, 4)], 5)
+      : normalizeArray(data.weaknesses, 6),
+    feedback: cleanText(data.feedback || mainMessage, 4500),
     estimatedLevel: cleanText(data.estimatedLevel || task.level || "", 20),
+    isOnTopic: invalid ? validationStatus !== "off_topic" : toBoolean(getField(data, "isOnTopic", "is_on_topic", true), true),
+    isMeaningful: invalid
+      ? !["empty", "too_short", "meaningless"].includes(validationStatus)
+      : toBoolean(getField(data, "isMeaningful", "is_meaningful", true), true),
+    shouldShowImprovement,
+    mainMessage,
+    sentenceCorrections: invalid
+      ? []
+      : normalizeSentenceCorrections(getField(data, "sentenceCorrections", "sentence_corrections", [])),
+    improvedVersion:
+      invalid || !shouldShowImprovement
+        ? ""
+        : cleanText(getField(data, "improvedVersion", "improved_version", ""), 12000),
+    nextSteps: normalizeArray(getField(data, "nextSteps", "next_steps", []), 6),
   };
 };
 
-const buildEmptyEvaluation = (task) => ({
-  score: 0,
-  maxScore: roundScore(task.maxScore),
-  criterionScores: normalizeCriterionScores({}),
-  strengths: [],
-  weaknesses: ["Aucune reponse exploitable n'a ete fournie pour cette tache."],
-  feedback: "Aucune reponse n'a ete fournie. La tache ne peut pas etre validee sans production ecrite.",
-  estimatedLevel: task.level || "",
-});
+const buildEmptyEvaluation = (task) => buildValidationEvaluation(task, "empty");
 
 const buildUnavailableEvaluation = (task, message) => {
   const feedback = cleanText(
@@ -360,13 +561,22 @@ const buildUnavailableEvaluation = (task, message) => {
     1000
   );
   return {
+    validationStatus: "unavailable",
     score: 0,
+    scorePercentage: 0,
     maxScore: roundScore(task.maxScore),
     criterionScores: normalizeCriterionScores({}),
     strengths: [],
     weaknesses: [feedback],
     feedback,
     estimatedLevel: task.level || "",
+    isOnTopic: false,
+    isMeaningful: false,
+    shouldShowImprovement: false,
+    mainMessage: feedback,
+    sentenceCorrections: [],
+    improvedVersion: "",
+    nextSteps: ["Relancez la correction dans quelques instants."],
   };
 };
 
@@ -509,12 +719,20 @@ const buildBatchPrompt = (tasks) => {
   }));
 
   return [
-    "You are a certified examiner for German Expression Ecrite tasks.",
+    "You are a strict but helpful German exam writing evaluator for Expression Ecrite / Schreiben tasks.",
     "Evaluate every task independently against its own task context. Do not let a good or bad answer affect another task.",
-    "Do not invent missing candidate content. Feedback must be in French, concise, practical, and examiner-style.",
-    "Each task score must be between 0 and that task's maxScore and must never exceed the maximum score.",
+    "First classify each learner response as exactly one status: valid, empty, too_short, meaningless, or off_topic.",
+    "If a response is empty, too short, meaningless, random, or off-topic, do not generate a corrected model answer, sentence corrections, or improved version.",
+    "If a response is valid and related to the task, score it from 0 to 100 using German exam writing criteria.",
+    "The score field is a percentage from 0 to 100, not the task maximum. The application converts it to its stored max score.",
+    "For valid answers below 90, give suggestions and an improved version based mainly on the learner's own text. Preserve the learner's original ideas and do not write a completely new answer.",
+    "For valid answers of 90 or above, congratulate the learner and give only minor refinements if useful.",
+    "Feedback must be in French, concise, practical, and examiner-style.",
     "Criterion scores are diagnostic values from 0 to 10 for each criterion.",
-    "Evaluate respect of instructions, task completion, coherence and organization, grammar and syntax, spelling and punctuation, vocabulary richness, register and tone.",
+    "Evaluate task relevance, completeness, coherence and organization, grammar and syntax, spelling and punctuation, vocabulary, sentence structure, and register/formality.",
+    "Set shouldShowImprovement to false for invalid statuses. Set it to true for valid answers below 90.",
+    "For invalid statuses, use mainMessage and nextSteps to explain what the learner must do next.",
+    "For valid answers below 90, include strengths, weaknesses, sentenceCorrections, improvedVersion, and nextSteps. The improvedVersion must be based on the learner's own text.",
     "Return strict JSON only, matching the response schema.",
     "Return exactly one correction object for each supplied taskIndex.",
     "Task contexts:",
@@ -639,6 +857,15 @@ const ensureWritingCorrectionSchema = async (pool) => {
       duration_minutes INTEGER,
       task_weight NUMERIC(8,2),
       response_text TEXT,
+      validation_status TEXT NOT NULL DEFAULT 'valid',
+      is_on_topic BOOLEAN NOT NULL DEFAULT TRUE,
+      is_meaningful BOOLEAN NOT NULL DEFAULT TRUE,
+      should_show_improvement BOOLEAN NOT NULL DEFAULT FALSE,
+      main_message TEXT,
+      sentence_corrections JSONB NOT NULL DEFAULT '[]'::jsonb,
+      improved_version TEXT,
+      next_steps JSONB NOT NULL DEFAULT '[]'::jsonb,
+      score_percentage NUMERIC(8,2) NOT NULL DEFAULT 0,
       score NUMERIC(8,2) NOT NULL DEFAULT 0,
       max_score NUMERIC(8,2) NOT NULL DEFAULT 0,
       criterion_scores JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -658,6 +885,15 @@ const ensureWritingCorrectionSchema = async (pool) => {
     CREATE INDEX IF NOT EXISTS writing_correction_tasks_correction_idx
       ON writing_correction_tasks(correction_id, task_index);
   `);
+  await pool.query(`ALTER TABLE writing_correction_tasks ADD COLUMN IF NOT EXISTS validation_status TEXT NOT NULL DEFAULT 'valid';`);
+  await pool.query(`ALTER TABLE writing_correction_tasks ADD COLUMN IF NOT EXISTS is_on_topic BOOLEAN NOT NULL DEFAULT TRUE;`);
+  await pool.query(`ALTER TABLE writing_correction_tasks ADD COLUMN IF NOT EXISTS is_meaningful BOOLEAN NOT NULL DEFAULT TRUE;`);
+  await pool.query(`ALTER TABLE writing_correction_tasks ADD COLUMN IF NOT EXISTS should_show_improvement BOOLEAN NOT NULL DEFAULT FALSE;`);
+  await pool.query(`ALTER TABLE writing_correction_tasks ADD COLUMN IF NOT EXISTS main_message TEXT;`);
+  await pool.query(`ALTER TABLE writing_correction_tasks ADD COLUMN IF NOT EXISTS sentence_corrections JSONB NOT NULL DEFAULT '[]'::jsonb;`);
+  await pool.query(`ALTER TABLE writing_correction_tasks ADD COLUMN IF NOT EXISTS improved_version TEXT;`);
+  await pool.query(`ALTER TABLE writing_correction_tasks ADD COLUMN IF NOT EXISTS next_steps JSONB NOT NULL DEFAULT '[]'::jsonb;`);
+  await pool.query(`ALTER TABLE writing_correction_tasks ADD COLUMN IF NOT EXISTS score_percentage NUMERIC(8,2) NOT NULL DEFAULT 0;`);
   await pool.query(`ALTER TABLE writing_correction_tasks ENABLE ROW LEVEL SECURITY;`);
 
   await pool.query(`
@@ -697,6 +933,15 @@ const toTaskPayload = (row) => ({
   moduleType: row.module_type,
   durationMinutes: row.duration_minutes,
   taskWeight: row.task_weight == null ? null : Number(row.task_weight),
+  validationStatus: normalizeValidationStatus(row.validation_status),
+  isOnTopic: Boolean(row.is_on_topic),
+  isMeaningful: Boolean(row.is_meaningful),
+  shouldShowImprovement: Boolean(row.should_show_improvement),
+  mainMessage: row.main_message,
+  sentenceCorrections: Array.isArray(row.sentence_corrections) ? row.sentence_corrections : [],
+  improvedVersion: row.improved_version || "",
+  nextSteps: Array.isArray(row.next_steps) ? row.next_steps : [],
+  scorePercentage: row.score_percentage == null ? null : Number(row.score_percentage),
   score: Number(row.score),
   maxScore: Number(row.max_score),
   criterionScores: asObject(row.criterion_scores),
@@ -794,17 +1039,20 @@ const finishLog = async (pool, logId, params) => {
 
 const upsertTaskCorrection = async (pool, correction, task, evaluation, model, requestHash) => {
   await pool.query(
-    `INSERT INTO writing_correction_tasks (
+     `INSERT INTO writing_correction_tasks (
        correction_id, simulation_id, user_id, task_index, task_id, title, instructions,
        subtitles, exam_type, module_type, duration_minutes, task_weight, response_text,
+       validation_status, is_on_topic, is_meaningful, should_show_improvement,
+       main_message, sentence_corrections, improved_version, next_steps, score_percentage,
        score, max_score, criterion_scores, strengths, weaknesses, feedback,
        estimated_level, model, request_hash, corrected_at, updated_at
      )
      VALUES (
        $1, $2, $3, $4, $5, $6, $7,
        $8, $9, $10, $11, $12, $13,
-       $14, $15, $16, $17, $18, $19,
-       $20, $21, $22, NOW(), NOW()
+       $14, $15, $16, $17, $18, $19, $20, $21, $22,
+       $23, $24, $25, $26, $27, $28,
+       $29, $30, $31, NOW(), NOW()
      )
      ON CONFLICT (simulation_id, task_index)
      DO UPDATE SET
@@ -819,6 +1067,15 @@ const upsertTaskCorrection = async (pool, correction, task, evaluation, model, r
        duration_minutes = EXCLUDED.duration_minutes,
        task_weight = EXCLUDED.task_weight,
        response_text = EXCLUDED.response_text,
+       validation_status = EXCLUDED.validation_status,
+       is_on_topic = EXCLUDED.is_on_topic,
+       is_meaningful = EXCLUDED.is_meaningful,
+       should_show_improvement = EXCLUDED.should_show_improvement,
+       main_message = EXCLUDED.main_message,
+       sentence_corrections = EXCLUDED.sentence_corrections,
+       improved_version = EXCLUDED.improved_version,
+       next_steps = EXCLUDED.next_steps,
+       score_percentage = EXCLUDED.score_percentage,
        score = EXCLUDED.score,
        max_score = EXCLUDED.max_score,
        criterion_scores = EXCLUDED.criterion_scores,
@@ -844,6 +1101,15 @@ const upsertTaskCorrection = async (pool, correction, task, evaluation, model, r
       task.durationMinutes,
       task.taskWeight,
       task.candidateResponse,
+      evaluation.validationStatus,
+      Boolean(evaluation.isOnTopic),
+      Boolean(evaluation.isMeaningful),
+      Boolean(evaluation.shouldShowImprovement),
+      evaluation.mainMessage || evaluation.feedback || null,
+      JSON.stringify(evaluation.sentenceCorrections || []),
+      evaluation.improvedVersion || null,
+      JSON.stringify(evaluation.nextSteps || []),
+      evaluation.scorePercentage || 0,
       evaluation.score,
       evaluation.maxScore,
       JSON.stringify(evaluation.criterionScores),
@@ -863,14 +1129,20 @@ const buildOverall = (taskResults, status) => {
   const percentage = maxScore > 0 ? Math.max(0, Math.min(100, Math.round((totalScore / maxScore) * 100))) : 0;
   const strengths = uniqueStrings(taskResults.flatMap((item) => item.evaluation.strengths), 6);
   const weaknesses = uniqueStrings(taskResults.flatMap((item) => item.evaluation.weaknesses), 6);
+  const invalidCount = taskResults.filter((item) => isInvalidValidationStatus(item.evaluation.validationStatus)).length;
+  const allInvalid = invalidCount > 0 && invalidCount === taskResults.length;
 
   let overallFeedback = "Correction terminee.";
   if (status === "failed") {
     overallFeedback = "La correction automatique n'a pas pu etre terminee. Les reponses sont enregistrees pour une nouvelle tentative.";
   } else if (status === "partial") {
     overallFeedback = "Correction partielle: certaines taches ont ete evaluees, mais au moins une correction IA a echoue.";
-  } else if (percentage >= 85) {
-    overallFeedback = "Tres bonne production: les consignes sont globalement respectees et le texte est efficace.";
+  } else if (allInvalid) {
+    overallFeedback = "La reponse ne peut pas etre corrigee comme une production ecrite valide. Redigez un texte clair et lie a la consigne avant de relancer la correction.";
+  } else if (invalidCount) {
+    overallFeedback = "Certaines reponses ne peuvent pas etre corrigees normalement. Les textes valides ont ete evalues, mais les reponses invalides doivent etre reecrites.";
+  } else if (percentage >= 90) {
+    overallFeedback = "Tres bon travail. Votre reponse est claire, pertinente et bien structuree. Quelques petites ameliorations peuvent encore rendre le texte plus naturel.";
   } else if (percentage >= 70) {
     overallFeedback = "Production solide: la tache est globalement accomplie, avec des points linguistiques a consolider.";
   } else if (percentage >= 50) {
@@ -886,6 +1158,7 @@ const buildOverall = (taskResults, status) => {
     strengths,
     weaknesses,
     overallFeedback,
+    invalidCount,
   };
 };
 
@@ -898,6 +1171,7 @@ const updateSimulationScore = async (pool, simulation, overall, correction) => {
     totalScore: overall.totalScore,
     maxScore: overall.maxScore,
     percentage: overall.percentage,
+    invalidTaskCount: overall.invalidCount,
     correctedAt: new Date().toISOString(),
   };
 
@@ -1001,8 +1275,10 @@ const correctWritingSimulation = async (pool, simulation, options = {}) => {
 
   await Promise.all(tasks.map(async (task) => {
     const taskHash = taskHashFor(task);
-    const hasResponse = Boolean(task.candidateResponse.trim());
-    const responseWords = task.candidateResponse.split(/\s+/).filter(Boolean).length;
+    const validationStatus = getLocalValidationStatus(task);
+    const locallyInvalid = isInvalidValidationStatus(validationStatus);
+    const hasResponse = validationStatus !== "empty";
+    const responseWords = getResponseWordCount(task.candidateResponse);
     const logId = await insertLog(pool, {
       correctionId: correction.id,
       simulationId: simulation.id,
@@ -1010,19 +1286,20 @@ const correctWritingSimulation = async (pool, simulation, options = {}) => {
       taskIndex: task.index,
       model,
       requestHash: taskHash,
-      status: hasResponse && apiKey ? "started" : hasResponse ? "failed" : "skipped",
+      status: locallyInvalid ? "skipped" : hasResponse && apiKey ? "started" : hasResponse ? "failed" : "skipped",
       requestMetadata: {
         taskId: task.taskId,
         title: task.title,
         maxScore: task.maxScore,
         responseWords,
+        validationStatus,
         batch: true,
       },
     });
     logIds.set(task.index, logId);
 
-    if (!hasResponse) {
-      const evaluation = buildEmptyEvaluation(task);
+    if (locallyInvalid) {
+      const evaluation = validationStatus === "empty" ? buildEmptyEvaluation(task) : buildValidationEvaluation(task, validationStatus);
       taskResultsByIndex.set(task.index, {
         task,
         evaluation,
@@ -1031,7 +1308,7 @@ const correctWritingSimulation = async (pool, simulation, options = {}) => {
       });
       await finishLog(pool, logId, {
         status: "skipped",
-        responseMetadata: { reason: "empty_response" },
+        responseMetadata: { reason: validationStatus },
       });
     } else if (!apiKey) {
       const message = "GEMINI_API_KEY is not configured on the server.";
@@ -1050,7 +1327,7 @@ const correctWritingSimulation = async (pool, simulation, options = {}) => {
     }
   }));
 
-  const aiTasks = tasks.filter((task) => task.candidateResponse.trim() && apiKey);
+  const aiTasks = tasks.filter((task) => !taskResultsByIndex.has(task.index) && apiKey);
   if (aiTasks.length) {
     try {
       let batch = null;
@@ -1081,11 +1358,14 @@ const correctWritingSimulation = async (pool, simulation, options = {}) => {
           errorMessage: result.errorMessage || null,
           responseMetadata: result.aiSucceeded
             ? {
-                score: result.evaluation.score,
-                maxScore: result.evaluation.maxScore,
-                estimatedLevel: result.evaluation.estimatedLevel,
-                model: batch.model,
-                batch: true,
+              score: result.evaluation.score,
+              scorePercentage: result.evaluation.scorePercentage,
+              maxScore: result.evaluation.maxScore,
+              validationStatus: result.evaluation.validationStatus,
+              shouldShowImprovement: result.evaluation.shouldShowImprovement,
+              estimatedLevel: result.evaluation.estimatedLevel,
+              model: batch.model,
+              batch: true,
               }
             : { batch: true },
         });
