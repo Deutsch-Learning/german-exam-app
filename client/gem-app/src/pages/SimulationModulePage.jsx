@@ -2901,6 +2901,22 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     persistProgress(`Part ${currentPart?.number ?? currentPartIndex + 1} demarree a ${formatClock()}`);
   }, [currentIndex, currentPart, currentPartIndex, module, persistProgress, simulationMode, totalExamDuration]);
 
+  const handleReadableWheel = useCallback((event) => {
+    const target = event.currentTarget;
+    const maxScrollTop = target.scrollHeight - target.clientHeight;
+    if (maxScrollTop <= 0 || event.deltaY === 0) return;
+
+    const scrollingDown = event.deltaY > 0;
+    const canScrollDown = target.scrollTop < maxScrollTop - 1;
+    const canScrollUp = target.scrollTop > 1;
+
+    if ((scrollingDown && canScrollDown) || (!scrollingDown && canScrollUp)) {
+      event.preventDefault();
+      event.stopPropagation();
+      target.scrollTop = Math.max(0, Math.min(maxScrollTop, target.scrollTop + event.deltaY));
+    }
+  }, []);
+
   const renderPartMaterial = (part, { compact = false } = {}) => {
     const sourceText = part?.sourceText || module.passage?.intro || currentTask?.prompt || currentTask?.question || "";
     const blocks = String(sourceText)
@@ -2909,7 +2925,10 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       .filter(Boolean);
 
     return (
-      <div className={`${styles.examMaterial} ${compact ? styles.examMaterialCompact : ""}`}>
+      <div
+        className={`${styles.examMaterial} ${styles.readableScrollArea} ${compact ? styles.examMaterialCompact : ""}`}
+        onWheel={handleReadableWheel}
+      >
         {blocks.length ? (
           blocks.map((block, index) => {
             const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
@@ -3114,7 +3133,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
         </div>
       </div>
 
-      <div className={styles.partIntroBody}>
+      <div className={styles.partIntroBody} onWheel={handleReadableWheel}>
         {renderPartMaterial(currentPart)}
       </div>
 
@@ -3336,13 +3355,15 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
   const renderReading = () => (
     <div className={styles.readingLayout}>
-      <section className={styles.passagePane}>
+      <section className={styles.passagePane} onWheel={handleReadableWheel}>
         <div className={styles.sectionLabel}>
           <BookOpen size={18} />
           Quelle Teil {currentPart?.number ?? currentPartIndex + 1}
         </div>
         <h2 translate="no">{currentPart?.displayTitle ?? module.passage.title}</h2>
-        <div className={styles.introText}>{renderStructuredExamText(module.passage.intro, "reading-intro")}</div>
+        <div className={`${styles.introText} ${styles.readableScrollArea}`} onWheel={handleReadableWheel}>
+          {renderStructuredExamText(module.passage.intro, "reading-intro")}
+        </div>
         {renderPartMaterial(currentPart, { compact: true })}
       </section>
 
@@ -3536,7 +3557,9 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             </div>
             <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
             <h2>{currentTask.title}</h2>
-            <div className={styles.instructionText}>{renderStructuredExamText(currentTask.prompt, `write-prompt-${currentTask.id}`)}</div>
+            <div className={`${styles.instructionText} ${styles.readableScrollArea}`} onWheel={handleReadableWheel}>
+              {renderStructuredExamText(currentTask.prompt, `write-prompt-${currentTask.id}`)}
+            </div>
             <div className={styles.promptMeta}>
               <span><FileText size={16} /> {formatWritingRequirementGerman(currentTask)}</span>
               <span><ShieldCheck size={16} /> Register {currentTask.register}</span>
@@ -3614,7 +3637,9 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           </div>
           <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
           <h2>{currentTask.title}</h2>
-          <div className={styles.instructionText}>{renderStructuredExamText(currentTask.prompt, `write-prompt-${currentTask.id}`)}</div>
+          <div className={`${styles.instructionText} ${styles.readableScrollArea}`} onWheel={handleReadableWheel}>
+            {renderStructuredExamText(currentTask.prompt, `write-prompt-${currentTask.id}`)}
+          </div>
           <div className={styles.promptMeta}>
             <span><FileText size={16} /> {formatWritingRequirementFrench(currentTask)}</span>
             <span><ShieldCheck size={16} /> Registre {currentTask.register}</span>
@@ -3697,7 +3722,9 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             </div>
             <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
             <h2>{currentTask.title}</h2>
-            <div className={styles.instructionText}>{renderStructuredExamText(currentTask.prompt, `speak-prompt-${currentTask.id}`)}</div>
+            <div className={`${styles.instructionText} ${styles.readableScrollArea}`} onWheel={handleReadableWheel}>
+              {renderStructuredExamText(currentTask.prompt, `speak-prompt-${currentTask.id}`)}
+            </div>
             {currentTask.visual ? (
               <img className={styles.speakingImage} src={speakingImage} alt="Aktive Personen in einer Alltagssituation" />
             ) : null}
@@ -3794,7 +3821,9 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           </div>
           <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
           <h2>{currentTask.title}</h2>
-          <div className={styles.instructionText}>{renderStructuredExamText(currentTask.prompt, `speak-prompt-${currentTask.id}`)}</div>
+          <div className={`${styles.instructionText} ${styles.readableScrollArea}`} onWheel={handleReadableWheel}>
+            {renderStructuredExamText(currentTask.prompt, `speak-prompt-${currentTask.id}`)}
+          </div>
           {currentTask.visual ? (
             <img className={styles.speakingImage} src={speakingImage} alt="Personnes actives dans un contexte quotidien" />
           ) : null}

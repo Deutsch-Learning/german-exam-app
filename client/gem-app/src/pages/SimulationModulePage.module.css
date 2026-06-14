@@ -595,6 +595,25 @@
   color: #1f2937;
 }
 
+.readableScrollArea {
+  max-height: min(56vh, 560px);
+  overflow-y: auto;
+  overscroll-behavior-y: auto;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+}
+
+.passagePane > .readableScrollArea,
+.partIntroBody > .readableScrollArea {
+  max-height: none;
+}
+
+.promptPanel .readableScrollArea,
+.questionPane .readableScrollArea {
+  max-height: min(42vh, 440px);
+}
+
 .examMaterial p,
 .examMaterial ul {
   margin: 0;
