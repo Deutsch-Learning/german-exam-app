@@ -876,7 +876,7 @@ const GERMAN_TASK_COPY = {
       { value: "b", label: "In einer Bibliothek." },
       { value: "c", label: "In einem Restaurant." },
     ],
-    hint: "Hoeren Sie auf Woerter zum Verkehr.",
+    hint: "Hoeren Sie auf Wörter zum Verkehr.",
     explanation: "Die Ansage spricht von einem Zug, einem Gleis und Reisenden.",
   },
   "listen-2": {
@@ -901,7 +901,7 @@ const GERMAN_TASK_COPY = {
       { value: "delay", label: "Ansage der Verspaetung" },
       { value: "coffee", label: "Hinweis fuer Reisende" },
     ],
-    hint: "Achten Sie auf Signalwoerter wie zuerst, danach und schliesslich.",
+    hint: "Achten Sie auf Signalwörter wie zuerst, danach und schliesslich.",
     explanation: "Zuerst kommt der Gleiswechsel, dann die Verspaetung, danach der Hinweis zum Warten.",
   },
   "listen-5": {
@@ -1263,7 +1263,7 @@ const countWords = (text) => {
 };
 
 const formatWritingRequirementGerman = (task) =>
-  `Mindestens ${getWritingMinimumWords(task)} Woerter, keine Obergrenze`;
+  `Mindestens ${getWritingMinimumWords(task)} Wörter, keine Obergrenze`;
 
 const formatWritingRequirementFrench = (task) =>
   `Minimum ${getWritingMinimumWords(task)} mots, sans limite maximale`;
@@ -1534,7 +1534,7 @@ const getWritingSuggestions = (task, text) => {
 
   const germanSuggestions = [];
   if (words < task.minWords) {
-    germanSuggestions.push(`Fuegen Sie etwa ${task.minWords - words} Woerter hinzu, um das erwartete Minimum zu erreichen.`);
+    germanSuggestions.push(`Fuegen Sie etwa ${task.minWords - words} Wörter hinzu, um das erwartete Minimum zu erreichen.`);
   }
   if (!/(weil|deshalb|auÃŸerdem|jedoch|trotzdem|zum beispiel|daher|einerseits|andererseits)/i.test(text)) {
     germanSuggestions.push("Fuegen Sie mindestens einen deutschen Konnektor ein, damit der Text fluessiger wird.");
@@ -1787,7 +1787,7 @@ const buildResultSummary = (module, answers) => {
         title: task.title ?? task.question,
         typeLabel: task.typeLabel,
         isCorrect: null,
-        userAnswer: `${countWords(answers[index])} Woerter`,
+        userAnswer: `${countWords(answers[index])} Wörter`,
         correctAnswer: formatWritingRequirementGerman(task),
         explanation: "Antwort gespeichert. Die finale Bewertung kommt aus der KI-Korrektur.",
       };
@@ -3615,7 +3615,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
                       }}
                     >
                       <span>{version.taskTitle}</span>
-                      <small>{formatClock(new Date(version.createdAt))} - {version.words} Woerter</small>
+                      <small>{formatClock(new Date(version.createdAt))} - {version.words} Wörter</small>
                     </button>
                   ))}
                 </div>
