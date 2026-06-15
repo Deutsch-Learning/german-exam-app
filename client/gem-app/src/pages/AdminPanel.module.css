@@ -828,7 +828,7 @@
   gap: 6px;
 }
 
-.previewBox span {
+.previewLabel {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -838,7 +838,7 @@
   text-transform: uppercase;
 }
 
-.previewBox p {
+.previewBox > p {
   margin: 0;
   color: #334155;
   line-height: 1.55;
@@ -1142,6 +1142,11 @@
 .richPreview {
   color: #334155;
   line-height: 1.55;
+}
+
+.examPreviewSurface {
+  --module-accent: #f9c415;
+  --module-soft: #fffbeb;
 }
 
 .websitePreview {
