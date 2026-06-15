@@ -653,7 +653,7 @@
 
 .filterRow {
   display: grid;
-  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  grid-template-columns: repeat(6, minmax(118px, 1fr));
   gap: 10px;
 }
 
@@ -934,6 +934,91 @@
   font-weight: 700;
 }
 
+.cmsLoadingState {
+  display: grid;
+  gap: 18px;
+}
+
+.cmsLoadingHero,
+.cmsLoadingToolbar,
+.cmsLoadingWorkspace > section {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.05);
+}
+
+.cmsLoadingHero {
+  min-height: 154px;
+  padding: 22px;
+  display: grid;
+  align-content: center;
+  gap: 14px;
+}
+
+.cmsLoadingHero span,
+.cmsLoadingHero strong,
+.cmsLoadingHero p,
+.cmsLoadingToolbar span,
+.cmsLoadingWorkspace span {
+  display: block;
+  border-radius: 8px;
+  background: linear-gradient(90deg, #e2e8f0 0%, #f8fafc 45%, #e2e8f0 100%);
+  background-size: 220% 100%;
+  animation: adminLoadingShimmer 1.15s ease-in-out infinite;
+}
+
+.cmsLoadingHero span {
+  width: 120px;
+  height: 16px;
+}
+
+.cmsLoadingHero strong {
+  width: min(100%, 460px);
+  height: 34px;
+}
+
+.cmsLoadingHero p {
+  width: min(100%, 620px);
+  height: 18px;
+}
+
+.cmsLoadingToolbar {
+  padding: 16px;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) repeat(3, minmax(120px, 0.35fr));
+  gap: 10px;
+}
+
+.cmsLoadingToolbar span {
+  height: 42px;
+}
+
+.cmsLoadingWorkspace {
+  display: grid;
+  grid-template-columns: minmax(260px, 360px) minmax(0, 1fr);
+  gap: 18px;
+}
+
+.cmsLoadingWorkspace > section {
+  padding: 18px;
+  display: grid;
+  gap: 12px;
+}
+
+.cmsLoadingWorkspace > section:first-child span {
+  height: 96px;
+}
+
+.cmsLoadingWorkspace > section:last-child span:first-child {
+  width: 60%;
+  height: 34px;
+}
+
+.cmsLoadingWorkspace > section:last-child span {
+  height: 120px;
+}
+
 .richField {
   display: grid;
   gap: 8px;
@@ -952,7 +1037,8 @@
 }
 
 .richToolbar button,
-.colorTool {
+.colorTool,
+.richSelectTool {
   width: 36px;
   height: 34px;
   border: 1px solid #cbd5e1;
@@ -965,13 +1051,53 @@
 }
 
 .richToolbar button:hover,
-.colorTool:hover {
+.colorTool:hover,
+.richSelectTool:hover {
   border-color: #f9c415;
   background: #fffbeb;
 }
 
-.colorTool {
+.colorTool,
+.richSelectTool {
   position: relative;
+}
+
+.richSelectTool {
+  width: auto;
+  min-width: 94px;
+  grid-auto-flow: column;
+  gap: 6px;
+  padding: 0 8px;
+}
+
+.richSelectTool select {
+  border: 0;
+  background: transparent;
+  color: #334155;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 800;
+  outline: 0;
+}
+
+.toolbarDivider {
+  width: 1px;
+  height: 34px;
+  background: #e2e8f0;
+}
+
+.colorSwatch {
+  position: relative;
+}
+
+.colorSwatch::before {
+  content: "";
+  width: 18px;
+  height: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  border-radius: 999px;
+  background: var(--swatch-color);
 }
 
 .colorTool input {
@@ -984,7 +1110,8 @@
 .richEditor {
   min-height: 180px;
   max-height: 420px;
-  overflow: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   border: 1px solid #cbd5e1;
   border-radius: 8px;
   background: #ffffff;
@@ -1017,6 +1144,15 @@
   line-height: 1.55;
 }
 
+@keyframes adminLoadingShimmer {
+  0% {
+    background-position: 120% 0;
+  }
+  100% {
+    background-position: -120% 0;
+  }
+}
+
 @media (max-width: 860px) {
   .layout {
     grid-template-columns: 1fr;
@@ -1039,6 +1175,7 @@
   .cmsHero,
   .cmsToolbar,
   .cmsWorkspace,
+  .cmsLoadingWorkspace,
   .intakeGrid {
     grid-template-columns: 1fr;
   }

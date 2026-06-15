@@ -22,10 +22,13 @@ import {
   MessageSquareText,
   Palette,
   Plus,
+  Redo2,
   Search,
   Shield,
   Trash2,
+  Type,
   Underline,
+  Undo2,
   Upload,
   Users,
   Volume2,
@@ -93,6 +96,21 @@ const QUESTION_TYPE_OPTIONS = [
 ];
 
 const MODULE_LABELS = MODULE_OPTIONS.reduce((acc, item) => ({ ...acc, [item.id]: item.label }), {});
+const RICH_FONT_FAMILIES = [
+  "Arial",
+  "Georgia",
+  "Times New Roman",
+  "Verdana",
+  "Tahoma",
+  "Courier New",
+];
+const RICH_FONT_SIZES = [
+  { label: "Small", value: "2" },
+  { label: "Normal", value: "3" },
+  { label: "Large", value: "4" },
+  { label: "Title", value: "5" },
+];
+const RICH_COLORS = ["#111827", "#c10016", "#2563eb", "#047857", "#92400e", "#7c3aed"];
 
 const getModuleLabel = (value) => MODULE_LABELS[String(value ?? "").toLowerCase()] ?? value ?? "-";
 
@@ -687,7 +705,15 @@ function AdminExams() {
   const [documentError, setDocumentError] = useState("");
   const [status, setStatus] = useState("");
   const [busyAction, setBusyAction] = useState("");
-  const [filters, setFilters] = useState({ search: "", provider: "all", level: "all", status: "all", module: "all" });
+  const [filters, setFilters] = useState({
+    search: "",
+    provider: "all",
+    level: "all",
+    status: "all",
+    module: "all",
+    sortBy: "order",
+    sortDir: "asc",
+  });
   const [selectedExamId, setSelectedExamId] = useState("");
   const [examDraft, setExamDraft] = useState(null);
   const [sectionDraft, setSectionDraft] = useState(null);
@@ -726,7 +752,18 @@ function AdminExams() {
 
   const visibleExams = useMemo(() => {
     const search = filters.search.trim().toLowerCase();
-    return exams.filter((exam) => {
+    const levelRank = (level) => {
+      const index = LEVEL_OPTIONS.indexOf(String(level ?? "").toUpperCase());
+      return index === -1 ? 999 : index;
+    };
+    const moduleRank = (moduleId) => {
+      const index = MODULE_OPTIONS.findIndex((item) => item.id === String(moduleId ?? "").toLowerCase());
+      return index === -1 ? 999 : index;
+    };
+    const compareText = (a, b) => String(a ?? "").localeCompare(String(b ?? ""), "fr", { numeric: true, sensitivity: "base" });
+    const compareNumber = (a, b) => (Number(a) || 0) - (Number(b) || 0);
+    const compareDate = (a, b) => new Date(a ?? 0).getTime() - new Date(b ?? 0).getTime();
+    const filtered = exams.filter((exam) => {
       const body = getExamBody(exam);
       const text = [
         exam.name,
@@ -744,6 +781,29 @@ function AdminExams() {
       const matchesModule = filters.module === "all" || String(exam.section_type ?? "").toLowerCase() === filters.module;
       return matchesSearch && matchesProvider && matchesLevel && matchesStatus && matchesModule;
     });
+    const sorted = [...filtered].sort((a, b) => {
+      let result;
+      if (filters.sortBy === "name") {
+        result = compareText(a.name, b.name);
+      } else if (filters.sortBy === "body") {
+        result = compareText(getExamBody(a), getExamBody(b)) || levelRank(a.level) - levelRank(b.level);
+      } else if (filters.sortBy === "level") {
+        result = levelRank(a.level) - levelRank(b.level) || compareText(getExamBody(a), getExamBody(b));
+      } else if (filters.sortBy === "module") {
+        result = moduleRank(a.section_type) - moduleRank(b.section_type) || compareText(a.name, b.name);
+      } else if (filters.sortBy === "updated") {
+        result = compareDate(a.updated_at, b.updated_at);
+      } else {
+        result =
+          compareText(getExamBody(a), getExamBody(b)) ||
+          levelRank(a.level) - levelRank(b.level) ||
+          compareNumber(a.series_number, b.series_number) ||
+          moduleRank(a.section_type) - moduleRank(b.section_type) ||
+          compareText(a.name, b.name);
+      }
+      return filters.sortDir === "desc" ? -result : result;
+    });
+    return sorted;
   }, [exams, filters]);
 
   useEffect(() => {
@@ -934,13 +994,18 @@ function AdminExams() {
     }, "Generated exam content saved.");
   };
 
+  const initialLoading = loading && !data;
+
   return (
     <>
       <Header title="Exam Content CMS" subtitle="Manage German exam bodies, levels, series, sections, tasks, scoring, and publication state." />
       {status ? <p className={styles.status}>{status}</p> : null}
       {error ? <p className={styles.error}>{error}</p> : null}
       {documentError ? <p className={styles.error}>{documentError}</p> : null}
-      {loading ? <p>Loading...</p> : null}
+      {initialLoading ? (
+        <AdminCmsLoading />
+      ) : (
+        <>
 
       <section className={styles.cmsHero}>
         <div className={styles.cmsHeroText}>
@@ -992,6 +1057,22 @@ function AdminExams() {
               <option value="all">All statuses</option>
               <option value="published">Published</option>
               <option value="draft">Draft</option>
+            </select>
+          </label>
+          <label className={styles.field}>Sort by
+            <select value={filters.sortBy} onChange={(event) => setFilters((prev) => ({ ...prev, sortBy: event.target.value }))}>
+              <option value="order">Exam order</option>
+              <option value="name">Name</option>
+              <option value="body">Exam body</option>
+              <option value="level">Level</option>
+              <option value="module">Module</option>
+              <option value="updated">Updated date</option>
+            </select>
+          </label>
+          <label className={styles.field}>Direction
+            <select value={filters.sortDir} onChange={(event) => setFilters((prev) => ({ ...prev, sortDir: event.target.value }))}>
+              <option value="asc">Ascending</option>
+              <option value="desc">Descending</option>
             </select>
           </label>
         </div>
@@ -1435,6 +1516,8 @@ function AdminExams() {
           </div>
         </section>
       ) : null}
+        </>
+      )}
     </>
   );
 }
@@ -1446,6 +1529,35 @@ function CmsStat({ icon: Icon, label, value }) {
       <span>{label}</span>
       <strong>{value}</strong>
     </article>
+  );
+}
+
+function AdminCmsLoading() {
+  return (
+    <div className={styles.cmsLoadingState} aria-busy="true">
+      <section className={styles.cmsLoadingHero}>
+        <span />
+        <strong />
+        <p />
+      </section>
+      <section className={styles.cmsLoadingToolbar}>
+        <span />
+        <span />
+        <span />
+        <span />
+      </section>
+      <div className={styles.cmsLoadingWorkspace}>
+        <section>
+          {Array.from({ length: 5 }).map((_, index) => <span key={index} />)}
+        </section>
+        <section>
+          <span />
+          <span />
+          <span />
+          <span />
+        </section>
+      </div>
+    </div>
   );
 }
 
@@ -1473,6 +1585,7 @@ function RichPreview({ label, value }) {
 
 function RichTextEditor({ label, value, onChange }) {
   const editorRef = useRef(null);
+  const savedRangeRef = useRef(null);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -1481,17 +1594,51 @@ function RichTextEditor({ label, value, onChange }) {
     if (editor.innerHTML !== nextHtml) editor.innerHTML = nextHtml;
   }, [value]);
 
+  const rememberSelection = () => {
+    const editor = editorRef.current;
+    const selection = window.getSelection();
+    if (!editor || !selection?.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    if (editor.contains(range.commonAncestorContainer)) {
+      savedRangeRef.current = range.cloneRange();
+    }
+  };
+
+  const restoreSelection = () => {
+    const editor = editorRef.current;
+    const range = savedRangeRef.current;
+    if (!editor || !range) {
+      editor?.focus();
+      return;
+    }
+    try {
+      if (!editor.contains(range.commonAncestorContainer)) {
+        editor.focus();
+        return;
+      }
+      const selection = window.getSelection();
+      editor.focus();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    } catch {
+      savedRangeRef.current = null;
+      editor.focus();
+    }
+  };
+
   const runCommand = (command, commandValue = null) => {
     const editor = editorRef.current;
     if (!editor) return;
-    editor.focus();
+    restoreSelection();
     document.execCommand(command, false, commandValue);
+    rememberSelection();
     onChange(editor.innerHTML);
   };
 
   const syncValue = () => {
     const editor = editorRef.current;
     if (!editor) return;
+    rememberSelection();
     onChange(editor.innerHTML);
   };
 
@@ -1503,26 +1650,91 @@ function RichTextEditor({ label, value, onChange }) {
     onChange(safeHtml);
   };
 
+  const handleToolbarMouseDown = (event) => {
+    event.preventDefault();
+    rememberSelection();
+  };
+
+  const handleEditorWheel = (event) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const maxScrollTop = editor.scrollHeight - editor.clientHeight;
+    if (maxScrollTop <= 0 || event.deltaY === 0) return;
+
+    const nextScrollTop = Math.max(0, Math.min(maxScrollTop, editor.scrollTop + event.deltaY));
+    if (nextScrollTop !== editor.scrollTop) {
+      event.preventDefault();
+      event.stopPropagation();
+      editor.scrollTop = nextScrollTop;
+    }
+  };
+
   return (
     <div className={styles.richField}>
       <span className={styles.richLabel}>{label}</span>
       <div className={styles.richToolbar} aria-label={`${label} formatting`}>
-        <button type="button" title="Bold" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("bold")}>
+        <button type="button" title="Undo" onMouseDown={handleToolbarMouseDown} onClick={() => runCommand("undo")}>
+          <Undo2 size={16} />
+        </button>
+        <button type="button" title="Redo" onMouseDown={handleToolbarMouseDown} onClick={() => runCommand("redo")}>
+          <Redo2 size={16} />
+        </button>
+        <span className={styles.toolbarDivider} />
+        <button type="button" title="Bold" onMouseDown={handleToolbarMouseDown} onClick={() => runCommand("bold")}>
           <Bold size={16} />
         </button>
-        <button type="button" title="Italic" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("italic")}>
+        <button type="button" title="Italic" onMouseDown={handleToolbarMouseDown} onClick={() => runCommand("italic")}>
           <Italic size={16} />
         </button>
-        <button type="button" title="Underline" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("underline")}>
+        <button type="button" title="Underline" onMouseDown={handleToolbarMouseDown} onClick={() => runCommand("underline")}>
           <Underline size={16} />
         </button>
-        <button type="button" title="Bullet list" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("insertUnorderedList")}>
+        <button type="button" title="Bullet list" onMouseDown={handleToolbarMouseDown} onClick={() => runCommand("insertUnorderedList")}>
           <List size={16} />
         </button>
-        <button type="button" title="Numbered list" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("insertOrderedList")}>
+        <button type="button" title="Numbered list" onMouseDown={handleToolbarMouseDown} onClick={() => runCommand("insertOrderedList")}>
           <ListOrdered size={16} />
         </button>
-        <label className={styles.colorTool} title="Text color">
+        <label className={styles.richSelectTool} title="Font">
+          <Type size={16} />
+          <select
+            defaultValue=""
+            onMouseDown={rememberSelection}
+            onChange={(event) => {
+              runCommand("fontName", event.target.value);
+              event.target.value = "";
+            }}
+          >
+            <option value="" disabled>Font</option>
+            {RICH_FONT_FAMILIES.map((font) => <option key={font} value={font}>{font}</option>)}
+          </select>
+        </label>
+        <label className={styles.richSelectTool} title="Size">
+          <select
+            defaultValue=""
+            onMouseDown={rememberSelection}
+            onChange={(event) => {
+              runCommand("fontSize", event.target.value);
+              event.target.value = "";
+            }}
+          >
+            <option value="" disabled>Size</option>
+            {RICH_FONT_SIZES.map((size) => <option key={size.value} value={size.value}>{size.label}</option>)}
+          </select>
+        </label>
+        <span className={styles.toolbarDivider} />
+        {RICH_COLORS.map((color) => (
+          <button
+            key={color}
+            type="button"
+            className={styles.colorSwatch}
+            title={`Color ${color}`}
+            style={{ "--swatch-color": color }}
+            onMouseDown={handleToolbarMouseDown}
+            onClick={() => runCommand("foreColor", color)}
+          />
+        ))}
+        <label className={styles.colorTool} title="Custom text color" onMouseDown={rememberSelection}>
           <Palette size={16} />
           <input type="color" onChange={(event) => runCommand("foreColor", event.target.value)} />
         </label>
@@ -1535,7 +1747,10 @@ function RichTextEditor({ label, value, onChange }) {
         aria-label={label}
         spellCheck="true"
         onInput={syncValue}
+        onKeyUp={rememberSelection}
+        onMouseUp={rememberSelection}
         onBlur={sanitizeValue}
+        onWheel={handleEditorWheel}
       />
     </div>
   );
