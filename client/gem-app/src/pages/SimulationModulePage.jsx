@@ -58,6 +58,7 @@ import {
 import NotFoundPage from "./NotFoundPage";
 import ComingSoonPage from "./ComingSoonPage";
 import { getModuleCountLabel, isTopicModule } from "../utils/moduleLabels";
+import { hasRichTextMarkup, sanitizeRichTextHtml } from "../utils/richText";
 
 const LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"];
 const PASS_SCORE = 70;
@@ -2938,8 +2939,35 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     }
   }, []);
 
+  const renderRichExamText = (html, keyPrefix = "rich-exam-text", className = "") => (
+    <div
+      key={keyPrefix}
+      className={`${styles.richExamText} ${className}`}
+      translate="no"
+      dangerouslySetInnerHTML={{ __html: sanitizeRichTextHtml(html) }}
+    />
+  );
+
+  const renderQuestionHeading = (text, keyPrefix) => {
+    if (hasRichTextMarkup(text)) {
+      return renderRichExamText(text, keyPrefix, styles.questionText);
+    }
+    return <h2 className={styles.questionText}>{text}</h2>;
+  };
+
   const renderPartMaterial = (part, { compact = false } = {}) => {
     const sourceText = part?.sourceText || module.passage?.intro || currentTask?.prompt || currentTask?.question || "";
+    if (hasRichTextMarkup(sourceText)) {
+      return (
+        <div
+          className={`${styles.examMaterial} ${styles.readableScrollArea} ${compact ? styles.examMaterialCompact : ""}`}
+          onWheel={handleReadableWheel}
+        >
+          {renderRichExamText(sourceText, `${part?.id ?? "part"}-rich`)}
+        </div>
+      );
+    }
+
     const blocks = String(sourceText)
       .split(/\n{2,}/)
       .map((block) => block.trim())
@@ -2995,6 +3023,10 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   };
 
   const renderStructuredExamText = (text, keyPrefix = "exam-text") => {
+    if (hasRichTextMarkup(text)) {
+      return renderRichExamText(text, `${keyPrefix}-rich`);
+    }
+
     const lines = String(text ?? "")
       .replace(/\r/g, "")
       .split("\n")
@@ -3393,7 +3425,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           <span className={styles.questionStep}>Frage {currentIndex + 1} von {totalTasks}</span>
           <span>{currentTask.typeLabel}</span>
         </div>
-        <h2 className={styles.questionText}>{currentTask.question}</h2>
+        {renderQuestionHeading(currentTask.question, `read-question-${currentTask.id}`)}
         {renderQuestionControl(currentTask, currentAnswer)}
         {!simulationMode ? (
           <>
@@ -3475,7 +3507,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               <span>{level}</span>
             </div>
             <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
-            <h2 className={styles.questionText}>{currentTask.question}</h2>
+            {renderQuestionHeading(currentTask.question, `listen-question-${currentTask.id}`)}
             {renderQuestionControl(currentTask, currentAnswer)}
             {!simulationMode ? (
               <>
@@ -3550,7 +3582,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             <span>{level}</span>
           </div>
           <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
-          <h2 className={styles.questionText}>{currentTask.question}</h2>
+          {renderQuestionHeading(currentTask.question, `listen-question-${currentTask.id}`)}
           {renderQuestionControl(currentTask, currentAnswer)}
           {!simulationMode ? (
             <>

@@ -683,6 +683,30 @@
   line-height: 1.75;
 }
 
+.richExamText {
+  color: #374151;
+  font-weight: 400;
+  line-height: 1.75;
+}
+
+.richExamText p {
+  margin: 0 0 0.85em;
+}
+
+.richExamText p:last-child {
+  margin-bottom: 0;
+}
+
+.richExamText ul,
+.richExamText ol {
+  margin: 0.35em 0 0.9em;
+  padding-left: 1.45em;
+}
+
+.richExamText li {
+  margin: 0.25em 0;
+}
+
 .sectionLabel {
   color: var(--module-accent);
   font-size: 0.82rem;
