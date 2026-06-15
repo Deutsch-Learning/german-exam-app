@@ -40,7 +40,7 @@ import { clearDashboardCache } from "../services/dashboard";
 import { clearAuthSession } from "../utils/access";
 import { examSimulations } from "../data/siteContent";
 import { clearImportedExamCache, fetchImportedSeries } from "../services/importedExams";
-import { richTextToPlainText, sanitizeRichTextHtml } from "../utils/richText";
+import { hasRichTextMarkup, richTextToPlainText, sanitizeRichTextHtml } from "../utils/richText";
 
 const formatDate = (value) => {
   if (!value) return "-";
@@ -184,6 +184,21 @@ const clipPreview = (value, max = 180) => {
 };
 
 const cleanRichTextValue = (value) => sanitizeRichTextHtml(value);
+
+const classifyAdminPreviewLine = (line, index = 0, total = 1) => {
+  const text = String(line ?? "").trim();
+  if (!text) return "body";
+  if (/^(achtung|warning|warnung|important|wichtig|note|notiz|hinweis|remarque|attention)\b\s*:?\s*/i.test(text)) return "notice";
+  if (/lesen sie zuerst die anweisungen/i.test(text)) return "introInstruction";
+  if (/^(teil|part|section|abschnitt)\s*\d+\s*(\||-|:)/i.test(text)) return "sectionTitle";
+  if (/^(anweisung|instructions?|directions?|aufgabe|consigne)\b/i.test(text)) return "instruction";
+  if (/^(teil|part|section|abschnitt)\s*\d+\b/i.test(text)) return "sectionTitle";
+  if (/^(quelle|source|text|texte|transkript|transcript|situation|scenario|szenario)\b\s*:?\s*/i.test(text)) return "subtitle";
+  if (/^[A-Z][\p{L}\p{N}\s'().,:-]{2,72}:$/u.test(text)) return "subtitle";
+  if (total > 1 && index === 0 && text.length <= 90 && !/[.!?]$/.test(text)) return "sectionTitle";
+  if (text.length <= 56 && !/[.!?]$/.test(text)) return "subtitle";
+  return "body";
+};
 
 function AdminShell({ children }) {
   const location = useLocation();
@@ -1569,13 +1584,69 @@ function JsonTextarea({ label, value, onChange }) {
   );
 }
 
+function WebsiteTextPreview({ value }) {
+  const blocks = String(value ?? "")
+    .replace(/\r/g, "")
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean);
+
+  if (!blocks.length) return <p>No content yet.</p>;
+
+  return (
+    <div className={styles.websitePreview}>
+      {blocks.map((block, index) => {
+        const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
+        const listLineCount = lines.filter((line) => /^(\(?[a-j]\)|[-*]|\d+\.)\s+/i.test(line)).length;
+        const looksLikeList = lines.length > 1 && listLineCount >= Math.ceil(lines.length * 0.6);
+        if (looksLikeList) {
+          return (
+            <ul key={`${block}-${index}`}>
+              {lines.map((line) => (
+                <li key={line} className={styles.previewTextBody}>
+                  {line.replace(/^(\(?[a-j]\)|[-*]|\d+\.)\s*/i, "")}
+                </li>
+              ))}
+            </ul>
+          );
+        }
+
+        if (lines.length > 1) {
+          return (
+            <div key={`${block}-${index}`} className={styles.previewTextGroup}>
+              {lines.map((line, lineIndex) => {
+                const lineType = classifyAdminPreviewLine(line, lineIndex, lines.length);
+                return (
+                  <p key={`${line}-${lineIndex}`} className={styles[`previewText${lineType[0].toUpperCase()}${lineType.slice(1)}`]}>
+                    {line}
+                  </p>
+                );
+              })}
+            </div>
+          );
+        }
+
+        const blockType = classifyAdminPreviewLine(block, index, blocks.length);
+        return (
+          <p key={`${block}-${index}`} className={styles[`previewText${blockType[0].toUpperCase()}${blockType.slice(1)}`]}>
+            {block}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
 function RichPreview({ label, value }) {
   const html = sanitizeRichTextHtml(value);
+  const isRich = hasRichTextMarkup(value);
   return (
     <div className={styles.previewBox}>
       <span><Eye size={15} /> {label}</span>
-      {html ? (
+      {isRich && html ? (
         <div className={styles.richPreview} dangerouslySetInnerHTML={{ __html: html }} />
+      ) : !isRich ? (
+        <WebsiteTextPreview value={value} />
       ) : (
         <p>No content yet.</p>
       )}
@@ -1584,15 +1655,55 @@ function RichPreview({ label, value }) {
 }
 
 function RichTextEditor({ label, value, onChange }) {
+  const fieldRef = useRef(null);
   const editorRef = useRef(null);
   const savedRangeRef = useRef(null);
+  const currentHtmlRef = useRef("");
+  const skipNextValueSyncRef = useRef(false);
+  const toolbarInteractingRef = useRef(false);
+  const historyRef = useRef([]);
+  const historyIndexRef = useRef(-1);
+
+  const resetHistory = (html) => {
+    historyRef.current = [html];
+    historyIndexRef.current = 0;
+  };
+
+  const setEditorHtml = (html) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.innerHTML = html;
+    currentHtmlRef.current = html;
+  };
 
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor) return;
     const nextHtml = sanitizeRichTextHtml(value);
-    if (editor.innerHTML !== nextHtml) editor.innerHTML = nextHtml;
+    if (skipNextValueSyncRef.current) {
+      skipNextValueSyncRef.current = false;
+      return;
+    }
+    if (editor.innerHTML !== nextHtml) setEditorHtml(nextHtml);
+    resetHistory(nextHtml);
   }, [value]);
+
+  const pushHistory = (html) => {
+    const history = historyRef.current;
+    if (history[historyIndexRef.current] === html) return;
+    const nextHistory = history.slice(0, historyIndexRef.current + 1);
+    nextHistory.push(html);
+    if (nextHistory.length > 80) nextHistory.shift();
+    historyRef.current = nextHistory;
+    historyIndexRef.current = nextHistory.length - 1;
+  };
+
+  const emitChange = (html, { recordHistory = true } = {}) => {
+    currentHtmlRef.current = html;
+    if (recordHistory) pushHistory(html);
+    skipNextValueSyncRef.current = true;
+    onChange(html);
+  };
 
   const rememberSelection = () => {
     const editor = editorRef.current;
@@ -1632,26 +1743,55 @@ function RichTextEditor({ label, value, onChange }) {
     restoreSelection();
     document.execCommand(command, false, commandValue);
     rememberSelection();
-    onChange(editor.innerHTML);
+    emitChange(editor.innerHTML);
+    window.setTimeout(() => {
+      toolbarInteractingRef.current = false;
+    }, 80);
+  };
+
+  const moveHistory = (direction) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const nextIndex = Math.max(0, Math.min(historyRef.current.length - 1, historyIndexRef.current + direction));
+    if (nextIndex === historyIndexRef.current) {
+      window.setTimeout(() => {
+        toolbarInteractingRef.current = false;
+      }, 80);
+      return;
+    }
+    historyIndexRef.current = nextIndex;
+    const nextHtml = historyRef.current[nextIndex] ?? "";
+    setEditorHtml(nextHtml);
+    emitChange(nextHtml, { recordHistory: false });
+    window.setTimeout(() => {
+      toolbarInteractingRef.current = false;
+    }, 80);
   };
 
   const syncValue = () => {
     const editor = editorRef.current;
     if (!editor) return;
     rememberSelection();
-    onChange(editor.innerHTML);
+    emitChange(editor.innerHTML);
   };
 
-  const sanitizeValue = () => {
+  const sanitizeValue = (event) => {
     const editor = editorRef.current;
     if (!editor) return;
+    if (toolbarInteractingRef.current || fieldRef.current?.contains(event?.relatedTarget)) return;
     const safeHtml = sanitizeRichTextHtml(editor.innerHTML);
-    editor.innerHTML = safeHtml;
-    onChange(safeHtml);
+    if (safeHtml !== editor.innerHTML) setEditorHtml(safeHtml);
+    emitChange(safeHtml);
   };
 
   const handleToolbarMouseDown = (event) => {
     event.preventDefault();
+    toolbarInteractingRef.current = true;
+    rememberSelection();
+  };
+
+  const markToolbarInteraction = () => {
+    toolbarInteractingRef.current = true;
     rememberSelection();
   };
 
@@ -1669,14 +1809,27 @@ function RichTextEditor({ label, value, onChange }) {
     }
   };
 
+  const handleKeyDown = (event) => {
+    const modKey = event.ctrlKey || event.metaKey;
+    if (!modKey) return;
+    const key = event.key.toLowerCase();
+    if (key === "z") {
+      event.preventDefault();
+      moveHistory(event.shiftKey ? 1 : -1);
+    } else if (key === "y") {
+      event.preventDefault();
+      moveHistory(1);
+    }
+  };
+
   return (
-    <div className={styles.richField}>
+    <div className={styles.richField} ref={fieldRef}>
       <span className={styles.richLabel}>{label}</span>
       <div className={styles.richToolbar} aria-label={`${label} formatting`}>
-        <button type="button" title="Undo" onMouseDown={handleToolbarMouseDown} onClick={() => runCommand("undo")}>
+        <button type="button" title="Undo" onMouseDown={handleToolbarMouseDown} onClick={() => moveHistory(-1)}>
           <Undo2 size={16} />
         </button>
-        <button type="button" title="Redo" onMouseDown={handleToolbarMouseDown} onClick={() => runCommand("redo")}>
+        <button type="button" title="Redo" onMouseDown={handleToolbarMouseDown} onClick={() => moveHistory(1)}>
           <Redo2 size={16} />
         </button>
         <span className={styles.toolbarDivider} />
@@ -1699,7 +1852,8 @@ function RichTextEditor({ label, value, onChange }) {
           <Type size={16} />
           <select
             defaultValue=""
-            onMouseDown={rememberSelection}
+            onMouseDown={markToolbarInteraction}
+            onBlur={() => window.setTimeout(() => { toolbarInteractingRef.current = false; }, 80)}
             onChange={(event) => {
               runCommand("fontName", event.target.value);
               event.target.value = "";
@@ -1712,7 +1866,8 @@ function RichTextEditor({ label, value, onChange }) {
         <label className={styles.richSelectTool} title="Size">
           <select
             defaultValue=""
-            onMouseDown={rememberSelection}
+            onMouseDown={markToolbarInteraction}
+            onBlur={() => window.setTimeout(() => { toolbarInteractingRef.current = false; }, 80)}
             onChange={(event) => {
               runCommand("fontSize", event.target.value);
               event.target.value = "";
@@ -1734,9 +1889,13 @@ function RichTextEditor({ label, value, onChange }) {
             onClick={() => runCommand("foreColor", color)}
           />
         ))}
-        <label className={styles.colorTool} title="Custom text color" onMouseDown={rememberSelection}>
+        <label className={styles.colorTool} title="Custom text color" onMouseDown={markToolbarInteraction}>
           <Palette size={16} />
-          <input type="color" onChange={(event) => runCommand("foreColor", event.target.value)} />
+          <input
+            type="color"
+            onBlur={() => window.setTimeout(() => { toolbarInteractingRef.current = false; }, 80)}
+            onChange={(event) => runCommand("foreColor", event.target.value)}
+          />
         </label>
       </div>
       <div
@@ -1747,6 +1906,7 @@ function RichTextEditor({ label, value, onChange }) {
         aria-label={label}
         spellCheck="true"
         onInput={syncValue}
+        onKeyDown={handleKeyDown}
         onKeyUp={rememberSelection}
         onMouseUp={rememberSelection}
         onBlur={sanitizeValue}
