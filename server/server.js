@@ -2433,20 +2433,83 @@ app.get("/api/admin/api-usage", requireAdmin, async (req, res) => {
   }
 });
 
+const normalizeOptionalText = (value, maxLength = 5000) => {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  const text = String(value).trim();
+  return text ? text.slice(0, maxLength) : null;
+};
+
+const normalizeJsonPayload = (value, fallback = {}) => {
+  if (value === undefined) return undefined;
+  if (value === null || value === "") return fallback;
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (!text) return fallback;
+    return JSON.parse(text);
+  }
+  return value;
+};
+
+const normalizeInteger = (value, fallback = null) => {
+  if (value === undefined) return undefined;
+  if (value === null || value === "") return fallback;
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.trunc(number) : fallback;
+};
+
+const touchExam = (examId, client = pool) =>
+  client.query(`UPDATE exams SET updated_at = NOW() WHERE id = $1`, [examId]);
+
 app.get("/api/admin/exams", requireAdmin, async (req, res) => {
   try {
     const exams = await pool.query(`
       SELECT e.*,
-             COUNT(q.id)::int AS question_count
+             COALESCE(q.question_count, 0)::int AS question_count,
+             COALESCE(s.section_count, 0)::int AS section_count,
+             COALESCE(s.total_points, 0)::int AS total_points,
+             COALESCE(s.total_duration_minutes, 0)::int AS total_duration_minutes
       FROM exams e
-      LEFT JOIN exam_questions q ON q.exam_id = e.id
-      GROUP BY e.id
+      LEFT JOIN (
+        SELECT exam_id, COUNT(*) AS question_count
+        FROM exam_questions
+        GROUP BY exam_id
+      ) q ON q.exam_id = e.id
+      LEFT JOIN (
+        SELECT exam_id,
+               COUNT(*) AS section_count,
+               SUM(COALESCE(points, 0)) AS total_points,
+               SUM(COALESCE(duration_minutes, 0)) AS total_duration_minutes
+        FROM exam_sections
+        GROUP BY exam_id
+      ) s ON s.exam_id = e.id
       ORDER BY e.updated_at DESC, e.created_at DESC
     `);
-    const questions = await pool.query(`
-      SELECT * FROM exam_questions ORDER BY exam_id, position, id
+    const sections = await pool.query(`
+      SELECT *
+      FROM exam_sections
+      ORDER BY exam_id, position, id
     `);
-    return res.json({ ok: true, exams: exams.rows, questions: questions.rows });
+    const questions = await pool.query(`
+      SELECT q.*, s.title AS section_title, s.part_number AS section_part_number
+      FROM exam_questions q
+      LEFT JOIN exam_sections s ON s.id = q.section_id
+      ORDER BY q.exam_id, COALESCE(s.position, 0), q.position, q.id
+    `);
+    const imports = await pool.query(`
+      SELECT id, filename, provider, exam_type, level, section_type, total_series,
+             total_sections, total_questions, parse_status, validation_warnings, created_at
+      FROM exam_document_imports
+      ORDER BY created_at DESC
+      LIMIT 25
+    `);
+    return res.json({
+      ok: true,
+      exams: exams.rows,
+      sections: sections.rows,
+      questions: questions.rows,
+      imports: imports.rows,
+    });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ ok: false, error: "Server error" });
@@ -2686,7 +2749,13 @@ app.post("/api/admin/exams/import-document", requireAdmin, documentUpload.single
 app.put("/api/admin/exams/:id", requireAdmin, async (req, res) => {
   try {
     const examId = Number(req.params.id);
-    const { code, name, examType, level, isActive } = req.body ?? {};
+    const { code, name, examType, level, isActive, provider, sectionType, seriesNumber, metadata } = req.body ?? {};
+    let parsedMetadata;
+    try {
+      parsedMetadata = normalizeJsonPayload(metadata);
+    } catch {
+      return res.status(400).json({ ok: false, error: "Exam metadata must be valid JSON" });
+    }
     const updated = await pool.query(
       `UPDATE exams
        SET code = COALESCE($1, code),
@@ -2694,15 +2763,23 @@ app.put("/api/admin/exams/:id", requireAdmin, async (req, res) => {
            exam_type = COALESCE($3, exam_type),
            level = COALESCE($4, level),
            is_active = COALESCE($5, is_active),
+           provider = COALESCE($6, provider),
+           section_type = COALESCE($7, section_type),
+           series_number = COALESCE($8, series_number),
+           metadata = COALESCE($9::jsonb, metadata),
            updated_at = NOW()
-       WHERE id = $6
+       WHERE id = $10
        RETURNING *`,
       [
-        typeof code === "string" && code.trim() ? code.trim().toLowerCase().slice(0, 80) : null,
-        typeof name === "string" && name.trim() ? name.trim().slice(0, 160) : null,
-        typeof examType === "string" && examType.trim() ? examType.trim().slice(0, 80) : null,
-        typeof level === "string" ? level.trim().slice(0, 40) : null,
+        normalizeOptionalText(code, 80)?.toLowerCase() ?? null,
+        normalizeOptionalText(name, 160),
+        normalizeOptionalText(examType, 80),
+        normalizeOptionalText(level, 40),
         typeof isActive === "boolean" ? isActive : null,
+        normalizeOptionalText(provider, 80),
+        normalizeOptionalText(sectionType, 40),
+        normalizeInteger(seriesNumber),
+        parsedMetadata === undefined ? null : JSON.stringify(parsedMetadata),
         examId,
       ]
     );
@@ -2715,36 +2792,400 @@ app.put("/api/admin/exams/:id", requireAdmin, async (req, res) => {
   }
 });
 
+app.post("/api/admin/exams/:id/duplicate", requireAdmin, async (req, res) => {
+  const examId = Number(req.params.id);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const original = await client.query(`SELECT * FROM exams WHERE id = $1`, [examId]);
+    if (!original.rows[0]) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ ok: false, error: "Exam not found" });
+    }
+
+    const source = original.rows[0];
+    const duplicateCode = `${String(source.code).slice(0, 58)}-copy-${Date.now().toString(36)}`.slice(0, 80);
+    const metadata = {
+      ...((source.metadata && typeof source.metadata === "object") ? source.metadata : {}),
+      duplicatedFromExamId: source.id,
+      duplicatedAt: new Date().toISOString(),
+    };
+    const insertedExam = await client.query(
+      `INSERT INTO exams (
+         code, name, exam_type, level, is_active, created_by, provider, section_type,
+         series_number, source_import_id, metadata
+       )
+       VALUES ($1, $2, $3, $4, FALSE, $5, $6, $7, $8, $9, $10::jsonb)
+       RETURNING *`,
+      [
+        duplicateCode,
+        `${source.name} (copy)`.slice(0, 160),
+        source.exam_type,
+        source.level,
+        req.user.id,
+        source.provider,
+        source.section_type,
+        source.series_number,
+        source.source_import_id,
+        JSON.stringify(metadata),
+      ]
+    );
+    const copy = insertedExam.rows[0];
+
+    const sections = await client.query(`SELECT * FROM exam_sections WHERE exam_id = $1 ORDER BY position, id`, [examId]);
+    const sectionIdMap = new Map();
+    for (const section of sections.rows) {
+      const insertedSection = await client.query(
+        `INSERT INTO exam_sections (
+           exam_id, section_type, part_number, title, instructions, duration_minutes,
+           points, scoring, metadata, position
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10)
+         RETURNING *`,
+        [
+          copy.id,
+          section.section_type,
+          section.part_number,
+          section.title,
+          section.instructions,
+          section.duration_minutes,
+          section.points,
+          JSON.stringify(section.scoring || {}),
+          JSON.stringify(section.metadata || {}),
+          section.position,
+        ]
+      );
+      sectionIdMap.set(section.id, insertedSection.rows[0].id);
+    }
+
+    const questions = await client.query(`SELECT * FROM exam_questions WHERE exam_id = $1 ORDER BY position, id`, [examId]);
+    for (const question of questions.rows) {
+      await client.query(
+        `INSERT INTO exam_questions (
+           exam_id, section_id, module_id, prompt, options, correct_answer, explanation,
+           position, question_type, transcript, audio, scoring, source_metadata
+         )
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb)`,
+        [
+          copy.id,
+          question.section_id ? sectionIdMap.get(question.section_id) ?? null : null,
+          question.module_id,
+          question.prompt,
+          JSON.stringify(question.options || []),
+          JSON.stringify(question.correct_answer || {}),
+          question.explanation,
+          question.position,
+          question.question_type,
+          question.transcript,
+          JSON.stringify(question.audio || {}),
+          JSON.stringify(question.scoring || {}),
+          JSON.stringify(question.source_metadata || {}),
+        ]
+      );
+    }
+
+    await client.query("COMMIT");
+    await auditAdminAction(req, "exam.duplicate", "exam", copy.id, { sourceExamId: examId });
+    return res.status(201).json({ ok: true, exam: copy });
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
+app.post("/api/admin/exams/:examId/sections", requireAdmin, async (req, res) => {
+  try {
+    const examId = Number(req.params.examId);
+    const exam = await pool.query(`SELECT id, section_type FROM exams WHERE id = $1`, [examId]);
+    if (!exam.rows[0]) return res.status(404).json({ ok: false, error: "Exam not found" });
+
+    let scoring;
+    let metadata;
+    try {
+      scoring = normalizeJsonPayload(req.body?.scoring, {});
+      metadata = normalizeJsonPayload(req.body?.metadata, {});
+    } catch {
+      return res.status(400).json({ ok: false, error: "Section scoring and metadata must be valid JSON" });
+    }
+
+    const requestedPosition = normalizeInteger(req.body?.position);
+    const nextPosition = requestedPosition == null
+      ? await pool.query(`SELECT COALESCE(MAX(position), 0) + 1 AS position FROM exam_sections WHERE exam_id = $1`, [examId])
+      : null;
+    const inserted = await pool.query(
+      `INSERT INTO exam_sections (
+         exam_id, section_type, part_number, title, instructions, duration_minutes,
+         points, scoring, metadata, position
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10)
+       RETURNING *`,
+      [
+        examId,
+        normalizeOptionalText(req.body?.sectionType, 40) || exam.rows[0].section_type || "read",
+        normalizeInteger(req.body?.partNumber, 1) || 1,
+        normalizeOptionalText(req.body?.title, 160) || "New section",
+        normalizeOptionalText(req.body?.instructions, 12000),
+        normalizeInteger(req.body?.durationMinutes),
+        normalizeInteger(req.body?.points),
+        JSON.stringify(scoring || {}),
+        JSON.stringify(metadata || {}),
+        requestedPosition == null ? Number(nextPosition.rows[0]?.position) || 1 : requestedPosition,
+      ]
+    );
+    await touchExam(examId);
+    await auditAdminAction(req, "exam.section_create", "section", inserted.rows[0].id, { examId });
+    return res.status(201).json({ ok: true, section: inserted.rows[0] });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.put("/api/admin/exams/:examId/sections/:sectionId", requireAdmin, async (req, res) => {
+  try {
+    const examId = Number(req.params.examId);
+    const sectionId = Number(req.params.sectionId);
+    let scoring;
+    let metadata;
+    try {
+      scoring = normalizeJsonPayload(req.body?.scoring);
+      metadata = normalizeJsonPayload(req.body?.metadata);
+    } catch {
+      return res.status(400).json({ ok: false, error: "Section scoring and metadata must be valid JSON" });
+    }
+
+    const updated = await pool.query(
+      `UPDATE exam_sections
+       SET section_type = COALESCE($1, section_type),
+           part_number = COALESCE($2, part_number),
+           title = COALESCE($3, title),
+           instructions = COALESCE($4, instructions),
+           duration_minutes = COALESCE($5, duration_minutes),
+           points = COALESCE($6, points),
+           scoring = COALESCE($7::jsonb, scoring),
+           metadata = COALESCE($8::jsonb, metadata),
+           position = COALESCE($9, position),
+           updated_at = NOW()
+       WHERE id = $10 AND exam_id = $11
+       RETURNING *`,
+      [
+        normalizeOptionalText(req.body?.sectionType, 40),
+        normalizeInteger(req.body?.partNumber),
+        normalizeOptionalText(req.body?.title, 160),
+        normalizeOptionalText(req.body?.instructions, 12000),
+        normalizeInteger(req.body?.durationMinutes),
+        normalizeInteger(req.body?.points),
+        scoring === undefined ? null : JSON.stringify(scoring || {}),
+        metadata === undefined ? null : JSON.stringify(metadata || {}),
+        normalizeInteger(req.body?.position),
+        sectionId,
+        examId,
+      ]
+    );
+    if (!updated.rows[0]) return res.status(404).json({ ok: false, error: "Section not found" });
+    await touchExam(examId);
+    await auditAdminAction(req, "exam.section_update", "section", sectionId, { examId });
+    return res.json({ ok: true, section: updated.rows[0] });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.delete("/api/admin/exams/:examId/sections/:sectionId", requireAdmin, async (req, res) => {
+  try {
+    const examId = Number(req.params.examId);
+    const sectionId = Number(req.params.sectionId);
+    const linked = await pool.query(
+      `SELECT COUNT(*)::int AS question_count FROM exam_questions WHERE exam_id = $1 AND section_id = $2`,
+      [examId, sectionId]
+    );
+    if (Number(linked.rows[0]?.question_count) > 0) {
+      return res.status(409).json({ ok: false, error: "Move or delete section questions before deleting this section" });
+    }
+    const deleted = await pool.query(
+      `DELETE FROM exam_sections WHERE id = $1 AND exam_id = $2 RETURNING *`,
+      [sectionId, examId]
+    );
+    if (!deleted.rows[0]) return res.status(404).json({ ok: false, error: "Section not found" });
+    await touchExam(examId);
+    await auditAdminAction(req, "exam.section_delete", "section", sectionId, { examId });
+    return res.json({ ok: true, section: deleted.rows[0] });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.post("/api/admin/exams/:examId/questions", requireAdmin, async (req, res) => {
+  try {
+    const examId = Number(req.params.examId);
+    const exam = await pool.query(`SELECT id, section_type FROM exams WHERE id = $1`, [examId]);
+    if (!exam.rows[0]) return res.status(404).json({ ok: false, error: "Exam not found" });
+
+    const sectionId = normalizeInteger(req.body?.sectionId);
+    let section = null;
+    if (sectionId != null) {
+      const sectionResult = await pool.query(`SELECT * FROM exam_sections WHERE id = $1 AND exam_id = $2`, [sectionId, examId]);
+      section = sectionResult.rows[0];
+      if (!section) return res.status(400).json({ ok: false, error: "Section does not belong to this exam" });
+    }
+
+    let options;
+    let correctAnswer;
+    let audio;
+    let scoring;
+    let sourceMetadata;
+    try {
+      options = normalizeJsonPayload(req.body?.options, []);
+      correctAnswer = normalizeJsonPayload(req.body?.correctAnswer ?? req.body?.correct_answer, {});
+      audio = normalizeJsonPayload(req.body?.audio, {});
+      scoring = normalizeJsonPayload(req.body?.scoring, {});
+      sourceMetadata = normalizeJsonPayload(req.body?.sourceMetadata ?? req.body?.source_metadata, {});
+    } catch {
+      return res.status(400).json({ ok: false, error: "Question JSON fields must be valid JSON" });
+    }
+    if (!Array.isArray(options)) {
+      return res.status(400).json({ ok: false, error: "Question options must be a JSON array" });
+    }
+
+    const requestedPosition = normalizeInteger(req.body?.position);
+    const nextPosition = requestedPosition == null
+      ? await pool.query(`SELECT COALESCE(MAX(position), 0) + 1 AS position FROM exam_questions WHERE exam_id = $1`, [examId])
+      : null;
+    const inserted = await pool.query(
+      `INSERT INTO exam_questions (
+         exam_id, section_id, module_id, prompt, options, correct_answer, explanation,
+         position, question_type, transcript, audio, scoring, source_metadata
+       )
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb)
+       RETURNING *`,
+      [
+        examId,
+        sectionId ?? null,
+        normalizeOptionalText(req.body?.moduleId, 40) || section?.section_type || exam.rows[0].section_type || "read",
+        normalizeOptionalText(req.body?.prompt, 12000) || "New prompt",
+        JSON.stringify(options),
+        JSON.stringify(correctAnswer || {}),
+        normalizeOptionalText(req.body?.explanation, 5000),
+        requestedPosition == null ? Number(nextPosition.rows[0]?.position) || 1 : requestedPosition,
+        normalizeOptionalText(req.body?.questionType, 80) || "prompt",
+        normalizeOptionalText(req.body?.transcript, 12000),
+        JSON.stringify(audio || {}),
+        JSON.stringify(scoring || {}),
+        JSON.stringify(sourceMetadata || {}),
+      ]
+    );
+    await touchExam(examId);
+    await auditAdminAction(req, "exam.question_create", "question", inserted.rows[0].id, { examId, sectionId });
+    return res.status(201).json({ ok: true, question: inserted.rows[0] });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
 app.put("/api/admin/exams/:examId/questions/:questionId", requireAdmin, async (req, res) => {
   try {
     const examId = Number(req.params.examId);
     const questionId = Number(req.params.questionId);
-    const { moduleId, prompt, options, correctAnswer, explanation, position } = req.body ?? {};
+    const {
+      sectionId,
+      moduleId,
+      prompt,
+      options,
+      correctAnswer,
+      correct_answer: legacyCorrectAnswer,
+      explanation,
+      position,
+      questionType,
+      transcript,
+      audio,
+      scoring,
+      sourceMetadata,
+      source_metadata: legacySourceMetadata,
+    } = req.body ?? {};
+    const normalizedSectionId = normalizeInteger(sectionId);
+    if (normalizedSectionId != null) {
+      const section = await pool.query(`SELECT id FROM exam_sections WHERE id = $1 AND exam_id = $2`, [normalizedSectionId, examId]);
+      if (!section.rows[0]) return res.status(400).json({ ok: false, error: "Section does not belong to this exam" });
+    }
+    let parsedOptions;
+    let parsedCorrectAnswer;
+    let parsedAudio;
+    let parsedScoring;
+    let parsedSourceMetadata;
+    try {
+      parsedOptions = normalizeJsonPayload(options);
+      parsedCorrectAnswer = normalizeJsonPayload(correctAnswer ?? legacyCorrectAnswer);
+      parsedAudio = normalizeJsonPayload(audio);
+      parsedScoring = normalizeJsonPayload(scoring);
+      parsedSourceMetadata = normalizeJsonPayload(sourceMetadata ?? legacySourceMetadata);
+    } catch {
+      return res.status(400).json({ ok: false, error: "Question JSON fields must be valid JSON" });
+    }
+    if (parsedOptions !== undefined && !Array.isArray(parsedOptions)) {
+      return res.status(400).json({ ok: false, error: "Question options must be a JSON array" });
+    }
     const updated = await pool.query(
       `UPDATE exam_questions
-       SET module_id = COALESCE($1, module_id),
-           prompt = COALESCE($2, prompt),
-           options = COALESCE($3::jsonb, options),
-           correct_answer = COALESCE($4::jsonb, correct_answer),
-           explanation = COALESCE($5, explanation),
-           position = COALESCE($6, position),
+       SET section_id = COALESCE($1, section_id),
+           module_id = COALESCE($2, module_id),
+           prompt = COALESCE($3, prompt),
+           options = COALESCE($4::jsonb, options),
+           correct_answer = COALESCE($5::jsonb, correct_answer),
+           explanation = COALESCE($6, explanation),
+           position = COALESCE($7, position),
+           question_type = COALESCE($8, question_type),
+           transcript = COALESCE($9, transcript),
+           audio = COALESCE($10::jsonb, audio),
+           scoring = COALESCE($11::jsonb, scoring),
+           source_metadata = COALESCE($12::jsonb, source_metadata),
            updated_at = NOW()
-       WHERE id = $7 AND exam_id = $8
+       WHERE id = $13 AND exam_id = $14
        RETURNING *`,
       [
+        normalizedSectionId,
         typeof moduleId === "string" && moduleId.trim() ? moduleId.trim().slice(0, 40) : null,
         typeof prompt === "string" && prompt.trim() ? prompt.trim().slice(0, 5000) : null,
-        Array.isArray(options) ? JSON.stringify(options) : null,
-        correctAnswer !== undefined ? JSON.stringify(correctAnswer) : null,
+        parsedOptions === undefined ? null : JSON.stringify(parsedOptions),
+        parsedCorrectAnswer === undefined ? null : JSON.stringify(parsedCorrectAnswer || {}),
         typeof explanation === "string" ? explanation.slice(0, 5000) : null,
         Number.isInteger(position) ? position : null,
+        normalizeOptionalText(questionType, 80),
+        normalizeOptionalText(transcript, 12000),
+        parsedAudio === undefined ? null : JSON.stringify(parsedAudio || {}),
+        parsedScoring === undefined ? null : JSON.stringify(parsedScoring || {}),
+        parsedSourceMetadata === undefined ? null : JSON.stringify(parsedSourceMetadata || {}),
         questionId,
         examId,
       ]
     );
     if (!updated.rows[0]) return res.status(404).json({ ok: false, error: "Question not found" });
+    await touchExam(examId);
     await auditAdminAction(req, "exam.question_update", "question", questionId, { examId });
     return res.json({ ok: true, question: updated.rows[0] });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.delete("/api/admin/exams/:examId/questions/:questionId", requireAdmin, async (req, res) => {
+  try {
+    const examId = Number(req.params.examId);
+    const questionId = Number(req.params.questionId);
+    const deleted = await pool.query(
+      `DELETE FROM exam_questions WHERE id = $1 AND exam_id = $2 RETURNING *`,
+      [questionId, examId]
+    );
+    if (!deleted.rows[0]) return res.status(404).json({ ok: false, error: "Question not found" });
+    await touchExam(examId);
+    await auditAdminAction(req, "exam.question_delete", "question", questionId, { examId });
+    return res.json({ ok: true, question: deleted.rows[0] });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ ok: false, error: "Server error" });
