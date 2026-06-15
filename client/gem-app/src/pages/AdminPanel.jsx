@@ -5,6 +5,7 @@ import {
   Activity,
   BarChart3,
   BookOpen,
+  Bold,
   CheckCircle2,
   ClipboardList,
   Copy,
@@ -14,12 +15,17 @@ import {
   FileJson,
   FileText,
   Headphones,
+  Italic,
+  List,
+  ListOrdered,
   LogOut,
   MessageSquareText,
+  Palette,
   Plus,
   Search,
   Shield,
   Trash2,
+  Underline,
   Upload,
   Users,
   Volume2,
@@ -31,6 +37,7 @@ import { clearDashboardCache } from "../services/dashboard";
 import { clearAuthSession } from "../utils/access";
 import { examSimulations } from "../data/siteContent";
 import { clearImportedExamCache, fetchImportedSeries } from "../services/importedExams";
+import { richTextToPlainText, sanitizeRichTextHtml } from "../utils/richText";
 
 const formatDate = (value) => {
   if (!value) return "-";
@@ -154,9 +161,11 @@ const makeQuestionDraft = (question, exam, section) => ({
 });
 
 const clipPreview = (value, max = 180) => {
-  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  const text = richTextToPlainText(value).replace(/\s+/g, " ").trim();
   return text.length > max ? `${text.slice(0, max - 3)}...` : text;
 };
+
+const cleanRichTextValue = (value) => sanitizeRichTextHtml(value);
 
 function AdminShell({ children }) {
   const location = useLocation();
@@ -820,6 +829,7 @@ function AdminExams() {
     await runAction("save-section", async () => {
       const payload = {
         ...sectionDraft,
+        instructions: cleanRichTextValue(sectionDraft.instructions),
         scoring: parseJsonField(sectionDraft.scoring, "Section scoring") ?? {},
         metadata: parseJsonField(sectionDraft.metadata, "Section metadata") ?? {},
       };
@@ -845,6 +855,9 @@ function AdminExams() {
     await runAction("save-question", async () => {
       const payload = {
         ...questionDraft,
+        prompt: cleanRichTextValue(questionDraft.prompt),
+        explanation: cleanRichTextValue(questionDraft.explanation),
+        transcript: cleanRichTextValue(questionDraft.transcript),
         options: parseJsonField(questionDraft.options, "Question options") ?? [],
         correctAnswer: parseJsonField(questionDraft.correctAnswer, "Correct answer") ?? {},
         audio: parseJsonField(questionDraft.audio, "Audio metadata") ?? {},
@@ -858,6 +871,16 @@ function AdminExams() {
       }
       setQuestionDraft(null);
     }, questionDraft.id ? "Question saved." : "Question created.");
+  };
+
+  const startSectionEdit = (section = null) => {
+    setQuestionDraft(null);
+    setSectionDraft(makeSectionDraft(section, selectedExam));
+  };
+
+  const startQuestionEdit = (question = null, section = null) => {
+    setSectionDraft(null);
+    setQuestionDraft(makeQuestionDraft(question, selectedExam, section));
   };
 
   const deleteQuestion = async (question) => {
@@ -1094,13 +1117,13 @@ function AdminExams() {
                     <h3>Sections and tasks</h3>
                     <p className={styles.panelHint}>Edit Lesen, Hören, Schreiben, and Sprechen content in the same hierarchy the learner app reads.</p>
                   </div>
-                  <button className={styles.button} type="button" onClick={() => setSectionDraft(makeSectionDraft(null, selectedExam))}>
+                  <button className={styles.button} type="button" onClick={() => startSectionEdit(null)}>
                     <Plus size={16} />
                     Add section
                   </button>
                 </div>
 
-                {sectionDraft ? (
+                {sectionDraft && !sectionDraft.id ? (
                   <SectionForm
                     draft={sectionDraft}
                     onChange={setSectionDraft}
@@ -1115,6 +1138,7 @@ function AdminExams() {
                     const sectionQuestions = questionsBySection.get(section.id) ?? [];
                     const module = MODULE_OPTIONS.find((item) => item.id === section.section_type);
                     const Icon = module?.icon ?? FileJson;
+                    const sectionIsEditing = String(sectionDraft?.id ?? "") === String(section.id);
                     return (
                       <article className={styles.sectionCard} key={section.id}>
                         <div className={styles.sectionHeader}>
@@ -1127,7 +1151,7 @@ function AdminExams() {
                             <p>{section.duration_minutes ?? "-"} min - {section.points ?? "-"} points - position {section.position}</p>
                           </div>
                           <div className={styles.actions}>
-                            <button className={styles.secondaryButton} type="button" onClick={() => setSectionDraft(makeSectionDraft(section, selectedExam))}>
+                            <button className={styles.secondaryButton} type="button" onClick={() => startSectionEdit(section)}>
                               <Edit3 size={15} />
                               Edit
                             </button>
@@ -1137,20 +1161,48 @@ function AdminExams() {
                             </button>
                           </div>
                         </div>
-                        <div className={styles.previewBox}>
-                          <span><Eye size={15} /> Instructions preview</span>
-                          <p>{clipPreview(section.instructions || section.title, 420) || "No instructions yet."}</p>
-                        </div>
+                        {sectionIsEditing ? (
+                          <SectionForm
+                            draft={sectionDraft}
+                            onChange={setSectionDraft}
+                            onSubmit={saveSection}
+                            onCancel={() => setSectionDraft(null)}
+                            busy={busyAction === "save-section"}
+                          />
+                        ) : (
+                          <RichPreview label="Instructions preview" value={section.instructions || section.title} />
+                        )}
                         <div className={styles.questionList}>
                           {sectionQuestions.map((question) => (
-                            <QuestionCard
-                              key={question.id}
-                              question={question}
-                              onEdit={() => setQuestionDraft(makeQuestionDraft(question, selectedExam, section))}
-                              onDelete={() => deleteQuestion(question)}
-                            />
+                            <div key={question.id} className={styles.questionSlot}>
+                              <QuestionCard
+                                question={question}
+                                onEdit={() => startQuestionEdit(question, section)}
+                                onDelete={() => deleteQuestion(question)}
+                              />
+                              {String(questionDraft?.id ?? "") === String(question.id) ? (
+                                <QuestionForm
+                                  draft={questionDraft}
+                                  sections={selectedSections}
+                                  onChange={setQuestionDraft}
+                                  onSubmit={saveQuestion}
+                                  onCancel={() => setQuestionDraft(null)}
+                                  busy={busyAction === "save-question"}
+                                />
+                              ) : null}
+                            </div>
                           ))}
-                          <button className={styles.secondaryButton} type="button" onClick={() => setQuestionDraft(makeQuestionDraft(null, selectedExam, section))}>
+                          {questionDraft && !questionDraft.id && String(questionDraft.sectionId) === String(section.id) ? (
+                            <QuestionForm
+                              draft={questionDraft}
+                              sections={selectedSections}
+                              onChange={setQuestionDraft}
+                              onSubmit={saveQuestion}
+                              onCancel={() => setQuestionDraft(null)}
+                              busy={busyAction === "save-question"}
+                            />
+                          ) : null}
+                          <button className={styles.secondaryButton} type="button" onClick={() => startQuestionEdit(null, section)}>
                             <Plus size={15} />
                             Add task to this section
                           </button>
@@ -1169,13 +1221,38 @@ function AdminExams() {
                       </div>
                       <div className={styles.questionList}>
                         {selectedOrphans.map((question) => (
-                          <QuestionCard
-                            key={question.id}
-                            question={question}
-                            onEdit={() => setQuestionDraft(makeQuestionDraft(question, selectedExam, null))}
-                            onDelete={() => deleteQuestion(question)}
-                          />
+                          <div key={question.id} className={styles.questionSlot}>
+                            <QuestionCard
+                              question={question}
+                              onEdit={() => startQuestionEdit(question, null)}
+                              onDelete={() => deleteQuestion(question)}
+                            />
+                            {String(questionDraft?.id ?? "") === String(question.id) ? (
+                              <QuestionForm
+                                draft={questionDraft}
+                                sections={selectedSections}
+                                onChange={setQuestionDraft}
+                                onSubmit={saveQuestion}
+                                onCancel={() => setQuestionDraft(null)}
+                                busy={busyAction === "save-question"}
+                              />
+                            ) : null}
+                          </div>
                         ))}
+                        {questionDraft && !questionDraft.id && !questionDraft.sectionId ? (
+                          <QuestionForm
+                            draft={questionDraft}
+                            sections={selectedSections}
+                            onChange={setQuestionDraft}
+                            onSubmit={saveQuestion}
+                            onCancel={() => setQuestionDraft(null)}
+                            busy={busyAction === "save-question"}
+                          />
+                        ) : null}
+                        <button className={styles.secondaryButton} type="button" onClick={() => startQuestionEdit(null, null)}>
+                          <Plus size={15} />
+                          Add unassigned task
+                        </button>
                       </div>
                     </article>
                   ) : null}
@@ -1184,16 +1261,6 @@ function AdminExams() {
                   ) : null}
                 </div>
 
-                {questionDraft ? (
-                  <QuestionForm
-                    draft={questionDraft}
-                    sections={selectedSections}
-                    onChange={setQuestionDraft}
-                    onSubmit={saveQuestion}
-                    onCancel={() => setQuestionDraft(null)}
-                    busy={busyAction === "save-question"}
-                  />
-                ) : null}
               </section>
             </>
           )}
@@ -1390,6 +1457,90 @@ function JsonTextarea({ label, value, onChange }) {
   );
 }
 
+function RichPreview({ label, value }) {
+  const html = sanitizeRichTextHtml(value);
+  return (
+    <div className={styles.previewBox}>
+      <span><Eye size={15} /> {label}</span>
+      {html ? (
+        <div className={styles.richPreview} dangerouslySetInnerHTML={{ __html: html }} />
+      ) : (
+        <p>No content yet.</p>
+      )}
+    </div>
+  );
+}
+
+function RichTextEditor({ label, value, onChange }) {
+  const editorRef = useRef(null);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const nextHtml = sanitizeRichTextHtml(value);
+    if (editor.innerHTML !== nextHtml) editor.innerHTML = nextHtml;
+  }, [value]);
+
+  const runCommand = (command, commandValue = null) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.focus();
+    document.execCommand(command, false, commandValue);
+    onChange(editor.innerHTML);
+  };
+
+  const syncValue = () => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    onChange(editor.innerHTML);
+  };
+
+  const sanitizeValue = () => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const safeHtml = sanitizeRichTextHtml(editor.innerHTML);
+    editor.innerHTML = safeHtml;
+    onChange(safeHtml);
+  };
+
+  return (
+    <div className={styles.richField}>
+      <span className={styles.richLabel}>{label}</span>
+      <div className={styles.richToolbar} aria-label={`${label} formatting`}>
+        <button type="button" title="Bold" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("bold")}>
+          <Bold size={16} />
+        </button>
+        <button type="button" title="Italic" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("italic")}>
+          <Italic size={16} />
+        </button>
+        <button type="button" title="Underline" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("underline")}>
+          <Underline size={16} />
+        </button>
+        <button type="button" title="Bullet list" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("insertUnorderedList")}>
+          <List size={16} />
+        </button>
+        <button type="button" title="Numbered list" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("insertOrderedList")}>
+          <ListOrdered size={16} />
+        </button>
+        <label className={styles.colorTool} title="Text color">
+          <Palette size={16} />
+          <input type="color" onChange={(event) => runCommand("foreColor", event.target.value)} />
+        </label>
+      </div>
+      <div
+        ref={editorRef}
+        className={styles.richEditor}
+        contentEditable
+        role="textbox"
+        aria-label={label}
+        spellCheck="true"
+        onInput={syncValue}
+        onBlur={sanitizeValue}
+      />
+    </div>
+  );
+}
+
 function SectionForm({ draft, onChange, onSubmit, onCancel, busy }) {
   return (
     <form className={styles.inlineEditor} onSubmit={onSubmit}>
@@ -1422,13 +1573,8 @@ function SectionForm({ draft, onChange, onSubmit, onCancel, busy }) {
           <input type="number" min="0" value={draft.position} onChange={(event) => onChange((prev) => ({ ...prev, position: event.target.value }))} />
         </label>
       </div>
-      <label className={styles.field}>Instructions
-        <textarea value={draft.instructions} onChange={(event) => onChange((prev) => ({ ...prev, instructions: event.target.value }))} />
-      </label>
-      <div className={styles.previewBox}>
-        <span><Eye size={15} /> Preview</span>
-        <p>{clipPreview(draft.instructions || draft.title, 520) || "No instructions yet."}</p>
-      </div>
+      <RichTextEditor label="Instructions" value={draft.instructions} onChange={(value) => onChange((prev) => ({ ...prev, instructions: value }))} />
+      <RichPreview label="Preview" value={draft.instructions || draft.title} />
       <div className={styles.editorGrid}>
         <JsonTextarea label="Scoring JSON" value={draft.scoring} onChange={(value) => onChange((prev) => ({ ...prev, scoring: value }))} />
         <JsonTextarea label="Metadata JSON" value={draft.metadata} onChange={(value) => onChange((prev) => ({ ...prev, metadata: value }))} />
@@ -1493,19 +1639,10 @@ function QuestionForm({ draft, sections, onChange, onSubmit, onCancel, busy }) {
       <datalist id="question-type-options">
         {QUESTION_TYPE_OPTIONS.map((item) => <option key={item} value={item} />)}
       </datalist>
-      <label className={styles.field}>Prompt / task text
-        <textarea value={draft.prompt} onChange={(event) => onChange((prev) => ({ ...prev, prompt: event.target.value }))} />
-      </label>
-      <div className={styles.previewBox}>
-        <span><Eye size={15} /> Candidate preview</span>
-        <p>{clipPreview(draft.prompt, 520) || "No prompt yet."}</p>
-      </div>
-      <label className={styles.field}>Explanation / examiner note
-        <textarea value={draft.explanation} onChange={(event) => onChange((prev) => ({ ...prev, explanation: event.target.value }))} />
-      </label>
-      <label className={styles.field}>Transcript
-        <textarea value={draft.transcript} onChange={(event) => onChange((prev) => ({ ...prev, transcript: event.target.value }))} />
-      </label>
+      <RichTextEditor label="Prompt / task text" value={draft.prompt} onChange={(value) => onChange((prev) => ({ ...prev, prompt: value }))} />
+      <RichPreview label="Candidate preview" value={draft.prompt} />
+      <RichTextEditor label="Explanation / examiner note" value={draft.explanation} onChange={(value) => onChange((prev) => ({ ...prev, explanation: value }))} />
+      <RichTextEditor label="Transcript" value={draft.transcript} onChange={(value) => onChange((prev) => ({ ...prev, transcript: value }))} />
       <div className={styles.editorGrid}>
         <JsonTextarea label="Options JSON" value={draft.options} onChange={(value) => onChange((prev) => ({ ...prev, options: value }))} />
         <JsonTextarea label="Correct answer JSON" value={draft.correctAnswer} onChange={(value) => onChange((prev) => ({ ...prev, correctAnswer: value }))} />

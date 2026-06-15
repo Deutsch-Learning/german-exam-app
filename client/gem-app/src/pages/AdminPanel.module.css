@@ -850,6 +850,11 @@
   gap: 8px;
 }
 
+.questionSlot {
+  display: grid;
+  gap: 8px;
+}
+
 .questionCard {
   padding: 11px;
   display: flex;
@@ -927,6 +932,89 @@
   color: #64748b;
   font-size: 0.84rem;
   font-weight: 700;
+}
+
+.richField {
+  display: grid;
+  gap: 8px;
+}
+
+.richLabel {
+  color: #334155;
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.richToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.richToolbar button,
+.colorTool {
+  width: 36px;
+  height: 34px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #334155;
+  display: inline-grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.richToolbar button:hover,
+.colorTool:hover {
+  border-color: #f9c415;
+  background: #fffbeb;
+}
+
+.colorTool {
+  position: relative;
+}
+
+.colorTool input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.richEditor {
+  min-height: 180px;
+  max-height: 420px;
+  overflow: auto;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #111827;
+  padding: 12px;
+  line-height: 1.55;
+  outline: 0;
+}
+
+.richEditor:focus {
+  border-color: #f9c415;
+  box-shadow: 0 0 0 3px rgba(249, 196, 21, 0.18);
+}
+
+.richEditor p,
+.richPreview p {
+  margin: 0 0 0.7em;
+}
+
+.richEditor ul,
+.richEditor ol,
+.richPreview ul,
+.richPreview ol {
+  margin: 0.3em 0 0.8em;
+  padding-left: 1.4em;
+}
+
+.richPreview {
+  color: #334155;
+  line-height: 1.55;
 }
 
 @media (max-width: 860px) {
