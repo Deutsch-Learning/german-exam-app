@@ -4,12 +4,25 @@ import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-r
 import {
   Activity,
   BarChart3,
+  BookOpen,
+  CheckCircle2,
+  ClipboardList,
+  Copy,
   Download,
+  Edit3,
+  Eye,
   FileJson,
+  FileText,
+  Headphones,
   LogOut,
+  MessageSquareText,
+  Plus,
+  Search,
   Shield,
+  Trash2,
   Upload,
   Users,
+  Volume2,
 } from "lucide-react";
 import API from "../services/api";
 import logo from "../assets/images/logo.png";
@@ -17,7 +30,7 @@ import styles from "./AdminPanel.module.css";
 import { clearDashboardCache } from "../services/dashboard";
 import { clearAuthSession } from "../utils/access";
 import { examSimulations } from "../data/siteContent";
-import { fetchImportedSeries } from "../services/importedExams";
+import { clearImportedExamCache, fetchImportedSeries } from "../services/importedExams";
 
 const formatDate = (value) => {
   if (!value) return "-";
@@ -51,6 +64,98 @@ const useAdminData = (loader) => {
   }, [load]);
 
   return { data, loading, error, reload: load };
+};
+
+const LEVEL_OPTIONS = ["A1", "A2", "B1", "B2", "C1", "C2"];
+const MODULE_OPTIONS = [
+  { id: "read", label: "Lesen", icon: BookOpen },
+  { id: "listen", label: "Hören", icon: Headphones },
+  { id: "write", label: "Schreiben", icon: FileText },
+  { id: "speak", label: "Sprechen", icon: Volume2 },
+];
+const EXAM_BODY_OPTIONS = ["goethe", "ösd", "osd", "telc", "ecl", "testdaf", "dsh", "custom"];
+const QUESTION_TYPE_OPTIONS = [
+  "multiple_choice",
+  "true_false",
+  "yes_no",
+  "matching",
+  "fill_blank",
+  "short_answer",
+  "prompt",
+  "compound",
+];
+
+const MODULE_LABELS = MODULE_OPTIONS.reduce((acc, item) => ({ ...acc, [item.id]: item.label }), {});
+
+const getModuleLabel = (value) => MODULE_LABELS[String(value ?? "").toLowerCase()] ?? value ?? "-";
+
+const formatJson = (value, fallback) => {
+  try {
+    return JSON.stringify(value ?? fallback, null, 2);
+  } catch {
+    return JSON.stringify(fallback, null, 2);
+  }
+};
+
+const parseJsonField = (value, label) => {
+  const text = String(value ?? "").trim();
+  if (!text) return undefined;
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`${label} must be valid JSON.`);
+  }
+};
+
+const normalizeDateLabel = (value) => (value ? formatDate(value) : "-");
+
+const getExamBody = (exam) =>
+  String(exam?.provider || exam?.exam_type || "custom").trim().toLowerCase();
+
+const makeExamDraft = (exam) => ({
+  code: exam?.code ?? "",
+  name: exam?.name ?? "",
+  examType: exam?.exam_type ?? "",
+  provider: exam?.provider ?? "",
+  level: exam?.level ?? "",
+  sectionType: exam?.section_type ?? "",
+  seriesNumber: exam?.series_number ?? "",
+  isActive: Boolean(exam?.is_active),
+  metadata: formatJson(exam?.metadata, {}),
+});
+
+const makeSectionDraft = (section, exam) => ({
+  id: section?.id ?? "",
+  sectionType: section?.section_type ?? exam?.section_type ?? "read",
+  partNumber: section?.part_number ?? 1,
+  title: section?.title ?? "",
+  instructions: section?.instructions ?? "",
+  durationMinutes: section?.duration_minutes ?? "",
+  points: section?.points ?? "",
+  position: section?.position ?? "",
+  scoring: formatJson(section?.scoring, {}),
+  metadata: formatJson(section?.metadata, {}),
+});
+
+const makeQuestionDraft = (question, exam, section) => ({
+  id: question?.id ?? "",
+  sectionId: question?.section_id ?? section?.id ?? "",
+  moduleId: question?.module_id ?? section?.section_type ?? exam?.section_type ?? "read",
+  questionType: question?.question_type ?? "prompt",
+  prompt: question?.prompt ?? "",
+  options: formatJson(question?.options, []),
+  correctAnswer: formatJson(question?.correct_answer, {}),
+  explanation: question?.explanation ?? "",
+  transcript: question?.transcript ?? "",
+  audio: formatJson(question?.audio, {}),
+  scoring: formatJson(question?.scoring, {}),
+  sourceMetadata: formatJson(question?.source_metadata, {}),
+  position: question?.position ?? "",
+});
+
+const clipPreview = (value, max = 180) => {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  return text.length > max ? `${text.slice(0, max - 3)}...` : text;
 };
 
 function AdminShell({ children }) {
@@ -559,6 +664,861 @@ function AdminApiUsage() {
 }
 
 function AdminExams() {
+  const loader = useCallback(async () => {
+    const res = await API.get("/api/admin/exams");
+    return res.data;
+  }, []);
+  const { data, loading, error, reload } = useAdminData(loader);
+  const [form, setForm] = useState({ code: "", name: "", examType: "custom", level: "B2" });
+  const [generateForm, setGenerateForm] = useState({ type: "testdaf", serie: "serie-1", level: "B2", moduleCategory: "reading", quantity: 4 });
+  const [jsonPayload, setJsonPayload] = useState("");
+  const [documentFile, setDocumentFile] = useState(null);
+  const [documentBusy, setDocumentBusy] = useState("");
+  const [documentAnalysis, setDocumentAnalysis] = useState(null);
+  const [documentError, setDocumentError] = useState("");
+  const [status, setStatus] = useState("");
+  const [busyAction, setBusyAction] = useState("");
+  const [filters, setFilters] = useState({ search: "", provider: "all", level: "all", status: "all", module: "all" });
+  const [selectedExamId, setSelectedExamId] = useState("");
+  const [examDraft, setExamDraft] = useState(null);
+  const [sectionDraft, setSectionDraft] = useState(null);
+  const [questionDraft, setQuestionDraft] = useState(null);
+
+  const exams = useMemo(() => data?.exams ?? [], [data?.exams]);
+  const sections = useMemo(() => data?.sections ?? [], [data?.sections]);
+  const questions = useMemo(() => data?.questions ?? [], [data?.questions]);
+  const imports = useMemo(() => data?.imports ?? [], [data?.imports]);
+
+  const sectionsByExam = useMemo(() => {
+    const map = new Map();
+    sections.forEach((section) => {
+      map.set(section.exam_id, [...(map.get(section.exam_id) ?? []), section]);
+    });
+    return map;
+  }, [sections]);
+
+  const questionsBySection = useMemo(() => {
+    const map = new Map();
+    questions.forEach((question) => {
+      if (!question.section_id) return;
+      map.set(question.section_id, [...(map.get(question.section_id) ?? []), question]);
+    });
+    return map;
+  }, [questions]);
+
+  const orphanQuestionsByExam = useMemo(() => {
+    const map = new Map();
+    questions.forEach((question) => {
+      if (question.section_id) return;
+      map.set(question.exam_id, [...(map.get(question.exam_id) ?? []), question]);
+    });
+    return map;
+  }, [questions]);
+
+  const visibleExams = useMemo(() => {
+    const search = filters.search.trim().toLowerCase();
+    return exams.filter((exam) => {
+      const body = getExamBody(exam);
+      const text = [
+        exam.name,
+        exam.code,
+        exam.exam_type,
+        exam.provider,
+        exam.level,
+        exam.section_type,
+        exam.series_number,
+      ].join(" ").toLowerCase();
+      const matchesSearch = !search || text.includes(search);
+      const matchesProvider = filters.provider === "all" || body === filters.provider;
+      const matchesLevel = filters.level === "all" || String(exam.level ?? "").toUpperCase() === filters.level;
+      const matchesStatus = filters.status === "all" || (filters.status === "published" ? exam.is_active : !exam.is_active);
+      const matchesModule = filters.module === "all" || String(exam.section_type ?? "").toLowerCase() === filters.module;
+      return matchesSearch && matchesProvider && matchesLevel && matchesStatus && matchesModule;
+    });
+  }, [exams, filters]);
+
+  useEffect(() => {
+    if (!visibleExams.length) {
+      setSelectedExamId("");
+      return;
+    }
+    if (!visibleExams.some((exam) => String(exam.id) === String(selectedExamId))) {
+      setSelectedExamId(String(visibleExams[0].id));
+    }
+  }, [selectedExamId, visibleExams]);
+
+  const selectedExam = useMemo(
+    () => exams.find((exam) => String(exam.id) === String(selectedExamId)) ?? visibleExams[0] ?? null,
+    [exams, selectedExamId, visibleExams]
+  );
+
+  const selectedSections = useMemo(
+    () => (selectedExam ? sectionsByExam.get(selectedExam.id) ?? [] : []),
+    [selectedExam, sectionsByExam]
+  );
+  const selectedOrphans = selectedExam ? orphanQuestionsByExam.get(selectedExam.id) ?? [] : [];
+
+  useEffect(() => {
+    setExamDraft(selectedExam ? makeExamDraft(selectedExam) : null);
+    setSectionDraft(null);
+    setQuestionDraft(null);
+  }, [selectedExam]);
+
+  const runAction = async (label, action, successMessage) => {
+    setBusyAction(label);
+    setStatus("");
+    setDocumentError("");
+    try {
+      await action();
+      clearImportedExamCache();
+      setStatus(successMessage);
+      await reload();
+    } catch (err) {
+      setDocumentError(err.response?.data?.error ?? err.message ?? "Admin action failed.");
+    } finally {
+      setBusyAction("");
+    }
+  };
+
+  const createExam = async (event) => {
+    event.preventDefault();
+    await runAction("create-exam", async () => {
+      await API.post("/api/admin/exams", form);
+      setForm({ code: "", name: "", examType: "custom", level: "B2" });
+    }, "Exam created.");
+  };
+
+  const saveExam = async (event) => {
+    event.preventDefault();
+    if (!selectedExam || !examDraft) return;
+    await runAction("save-exam", async () => {
+      await API.put(`/api/admin/exams/${selectedExam.id}`, {
+        ...examDraft,
+        metadata: parseJsonField(examDraft.metadata, "Exam metadata") ?? {},
+      });
+    }, "Exam metadata saved.");
+  };
+
+  const toggleExamStatus = async () => {
+    if (!selectedExam) return;
+    await runAction("toggle-exam", async () => {
+      await API.put(`/api/admin/exams/${selectedExam.id}`, { isActive: !selectedExam.is_active });
+    }, selectedExam.is_active ? "Exam unpublished." : "Exam published.");
+  };
+
+  const duplicateExam = async () => {
+    if (!selectedExam) return;
+    await runAction("duplicate-exam", async () => {
+      const res = await API.post(`/api/admin/exams/${selectedExam.id}/duplicate`);
+      setSelectedExamId(String(res.data.exam.id));
+    }, "Exam duplicated as draft.");
+  };
+
+  const saveSection = async (event) => {
+    event.preventDefault();
+    if (!selectedExam || !sectionDraft) return;
+    await runAction("save-section", async () => {
+      const payload = {
+        ...sectionDraft,
+        scoring: parseJsonField(sectionDraft.scoring, "Section scoring") ?? {},
+        metadata: parseJsonField(sectionDraft.metadata, "Section metadata") ?? {},
+      };
+      if (sectionDraft.id) {
+        await API.put(`/api/admin/exams/${selectedExam.id}/sections/${sectionDraft.id}`, payload);
+      } else {
+        await API.post(`/api/admin/exams/${selectedExam.id}/sections`, payload);
+      }
+      setSectionDraft(null);
+    }, sectionDraft.id ? "Section saved." : "Section created.");
+  };
+
+  const deleteSection = async (section) => {
+    if (!selectedExam || !window.confirm(`Delete section "${section.title}"? Empty sections only can be deleted.`)) return;
+    await runAction("delete-section", async () => {
+      await API.delete(`/api/admin/exams/${selectedExam.id}/sections/${section.id}`);
+    }, "Section deleted.");
+  };
+
+  const saveQuestion = async (event) => {
+    event.preventDefault();
+    if (!selectedExam || !questionDraft) return;
+    await runAction("save-question", async () => {
+      const payload = {
+        ...questionDraft,
+        options: parseJsonField(questionDraft.options, "Question options") ?? [],
+        correctAnswer: parseJsonField(questionDraft.correctAnswer, "Correct answer") ?? {},
+        audio: parseJsonField(questionDraft.audio, "Audio metadata") ?? {},
+        scoring: parseJsonField(questionDraft.scoring, "Question scoring") ?? {},
+        sourceMetadata: parseJsonField(questionDraft.sourceMetadata, "Source metadata") ?? {},
+      };
+      if (questionDraft.id) {
+        await API.put(`/api/admin/exams/${selectedExam.id}/questions/${questionDraft.id}`, payload);
+      } else {
+        await API.post(`/api/admin/exams/${selectedExam.id}/questions`, payload);
+      }
+      setQuestionDraft(null);
+    }, questionDraft.id ? "Question saved." : "Question created.");
+  };
+
+  const deleteQuestion = async (question) => {
+    if (!selectedExam || !window.confirm("Delete this question? This cannot be undone.")) return;
+    await runAction("delete-question", async () => {
+      await API.delete(`/api/admin/exams/${selectedExam.id}/questions/${question.id}`);
+    }, "Question deleted.");
+  };
+
+  const uploadJson = async () => {
+    await runAction("upload-json", async () => {
+      const payload = JSON.parse(jsonPayload);
+      await API.post("/api/admin/exams/upload-json", { payload });
+      setJsonPayload("");
+    }, "JSON exam upload complete.");
+  };
+
+  const processDocument = async (mode) => {
+    if (!documentFile) return;
+    setDocumentBusy(mode);
+    setDocumentError("");
+    setStatus("");
+    try {
+      const formData = new FormData();
+      formData.append("document", documentFile);
+      const endpoint = mode === "import" ? "/api/admin/exams/import-document" : "/api/admin/exams/analyze-document";
+      const res = await API.post(endpoint, formData);
+      setDocumentAnalysis(res.data.analysis);
+      if (mode === "import") {
+        clearImportedExamCache();
+        setStatus(
+          res.data.duplicate
+            ? "Document already imported. Existing data was kept."
+            : `${res.data.exams?.length ?? 0} exam series imported from document.`
+        );
+        await reload();
+      } else {
+        setStatus("Document analyzed. Review the detected structure before importing.");
+      }
+    } catch (err) {
+      setDocumentError(err.response?.data?.error ?? "Document processing failed.");
+    } finally {
+      setDocumentBusy("");
+    }
+  };
+
+  const generateExams = async (event) => {
+    event.preventDefault();
+    await runAction("generate-exams", async () => {
+      await API.post("/api/admin/exams/generate", generateForm);
+    }, "Generated exam content saved.");
+  };
+
+  return (
+    <>
+      <Header title="Exam Content CMS" subtitle="Manage German exam bodies, levels, series, sections, tasks, scoring, and publication state." />
+      {status ? <p className={styles.status}>{status}</p> : null}
+      {error ? <p className={styles.error}>{error}</p> : null}
+      {documentError ? <p className={styles.error}>{documentError}</p> : null}
+      {loading ? <p>Loading...</p> : null}
+
+      <section className={styles.cmsHero}>
+        <div className={styles.cmsHeroText}>
+          <p className={styles.modalEyebrow}>Content hierarchy</p>
+          <h2>Exam body - level - series - section - task</h2>
+          <p>Reusable CMS layer built on the current exam, section, and question tables so learner tests continue to load from the same source of truth.</p>
+        </div>
+        <div className={styles.cmsStatGrid}>
+          <CmsStat icon={ClipboardList} label="Exams" value={exams.length} />
+          <CmsStat icon={BookOpen} label="Sections" value={sections.length} />
+          <CmsStat icon={MessageSquareText} label="Tasks" value={questions.length} />
+          <CmsStat icon={CheckCircle2} label="Published" value={exams.filter((exam) => exam.is_active).length} />
+          <CmsStat icon={FileJson} label="Modules" value={new Set(exams.map((exam) => exam.section_type).filter(Boolean)).size} />
+        </div>
+      </section>
+
+      <section className={styles.cmsToolbar}>
+        <label className={`${styles.field} ${styles.searchField}`}>Search content
+          <span>
+            <Search size={16} />
+            <input
+              value={filters.search}
+              onChange={(event) => setFilters((prev) => ({ ...prev, search: event.target.value }))}
+              placeholder="Goethe B1, series 2, schreiben..."
+            />
+          </span>
+        </label>
+        <div className={styles.filterRow}>
+          <label className={styles.field}>Exam body
+            <select value={filters.provider} onChange={(event) => setFilters((prev) => ({ ...prev, provider: event.target.value }))}>
+              <option value="all">All bodies</option>
+              {EXAM_BODY_OPTIONS.map((item) => <option key={item} value={item}>{item.toUpperCase()}</option>)}
+            </select>
+          </label>
+          <label className={styles.field}>Level
+            <select value={filters.level} onChange={(event) => setFilters((prev) => ({ ...prev, level: event.target.value }))}>
+              <option value="all">All levels</option>
+              {LEVEL_OPTIONS.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+          </label>
+          <label className={styles.field}>Module
+            <select value={filters.module} onChange={(event) => setFilters((prev) => ({ ...prev, module: event.target.value }))}>
+              <option value="all">All modules</option>
+              {MODULE_OPTIONS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+            </select>
+          </label>
+          <label className={styles.field}>Status
+            <select value={filters.status} onChange={(event) => setFilters((prev) => ({ ...prev, status: event.target.value }))}>
+              <option value="all">All statuses</option>
+              <option value="published">Published</option>
+              <option value="draft">Draft</option>
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <div className={styles.cmsWorkspace}>
+        <section className={styles.cmsLibrary}>
+          <div className={styles.panelHeader}>
+            <h2>Content library</h2>
+            <span>{visibleExams.length} shown</span>
+          </div>
+          <div className={styles.examList}>
+            {visibleExams.map((exam) => {
+              const module = MODULE_OPTIONS.find((item) => item.id === exam.section_type);
+              const Icon = module?.icon ?? FileJson;
+              const isActive = String(exam.id) === String(selectedExam?.id);
+              return (
+                <button
+                  type="button"
+                  key={exam.id}
+                  className={`${styles.examCard} ${isActive ? styles.examCardActive : ""}`}
+                  onClick={() => setSelectedExamId(String(exam.id))}
+                >
+                  <span className={styles.moduleBadge}>
+                    <Icon size={15} />
+                    {getModuleLabel(exam.section_type)}
+                  </span>
+                  <strong>{exam.name}</strong>
+                  <small>{exam.code}</small>
+                  <span className={styles.examMeta}>
+                    {getExamBody(exam).toUpperCase()} - {exam.level ?? "-"} - Series {exam.series_number ?? "-"}
+                  </span>
+                  <span className={styles.miniBadges}>
+                    <span className={`${styles.badge} ${exam.is_active ? "" : styles.warn}`}>{exam.is_active ? "Published" : "Draft"}</span>
+                    <span>{exam.section_count ?? 0} sections</span>
+                    <span>{exam.question_count ?? 0} tasks</span>
+                  </span>
+                </button>
+              );
+            })}
+            {!visibleExams.length ? <p className={styles.emptyState}>No exams match these filters.</p> : null}
+          </div>
+        </section>
+
+        <section className={styles.cmsDetail}>
+          {!selectedExam || !examDraft ? (
+            <div className={styles.emptyState}>Select or create an exam to start editing content.</div>
+          ) : (
+            <>
+              <div className={styles.detailHeader}>
+                <div>
+                  <p className={styles.modalEyebrow}>Selected exam</p>
+                  <h2>{selectedExam.name}</h2>
+                  <p>{selectedExam.code} - updated {normalizeDateLabel(selectedExam.updated_at)}</p>
+                </div>
+                <div className={styles.actions}>
+                  <button className={styles.secondaryButton} type="button" onClick={duplicateExam} disabled={Boolean(busyAction)}>
+                    <Copy size={16} />
+                    Duplicate
+                  </button>
+                  <button className={selectedExam.is_active ? styles.secondaryButton : styles.button} type="button" onClick={toggleExamStatus} disabled={Boolean(busyAction)}>
+                    <CheckCircle2 size={16} />
+                    {selectedExam.is_active ? "Unpublish" : "Publish"}
+                  </button>
+                </div>
+              </div>
+
+              <form className={styles.editorPanel} onSubmit={saveExam}>
+                <div className={styles.panelHeader}>
+                  <h3>Exam metadata</h3>
+                  <span className={styles.badge}>
+                    <Shield size={14} />
+                    Admin API
+                  </span>
+                </div>
+                <div className={styles.editorGrid}>
+                  <label className={styles.field}>Code
+                    <input value={examDraft.code} onChange={(event) => setExamDraft((prev) => ({ ...prev, code: event.target.value }))} />
+                  </label>
+                  <label className={styles.field}>Name
+                    <input value={examDraft.name} onChange={(event) => setExamDraft((prev) => ({ ...prev, name: event.target.value }))} />
+                  </label>
+                  <label className={styles.field}>Exam body
+                    <input list="exam-body-options" value={examDraft.provider} onChange={(event) => setExamDraft((prev) => ({ ...prev, provider: event.target.value }))} placeholder="goethe" />
+                  </label>
+                  <label className={styles.field}>Exam type
+                    <input value={examDraft.examType} onChange={(event) => setExamDraft((prev) => ({ ...prev, examType: event.target.value }))} />
+                  </label>
+                  <label className={styles.field}>Level
+                    <select value={examDraft.level} onChange={(event) => setExamDraft((prev) => ({ ...prev, level: event.target.value }))}>
+                      <option value="">No level</option>
+                      {LEVEL_OPTIONS.map((item) => <option key={item} value={item}>{item}</option>)}
+                    </select>
+                  </label>
+                  <label className={styles.field}>Module
+                    <select value={examDraft.sectionType} onChange={(event) => setExamDraft((prev) => ({ ...prev, sectionType: event.target.value }))}>
+                      <option value="">No module</option>
+                      {MODULE_OPTIONS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+                    </select>
+                  </label>
+                  <label className={styles.field}>Series number
+                    <input type="number" min="1" value={examDraft.seriesNumber} onChange={(event) => setExamDraft((prev) => ({ ...prev, seriesNumber: event.target.value }))} />
+                  </label>
+                  <label className={`${styles.field} ${styles.toggleField}`}>Publication
+                    <span>
+                      <input type="checkbox" checked={examDraft.isActive} onChange={(event) => setExamDraft((prev) => ({ ...prev, isActive: event.target.checked }))} />
+                      Published in learner app
+                    </span>
+                  </label>
+                </div>
+                <JsonTextarea label="Metadata JSON" value={examDraft.metadata} onChange={(value) => setExamDraft((prev) => ({ ...prev, metadata: value }))} />
+                <div className={styles.contentActions}>
+                  <button className={styles.button} type="submit" disabled={busyAction === "save-exam"}>
+                    <Edit3 size={16} />
+                    Save exam
+                  </button>
+                </div>
+              </form>
+
+              <section className={styles.editorPanel}>
+                <div className={styles.panelHeader}>
+                  <div>
+                    <h3>Sections and tasks</h3>
+                    <p className={styles.panelHint}>Edit Lesen, Hören, Schreiben, and Sprechen content in the same hierarchy the learner app reads.</p>
+                  </div>
+                  <button className={styles.button} type="button" onClick={() => setSectionDraft(makeSectionDraft(null, selectedExam))}>
+                    <Plus size={16} />
+                    Add section
+                  </button>
+                </div>
+
+                {sectionDraft ? (
+                  <SectionForm
+                    draft={sectionDraft}
+                    onChange={setSectionDraft}
+                    onSubmit={saveSection}
+                    onCancel={() => setSectionDraft(null)}
+                    busy={busyAction === "save-section"}
+                  />
+                ) : null}
+
+                <div className={styles.sectionStack}>
+                  {selectedSections.map((section) => {
+                    const sectionQuestions = questionsBySection.get(section.id) ?? [];
+                    const module = MODULE_OPTIONS.find((item) => item.id === section.section_type);
+                    const Icon = module?.icon ?? FileJson;
+                    return (
+                      <article className={styles.sectionCard} key={section.id}>
+                        <div className={styles.sectionHeader}>
+                          <div>
+                            <span className={styles.moduleBadge}>
+                              <Icon size={15} />
+                              {getModuleLabel(section.section_type)}
+                            </span>
+                            <h4>Teil {section.part_number}: {section.title}</h4>
+                            <p>{section.duration_minutes ?? "-"} min - {section.points ?? "-"} points - position {section.position}</p>
+                          </div>
+                          <div className={styles.actions}>
+                            <button className={styles.secondaryButton} type="button" onClick={() => setSectionDraft(makeSectionDraft(section, selectedExam))}>
+                              <Edit3 size={15} />
+                              Edit
+                            </button>
+                            <button className={styles.dangerGhostButton} type="button" onClick={() => deleteSection(section)}>
+                              <Trash2 size={15} />
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                        <div className={styles.previewBox}>
+                          <span><Eye size={15} /> Instructions preview</span>
+                          <p>{clipPreview(section.instructions || section.title, 420) || "No instructions yet."}</p>
+                        </div>
+                        <div className={styles.questionList}>
+                          {sectionQuestions.map((question) => (
+                            <QuestionCard
+                              key={question.id}
+                              question={question}
+                              onEdit={() => setQuestionDraft(makeQuestionDraft(question, selectedExam, section))}
+                              onDelete={() => deleteQuestion(question)}
+                            />
+                          ))}
+                          <button className={styles.secondaryButton} type="button" onClick={() => setQuestionDraft(makeQuestionDraft(null, selectedExam, section))}>
+                            <Plus size={15} />
+                            Add task to this section
+                          </button>
+                        </div>
+                      </article>
+                    );
+                  })}
+                  {selectedOrphans.length ? (
+                    <article className={styles.sectionCard}>
+                      <div className={styles.sectionHeader}>
+                        <div>
+                          <span className={styles.moduleBadge}><FileJson size={15} /> Unassigned</span>
+                          <h4>Tasks without a section</h4>
+                          <p>Move these into a section when possible.</p>
+                        </div>
+                      </div>
+                      <div className={styles.questionList}>
+                        {selectedOrphans.map((question) => (
+                          <QuestionCard
+                            key={question.id}
+                            question={question}
+                            onEdit={() => setQuestionDraft(makeQuestionDraft(question, selectedExam, null))}
+                            onDelete={() => deleteQuestion(question)}
+                          />
+                        ))}
+                      </div>
+                    </article>
+                  ) : null}
+                  {!selectedSections.length && !selectedOrphans.length ? (
+                    <p className={styles.emptyState}>No sections yet. Add one to start building this exam module.</p>
+                  ) : null}
+                </div>
+
+                {questionDraft ? (
+                  <QuestionForm
+                    draft={questionDraft}
+                    sections={selectedSections}
+                    onChange={setQuestionDraft}
+                    onSubmit={saveQuestion}
+                    onCancel={() => setQuestionDraft(null)}
+                    busy={busyAction === "save-question"}
+                  />
+                ) : null}
+              </section>
+            </>
+          )}
+        </section>
+      </div>
+
+      <datalist id="exam-body-options">
+        {EXAM_BODY_OPTIONS.map((item) => <option key={item} value={item} />)}
+      </datalist>
+
+      <section className={styles.panel}>
+        <div className={styles.panelHeader}>
+          <div>
+            <h2>Intelligent document import</h2>
+            <p className={styles.panelHint}>Upload PDF, DOCX, TXT, or image files. The parser detects provider, level, section, series, questions, scoring, and prevents duplicate imports.</p>
+          </div>
+          <span className={styles.badge}>
+            <Upload size={14} />
+            Auto parser
+          </span>
+        </div>
+        <div className={styles.documentImportGrid}>
+          <label className={styles.field}>Exam document
+            <input
+              type="file"
+              accept=".pdf,.docx,.txt,.png,.jpg,.jpeg,.webp,.tif,.tiff,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/*"
+              onChange={(event) => {
+                setDocumentFile(event.target.files?.[0] ?? null);
+                setDocumentAnalysis(null);
+                setDocumentError("");
+              }}
+            />
+          </label>
+          <div className={styles.actions}>
+            <button
+              className={styles.secondaryButton}
+              type="button"
+              disabled={!documentFile || Boolean(documentBusy)}
+              onClick={() => processDocument("analyze")}
+            >
+              {documentBusy === "analyze" ? "Analyzing..." : "Analyze only"}
+            </button>
+            <button
+              className={styles.button}
+              type="button"
+              disabled={!documentFile || Boolean(documentBusy)}
+              onClick={() => processDocument("import")}
+            >
+              {documentBusy === "import" ? "Importing..." : "Analyze & import"}
+            </button>
+          </div>
+        </div>
+        {documentAnalysis ? (
+          <div className={styles.importSummary}>
+            <div className={styles.summaryGrid}>
+              <span><strong>Provider</strong>{documentAnalysis.metadata?.provider ?? "-"}</span>
+              <span><strong>Exam</strong>{documentAnalysis.metadata?.examType ?? "-"}</span>
+              <span><strong>Level</strong>{documentAnalysis.metadata?.level ?? "-"}</span>
+              <span><strong>Section</strong>{documentAnalysis.metadata?.sectionLabel ?? documentAnalysis.metadata?.sectionType ?? "-"}</span>
+              <span><strong>Series</strong>{documentAnalysis.outline?.series?.length ?? 0}</span>
+              <span><strong>Questions</strong>{documentAnalysis.validation?.questionCount ?? 0}</span>
+            </div>
+            {documentAnalysis.validation?.warnings?.length ? (
+              <ul className={styles.warningList}>
+                {documentAnalysis.validation.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+              </ul>
+            ) : null}
+            <div className={styles.outlineList}>
+              {(documentAnalysis.outline?.series ?? []).slice(0, 8).map((series) => (
+                <article key={`${series.seriesNumber}-${series.title}`}>
+                  <strong>{series.sourceLabel}: {series.title}</strong>
+                  <span>{series.sectionCount} sections - {series.questionCount} questions</span>
+                </article>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </section>
+
+      <div className={styles.intakeGrid}>
+        <section className={styles.panel}>
+          <h2>Create exam shell</h2>
+          <form className={styles.formGrid} onSubmit={createExam}>
+            <label className={styles.field}>Code
+              <input value={form.code} onChange={(e) => setForm((prev) => ({ ...prev, code: e.target.value }))} placeholder="goethe-b2-2026" />
+            </label>
+            <label className={styles.field}>Name
+              <input value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} placeholder="Goethe B2 2026" />
+            </label>
+            <label className={styles.field}>Type
+              <input value={form.examType} onChange={(e) => setForm((prev) => ({ ...prev, examType: e.target.value }))} />
+            </label>
+            <label className={styles.field}>Level
+              <select value={form.level} onChange={(e) => setForm((prev) => ({ ...prev, level: e.target.value }))}>
+                {LEVEL_OPTIONS.map((item) => <option key={item} value={item}>{item}</option>)}
+              </select>
+            </label>
+            <button className={styles.button} type="submit" disabled={busyAction === "create-exam"}>
+              <Plus size={16} />
+              Create
+            </button>
+          </form>
+        </section>
+
+        <section className={styles.panel}>
+          <h2>Upload exams via JSON</h2>
+          <label className={styles.field}>JSON payload
+            <textarea
+              value={jsonPayload}
+              onChange={(event) => setJsonPayload(event.target.value)}
+              placeholder='{"exams":[{"code":"testdaf-1","name":"TestDaF Set 1","questions":[]}]}'
+            />
+          </label>
+          <button className={styles.secondaryButton} type="button" onClick={uploadJson} disabled={!jsonPayload.trim() || busyAction === "upload-json"}>
+            <Upload size={16} />
+            Upload JSON
+          </button>
+        </section>
+      </div>
+
+      <section className={styles.panel}>
+        <h2>Bulk exam generation</h2>
+        <form className={styles.formGrid} onSubmit={generateExams}>
+          <label className={styles.field}>Test type
+            <select value={generateForm.type} onChange={(e) => setGenerateForm((prev) => ({ ...prev, type: e.target.value }))}>
+              <option value="testdaf">TestDaF</option>
+              <option value="dsh">DSH</option>
+              <option value="goethe">Goethe</option>
+              <option value="telc">telc</option>
+            </select>
+          </label>
+          <label className={styles.field}>Serie
+            <input value={generateForm.serie} onChange={(e) => setGenerateForm((prev) => ({ ...prev, serie: e.target.value }))} />
+          </label>
+          <label className={styles.field}>Level
+            <select value={generateForm.level} onChange={(e) => setGenerateForm((prev) => ({ ...prev, level: e.target.value }))}>
+              {LEVEL_OPTIONS.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+          </label>
+          <label className={styles.field}>Module
+            <select value={generateForm.moduleCategory} onChange={(e) => setGenerateForm((prev) => ({ ...prev, moduleCategory: e.target.value }))}>
+              <option value="reading">Reading</option>
+              <option value="listening">Listening</option>
+              <option value="writing">Writing</option>
+              <option value="speaking">Speaking</option>
+            </select>
+          </label>
+          <label className={styles.field}>Quantity
+            <input type="number" min="1" max="50" value={generateForm.quantity} onChange={(e) => setGenerateForm((prev) => ({ ...prev, quantity: Number(e.target.value) }))} />
+          </label>
+          <button className={styles.button} type="submit" disabled={busyAction === "generate-exams"}>
+            <FileJson size={16} />
+            Generate
+          </button>
+        </form>
+      </section>
+
+      {imports.length ? (
+        <section className={styles.panel}>
+          <div className={styles.panelHeader}>
+            <h2>Recent document imports</h2>
+            <span>{imports.length} latest</span>
+          </div>
+          <div className={styles.importHistory}>
+            {imports.slice(0, 8).map((item) => (
+              <article key={item.id}>
+                <strong>{item.filename}</strong>
+                <span>{item.provider ?? "-"} - {item.level ?? "-"} - {item.section_type ?? "-"} - {item.total_questions ?? 0} questions</span>
+                <small>{normalizeDateLabel(item.created_at)}</small>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+    </>
+  );
+}
+
+function CmsStat({ icon: Icon, label, value }) {
+  return (
+    <article className={styles.cmsStat}>
+      <Icon size={18} />
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </article>
+  );
+}
+
+function JsonTextarea({ label, value, onChange }) {
+  return (
+    <label className={`${styles.field} ${styles.jsonField}`}>{label}
+      <textarea value={value} onChange={(event) => onChange(event.target.value)} spellCheck="false" />
+    </label>
+  );
+}
+
+function SectionForm({ draft, onChange, onSubmit, onCancel, busy }) {
+  return (
+    <form className={styles.inlineEditor} onSubmit={onSubmit}>
+      <div className={styles.panelHeader}>
+        <h4>{draft.id ? "Edit section" : "New section"}</h4>
+        <div className={styles.actions}>
+          <button className={styles.secondaryButton} type="button" onClick={onCancel}>Cancel</button>
+          <button className={styles.button} type="submit" disabled={busy}>Save section</button>
+        </div>
+      </div>
+      <div className={styles.editorGrid}>
+        <label className={styles.field}>Module
+          <select value={draft.sectionType} onChange={(event) => onChange((prev) => ({ ...prev, sectionType: event.target.value }))}>
+            {MODULE_OPTIONS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+          </select>
+        </label>
+        <label className={styles.field}>Part number
+          <input type="number" min="1" value={draft.partNumber} onChange={(event) => onChange((prev) => ({ ...prev, partNumber: event.target.value }))} />
+        </label>
+        <label className={styles.field}>Title
+          <input value={draft.title} onChange={(event) => onChange((prev) => ({ ...prev, title: event.target.value }))} />
+        </label>
+        <label className={styles.field}>Duration minutes
+          <input type="number" min="0" value={draft.durationMinutes} onChange={(event) => onChange((prev) => ({ ...prev, durationMinutes: event.target.value }))} />
+        </label>
+        <label className={styles.field}>Points
+          <input type="number" min="0" value={draft.points} onChange={(event) => onChange((prev) => ({ ...prev, points: event.target.value }))} />
+        </label>
+        <label className={styles.field}>Position
+          <input type="number" min="0" value={draft.position} onChange={(event) => onChange((prev) => ({ ...prev, position: event.target.value }))} />
+        </label>
+      </div>
+      <label className={styles.field}>Instructions
+        <textarea value={draft.instructions} onChange={(event) => onChange((prev) => ({ ...prev, instructions: event.target.value }))} />
+      </label>
+      <div className={styles.previewBox}>
+        <span><Eye size={15} /> Preview</span>
+        <p>{clipPreview(draft.instructions || draft.title, 520) || "No instructions yet."}</p>
+      </div>
+      <div className={styles.editorGrid}>
+        <JsonTextarea label="Scoring JSON" value={draft.scoring} onChange={(value) => onChange((prev) => ({ ...prev, scoring: value }))} />
+        <JsonTextarea label="Metadata JSON" value={draft.metadata} onChange={(value) => onChange((prev) => ({ ...prev, metadata: value }))} />
+      </div>
+    </form>
+  );
+}
+
+function QuestionCard({ question, onEdit, onDelete }) {
+  return (
+    <article className={styles.questionCard}>
+      <div>
+        <span className={styles.questionMeta}>#{question.position ?? "-"} - {question.question_type ?? "prompt"} - {getModuleLabel(question.module_id)}</span>
+        <strong>{clipPreview(question.prompt, 160) || "Untitled task"}</strong>
+        {question.explanation ? <small>{clipPreview(question.explanation, 140)}</small> : null}
+      </div>
+      <div className={styles.actions}>
+        <button className={styles.secondaryButton} type="button" onClick={onEdit}>
+          <Edit3 size={15} />
+          Edit
+        </button>
+        <button className={styles.dangerGhostButton} type="button" onClick={onDelete}>
+          <Trash2 size={15} />
+          Delete
+        </button>
+      </div>
+    </article>
+  );
+}
+
+function QuestionForm({ draft, sections, onChange, onSubmit, onCancel, busy }) {
+  return (
+    <form className={styles.inlineEditor} onSubmit={onSubmit}>
+      <div className={styles.panelHeader}>
+        <h4>{draft.id ? "Edit task" : "New task"}</h4>
+        <div className={styles.actions}>
+          <button className={styles.secondaryButton} type="button" onClick={onCancel}>Cancel</button>
+          <button className={styles.button} type="submit" disabled={busy}>Save task</button>
+        </div>
+      </div>
+      <div className={styles.editorGrid}>
+        <label className={styles.field}>Section
+          <select value={draft.sectionId} onChange={(event) => onChange((prev) => ({ ...prev, sectionId: event.target.value }))}>
+            <option value="">Unassigned</option>
+            {sections.map((section) => (
+              <option key={section.id} value={section.id}>Teil {section.part_number}: {section.title}</option>
+            ))}
+          </select>
+        </label>
+        <label className={styles.field}>Module
+          <select value={draft.moduleId} onChange={(event) => onChange((prev) => ({ ...prev, moduleId: event.target.value }))}>
+            {MODULE_OPTIONS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+          </select>
+        </label>
+        <label className={styles.field}>Question type
+          <input list="question-type-options" value={draft.questionType} onChange={(event) => onChange((prev) => ({ ...prev, questionType: event.target.value }))} />
+        </label>
+        <label className={styles.field}>Position
+          <input type="number" min="0" value={draft.position} onChange={(event) => onChange((prev) => ({ ...prev, position: event.target.value }))} />
+        </label>
+      </div>
+      <datalist id="question-type-options">
+        {QUESTION_TYPE_OPTIONS.map((item) => <option key={item} value={item} />)}
+      </datalist>
+      <label className={styles.field}>Prompt / task text
+        <textarea value={draft.prompt} onChange={(event) => onChange((prev) => ({ ...prev, prompt: event.target.value }))} />
+      </label>
+      <div className={styles.previewBox}>
+        <span><Eye size={15} /> Candidate preview</span>
+        <p>{clipPreview(draft.prompt, 520) || "No prompt yet."}</p>
+      </div>
+      <label className={styles.field}>Explanation / examiner note
+        <textarea value={draft.explanation} onChange={(event) => onChange((prev) => ({ ...prev, explanation: event.target.value }))} />
+      </label>
+      <label className={styles.field}>Transcript
+        <textarea value={draft.transcript} onChange={(event) => onChange((prev) => ({ ...prev, transcript: event.target.value }))} />
+      </label>
+      <div className={styles.editorGrid}>
+        <JsonTextarea label="Options JSON" value={draft.options} onChange={(value) => onChange((prev) => ({ ...prev, options: value }))} />
+        <JsonTextarea label="Correct answer JSON" value={draft.correctAnswer} onChange={(value) => onChange((prev) => ({ ...prev, correctAnswer: value }))} />
+        <JsonTextarea label="Audio JSON" value={draft.audio} onChange={(value) => onChange((prev) => ({ ...prev, audio: value }))} />
+        <JsonTextarea label="Scoring JSON" value={draft.scoring} onChange={(value) => onChange((prev) => ({ ...prev, scoring: value }))} />
+        <JsonTextarea label="Source metadata JSON" value={draft.sourceMetadata} onChange={(value) => onChange((prev) => ({ ...prev, sourceMetadata: value }))} />
+      </div>
+    </form>
+  );
+}
+
+// eslint-disable-next-line no-unused-vars
+function AdminExamsLegacy() {
   const loader = useCallback(async () => {
     const res = await API.get("/api/admin/exams");
     return res.data;
