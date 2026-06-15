@@ -59,6 +59,7 @@ import NotFoundPage from "./NotFoundPage";
 import ComingSoonPage from "./ComingSoonPage";
 import { getModuleCountLabel, isTopicModule } from "../utils/moduleLabels";
 import { hasRichTextMarkup, sanitizeRichTextHtml } from "../utils/richText";
+import { stripQuestionMaterial } from "../utils/examText";
 
 const LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"];
 const PASS_SCORE = 70;
@@ -1349,51 +1350,6 @@ const getTaskPartKey = (task, index = 0) => {
   if (task?.partKey) return task.partKey;
   if (task?.partNumber) return `part-${task.partNumber}`;
   return normalizePartKey(task?.partTitle || task?.typeLabel, `part-${index + 1}`);
-};
-
-const stripQuestionMaterial = (text, tasks = []) => {
-  const lines = String(text ?? "")
-    .replace(/\r/g, "")
-    .replace(/--- PAGE\s+\d+\/\d+\s+---/gi, "")
-    .split("\n");
-  const taskPrompts = tasks
-    .map((task) => String(task.question ?? "").split("\n")[0].trim())
-    .filter((prompt) => prompt.length > 18);
-  const cleaned = [];
-  let skippingTable = false;
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) {
-      if (!skippingTable) cleaned.push("");
-      continue;
-    }
-
-    if (/^Anzeigen\s*:/i.test(trimmed)) {
-      skippingTable = false;
-      cleaned.push(trimmed);
-      continue;
-    }
-
-    if (/^Nr\.?\s+(Aussage|Situation|Person|Aufgabe|Frage)/i.test(trimmed)) {
-      skippingTable = true;
-      continue;
-    }
-
-    if (skippingTable) continue;
-    if (/^\d{1,2}\s+.+\s+(?:n\s+n|___)$/i.test(trimmed)) continue;
-    if (/^Aufgabe\s+\d{1,2}\s*:/i.test(trimmed)) continue;
-    if (/^n\s+[a-c]\)/i.test(trimmed)) continue;
-    if (taskPrompts.some((prompt) => trimmed.includes(prompt) || prompt.includes(trimmed))) continue;
-
-    cleaned.push(line.replace(/\s+$/g, ""));
-  }
-
-  const result = cleaned
-    .join("\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-  return result || String(text ?? "").trim();
 };
 
 const buildExamParts = (module) => {

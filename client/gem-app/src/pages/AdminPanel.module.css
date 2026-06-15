@@ -1126,6 +1126,26 @@
   box-shadow: 0 0 0 3px rgba(249, 196, 21, 0.18);
 }
 
+.richEditorWebsite {
+  background: #ffffff;
+  color: #1f2937;
+  line-height: 1.75;
+}
+
+.richEditor.richEditorWebsite p,
+.richEditor.richEditorWebsite ul {
+  line-height: 1.75;
+  white-space: pre-line;
+}
+
+.richEditor.richEditorWebsite p {
+  margin: 0 0 0.85em;
+}
+
+.richEditor.richEditorWebsite p:last-child {
+  margin-bottom: 0;
+}
+
 .richEditor p,
 .richPreview p {
   margin: 0 0 0.7em;
@@ -1147,6 +1167,12 @@
 .examPreviewSurface {
   --module-accent: #f9c415;
   --module-soft: #fffbeb;
+}
+
+.examPreviewPane {
+  max-height: none;
+  overflow: visible;
+  box-shadow: none;
 }
 
 .websitePreview {

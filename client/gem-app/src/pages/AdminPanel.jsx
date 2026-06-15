@@ -42,6 +42,7 @@ import { clearAuthSession } from "../utils/access";
 import { examSimulations } from "../data/siteContent";
 import { clearImportedExamCache, fetchImportedSeries } from "../services/importedExams";
 import { hasRichTextMarkup, richTextToPlainText, sanitizeRichTextHtml } from "../utils/richText";
+import { stripQuestionMaterial } from "../utils/examText";
 
 const formatDate = (value) => {
   if (!value) return "-";
@@ -138,24 +139,45 @@ const normalizeDateLabel = (value) => (value ? formatDate(value) : "-");
 const getExamBody = (exam) =>
   String(exam?.provider || exam?.exam_type || "custom").trim().toLowerCase();
 
-const makeExamDraft = (exam) => ({
-  code: exam?.code ?? "",
-  name: exam?.name ?? "",
-  examType: exam?.exam_type ?? "",
-  provider: exam?.provider ?? "",
-  level: exam?.level ?? "",
-  sectionType: exam?.section_type ?? "",
-  seriesNumber: exam?.series_number ?? "",
-  isActive: Boolean(exam?.is_active),
-  metadata: formatJson(exam?.metadata, {}),
-});
+const asPlainObject = (value) =>
+  value && typeof value === "object" && !Array.isArray(value) ? value : {};
 
-const makeSectionDraft = (section, exam) => ({
+const getExamWebsiteInstructions = (exam) => {
+  if (!exam) return "";
+  if (Object.prototype.hasOwnProperty.call(exam, "websiteInstructions")) {
+    return exam.websiteInstructions ?? "";
+  }
+  return asPlainObject(exam.metadata).instructions ?? "";
+};
+
+const getSectionWebsiteInstructions = (section, sectionQuestions = []) => {
+  const instructions = section?.instructions ?? "";
+  if (!instructions || hasRichTextMarkup(instructions)) return instructions;
+  return stripQuestionMaterial(instructions, sectionQuestions);
+};
+
+const makeExamDraft = (exam) => {
+  const metadata = asPlainObject(exam?.metadata);
+  return {
+    code: exam?.code ?? "",
+    name: exam?.name ?? "",
+    examType: exam?.exam_type ?? "",
+    provider: exam?.provider ?? "",
+    level: exam?.level ?? "",
+    sectionType: exam?.section_type ?? "",
+    seriesNumber: exam?.series_number ?? "",
+    isActive: Boolean(exam?.is_active),
+    websiteInstructions: metadata.instructions ?? "",
+    metadata: formatJson(metadata, {}),
+  };
+};
+
+const makeSectionDraft = (section, exam, sectionQuestions = []) => ({
   id: section?.id ?? "",
   sectionType: section?.section_type ?? exam?.section_type ?? "read",
   partNumber: section?.part_number ?? 1,
   title: section?.title ?? "",
-  instructions: section?.instructions ?? "",
+  instructions: getSectionWebsiteInstructions(section, sectionQuestions),
   durationMinutes: section?.duration_minutes ?? "",
   points: section?.points ?? "",
   position: section?.position ?? "",
@@ -878,9 +900,13 @@ function AdminExams() {
     event.preventDefault();
     if (!selectedExam || !examDraft) return;
     await runAction("save-exam", async () => {
+      const metadata = parseJsonField(examDraft.metadata, "Exam metadata") ?? {};
       await API.put(`/api/admin/exams/${selectedExam.id}`, {
         ...examDraft,
-        metadata: parseJsonField(examDraft.metadata, "Exam metadata") ?? {},
+        metadata: {
+          ...metadata,
+          instructions: cleanRichTextValue(examDraft.websiteInstructions),
+        },
       });
     }, "Exam metadata saved.");
   };
@@ -952,7 +978,7 @@ function AdminExams() {
 
   const startSectionEdit = (section = null) => {
     setQuestionDraft(null);
-    setSectionDraft(makeSectionDraft(section, selectedExam));
+    setSectionDraft(makeSectionDraft(section, selectedExam, section ? questionsBySection.get(section.id) ?? [] : []));
   };
 
   const startQuestionEdit = (question = null, section = null) => {
@@ -1009,6 +1035,36 @@ function AdminExams() {
     await runAction("generate-exams", async () => {
       await API.post("/api/admin/exams/generate", generateForm);
     }, "Generated exam content saved.");
+  };
+
+  const updateExamMetadata = (value) => {
+    setExamDraft((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev, metadata: value };
+      try {
+        const parsed = JSON.parse(value);
+        if (typeof parsed?.instructions === "string") {
+          next.websiteInstructions = parsed.instructions;
+        }
+      } catch {
+        // Keep the rich editor stable while the JSON textarea is mid-edit.
+      }
+      return next;
+    });
+  };
+
+  const updateExamWebsiteInstructions = (value) => {
+    setExamDraft((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev, websiteInstructions: value };
+      try {
+        const metadata = JSON.parse(prev.metadata || "{}");
+        next.metadata = formatJson({ ...asPlainObject(metadata), instructions: value }, {});
+      } catch {
+        // If the JSON is temporarily invalid, preserve the editor change and let save validation report the JSON issue.
+      }
+      return next;
+    });
   };
 
   const initialLoading = loading && !data;
@@ -1200,7 +1256,14 @@ function AdminExams() {
                     </span>
                   </label>
                 </div>
-                <JsonTextarea label="Metadata JSON" value={examDraft.metadata} onChange={(value) => setExamDraft((prev) => ({ ...prev, metadata: value }))} />
+                <RichTextEditor
+                  label="Website intro instructions"
+                  value={examDraft.websiteInstructions}
+                  variant="instruction"
+                  onChange={updateExamWebsiteInstructions}
+                />
+                <RichPreview label="Website intro preview" value={examDraft.websiteInstructions} variant="instruction" />
+                <JsonTextarea label="Metadata JSON" value={examDraft.metadata} onChange={updateExamMetadata} />
                 <div className={styles.contentActions}>
                   <button className={styles.button} type="submit" disabled={busyAction === "save-exam"}>
                     <Edit3 size={16} />
@@ -1224,6 +1287,8 @@ function AdminExams() {
                 {sectionDraft && !sectionDraft.id ? (
                   <SectionForm
                     draft={sectionDraft}
+                    examIntro={getExamWebsiteInstructions(examDraft)}
+                    sectionQuestions={[]}
                     onChange={setSectionDraft}
                     onSubmit={saveSection}
                     onCancel={() => setSectionDraft(null)}
@@ -1262,13 +1327,19 @@ function AdminExams() {
                         {sectionIsEditing ? (
                           <SectionForm
                             draft={sectionDraft}
+                            examIntro={getExamWebsiteInstructions(examDraft)}
+                            sectionQuestions={sectionQuestions}
                             onChange={setSectionDraft}
                             onSubmit={saveSection}
                             onCancel={() => setSectionDraft(null)}
                             busy={busyAction === "save-section"}
                           />
                         ) : (
-                          <RichPreview label="Instructions preview" value={section.instructions} variant="material" />
+                          <SectionWebsitePreview
+                            examIntro={getExamWebsiteInstructions(examDraft)}
+                            section={section}
+                            questions={sectionQuestions}
+                          />
                         )}
                         <div className={styles.questionList}>
                           {sectionQuestions.map((question) => (
@@ -1594,6 +1665,12 @@ const getExamPreviewWrapperClass = (variant = "material") => {
   return `${baseClass} ${examStyles.readableScrollArea} ${styles.examPreviewSurface}`;
 };
 
+const getSectionDisplayTitle = (section) => {
+  const number = Number(section?.part_number ?? section?.partNumber) || 1;
+  const title = String(section?.title ?? "").replace(/^Teil\s+\d+\s*:?\s*/i, "").trim() || "Anweisungen";
+  return `Teil ${number} - ${title}`;
+};
+
 function WebsiteTextPreview({ value, variant = "material" }) {
   if (variant === "instruction") {
     const lines = String(value ?? "")
@@ -1670,26 +1747,50 @@ function WebsiteTextPreview({ value, variant = "material" }) {
   );
 }
 
-function RichPreview({ label, value, variant = "material" }) {
+function ExamTextPreview({ value, variant = "material" }) {
   const html = sanitizeRichTextHtml(value);
   const isRich = hasRichTextMarkup(value);
+  if (isRich && html) {
+    return (
+      <div className={getExamPreviewWrapperClass(variant)}>
+        <div className={examStyles.richExamText} translate="no" dangerouslySetInnerHTML={{ __html: html }} />
+      </div>
+    );
+  }
+  if (!isRich) return <WebsiteTextPreview value={value} variant={variant} />;
+  return <p>No content yet.</p>;
+}
+
+function RichPreview({ label, value, variant = "material" }) {
   return (
     <div className={styles.previewBox}>
       <span className={styles.previewLabel}><Eye size={15} /> {label}</span>
-      {isRich && html ? (
-        <div className={getExamPreviewWrapperClass(variant)}>
-          <div className={examStyles.richExamText} translate="no" dangerouslySetInnerHTML={{ __html: html }} />
-        </div>
-      ) : !isRich ? (
-        <WebsiteTextPreview value={value} variant={variant} />
-      ) : (
-        <p>No content yet.</p>
-      )}
+      <ExamTextPreview value={value} variant={variant} />
     </div>
   );
 }
 
-function RichTextEditor({ label, value, onChange }) {
+function SectionWebsitePreview({ label = "Instructions preview", examIntro = "", section, questions = [] }) {
+  const number = Number(section?.part_number ?? section?.partNumber) || 1;
+  const moduleId = String(section?.section_type ?? section?.sectionType ?? "read").toLowerCase();
+  const displayText = getSectionWebsiteInstructions(section, questions);
+  return (
+    <div className={styles.previewBox}>
+      <span className={styles.previewLabel}><Eye size={15} /> {label}</span>
+      <section className={`${examStyles.passagePane} ${styles.examPreviewPane}`}>
+        <div className={examStyles.sectionLabel}>
+          <BookOpen size={18} />
+          {moduleId === "read" ? "Quelle" : getModuleLabel(moduleId)} Teil {number}
+        </div>
+        <h2 translate="no">{getSectionDisplayTitle(section)}</h2>
+        {moduleId === "read" && examIntro ? <ExamTextPreview value={examIntro} variant="instruction" /> : null}
+        <ExamTextPreview value={displayText} variant="material" />
+      </section>
+    </div>
+  );
+}
+
+function RichTextEditor({ label, value, onChange, variant = "material" }) {
   const fieldRef = useRef(null);
   const editorRef = useRef(null);
   const savedRangeRef = useRef(null);
@@ -1935,7 +2036,7 @@ function RichTextEditor({ label, value, onChange }) {
       </div>
       <div
         ref={editorRef}
-        className={styles.richEditor}
+        className={`${styles.richEditor} ${styles.richEditorWebsite} ${variant === "instruction" ? examStyles.instructionText : examStyles.examMaterial} ${styles.examPreviewSurface}`}
         contentEditable
         role="textbox"
         aria-label={label}
@@ -1951,7 +2052,13 @@ function RichTextEditor({ label, value, onChange }) {
   );
 }
 
-function SectionForm({ draft, onChange, onSubmit, onCancel, busy }) {
+function SectionForm({ draft, examIntro = "", sectionQuestions = [], onChange, onSubmit, onCancel, busy }) {
+  const previewSection = {
+    sectionType: draft.sectionType,
+    part_number: draft.partNumber,
+    title: draft.title,
+    instructions: draft.instructions,
+  };
   return (
     <form className={styles.inlineEditor} onSubmit={onSubmit}>
       <div className={styles.panelHeader}>
@@ -1961,6 +2068,12 @@ function SectionForm({ draft, onChange, onSubmit, onCancel, busy }) {
           <button className={styles.button} type="submit" disabled={busy}>Save section</button>
         </div>
       </div>
+      <SectionWebsitePreview
+        label="Website section preview"
+        examIntro={examIntro}
+        section={previewSection}
+        questions={sectionQuestions}
+      />
       <div className={styles.editorGrid}>
         <label className={styles.field}>Module
           <select value={draft.sectionType} onChange={(event) => onChange((prev) => ({ ...prev, sectionType: event.target.value }))}>
@@ -1983,8 +2096,12 @@ function SectionForm({ draft, onChange, onSubmit, onCancel, busy }) {
           <input type="number" min="0" value={draft.position} onChange={(event) => onChange((prev) => ({ ...prev, position: event.target.value }))} />
         </label>
       </div>
-      <RichTextEditor label="Instructions" value={draft.instructions} onChange={(value) => onChange((prev) => ({ ...prev, instructions: value }))} />
-      <RichPreview label="Preview" value={draft.instructions} variant="material" />
+      <RichTextEditor
+        label="Instructions"
+        value={draft.instructions}
+        variant="material"
+        onChange={(value) => onChange((prev) => ({ ...prev, instructions: value }))}
+      />
       <div className={styles.editorGrid}>
         <JsonTextarea label="Scoring JSON" value={draft.scoring} onChange={(value) => onChange((prev) => ({ ...prev, scoring: value }))} />
         <JsonTextarea label="Metadata JSON" value={draft.metadata} onChange={(value) => onChange((prev) => ({ ...prev, metadata: value }))} />
@@ -2049,8 +2166,13 @@ function QuestionForm({ draft, sections, onChange, onSubmit, onCancel, busy }) {
       <datalist id="question-type-options">
         {QUESTION_TYPE_OPTIONS.map((item) => <option key={item} value={item} />)}
       </datalist>
-      <RichTextEditor label="Prompt / task text" value={draft.prompt} onChange={(value) => onChange((prev) => ({ ...prev, prompt: value }))} />
       <RichPreview label="Candidate preview" value={draft.prompt} variant="instruction" />
+      <RichTextEditor
+        label="Prompt / task text"
+        value={draft.prompt}
+        variant="instruction"
+        onChange={(value) => onChange((prev) => ({ ...prev, prompt: value }))}
+      />
       <RichTextEditor label="Explanation / examiner note" value={draft.explanation} onChange={(value) => onChange((prev) => ({ ...prev, explanation: value }))} />
       <RichTextEditor label="Transcript" value={draft.transcript} onChange={(value) => onChange((prev) => ({ ...prev, transcript: value }))} />
       <div className={styles.editorGrid}>

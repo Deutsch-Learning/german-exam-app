@@ -1260,7 +1260,10 @@ app.get("/api/exams/:provider/series/:seriesId/:moduleId", async (req, res) => {
 
     const importedRows = await queryImportedExamRows(provider, seriesNumber, level);
     const series = toPublicSeriesList(importedRows.rows, routeMeta)[0];
-    const exam = importedRows.rows.find((row) => row.section_type === moduleId);
+    const sourceExamId = Number(series?.modules?.[moduleId]?.sourceExamId);
+    const exam =
+      importedRows.rows.find((row) => Number(row.id) === sourceExamId) ||
+      importedRows.rows.find((row) => row.section_type === moduleId);
     if (!series || !exam) {
       return res.status(404).json({ ok: false, error: "Imported module not found" });
     }
