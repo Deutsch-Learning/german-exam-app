@@ -1144,6 +1144,74 @@
   line-height: 1.55;
 }
 
+.websitePreview {
+  display: grid;
+  gap: 12px;
+  color: #374151;
+  line-height: 1.75;
+}
+
+.websitePreview ul,
+.websitePreview ol {
+  margin: 0.35em 0 0.9em;
+  padding-left: 1.45em;
+}
+
+.previewTextSectionTitle,
+.previewTextSubtitle,
+.previewTextInstruction,
+.previewTextIntroInstruction,
+.previewTextNotice {
+  margin: 0;
+  color: #111827;
+  font-weight: 900;
+}
+
+.previewTextSectionTitle {
+  font-size: 1.14rem;
+  line-height: 1.35;
+}
+
+.previewTextSubtitle {
+  color: #1f2937;
+  font-size: 1rem;
+  line-height: 1.45;
+}
+
+.previewTextInstruction {
+  color: #26354b;
+  font-size: 0.98rem;
+  line-height: 1.65;
+}
+
+.previewTextIntroInstruction {
+  color: #1f2937;
+  font-size: 1rem;
+  font-style: italic;
+  line-height: 1.65;
+}
+
+.previewTextGroup {
+  display: grid;
+  gap: 12px;
+}
+
+.previewTextNotice {
+  border-left: 4px solid #f9c415;
+  border-radius: 8px;
+  background: #fffbeb;
+  color: #1f2937;
+  padding: 10px 12px;
+  line-height: 1.55;
+}
+
+.previewTextBody {
+  margin: 0;
+  color: #374151;
+  font-weight: 400;
+  line-height: 1.75;
+}
+
 @keyframes adminLoadingShimmer {
   0% {
     background-position: 120% 0;
