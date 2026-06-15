@@ -36,6 +36,7 @@ import {
 import API from "../services/api";
 import logo from "../assets/images/logo.png";
 import styles from "./AdminPanel.module.css";
+import examStyles from "./SimulationModulePage.module.css";
 import { clearDashboardCache } from "../services/dashboard";
 import { clearAuthSession } from "../utils/access";
 import { examSimulations } from "../data/siteContent";
@@ -192,6 +193,7 @@ const classifyAdminPreviewLine = (line, index = 0, total = 1) => {
   if (/lesen sie zuerst die anweisungen/i.test(text)) return "introInstruction";
   if (/^(teil|part|section|abschnitt)\s*\d+\s*(\||-|:)/i.test(text)) return "sectionTitle";
   if (/^(anweisung|instructions?|directions?|aufgabe|consigne)\b/i.test(text)) return "instruction";
+  if (/^(lisez|lesen sie|hoeren sie|horen sie|schreiben sie|waehlen sie|wahlen sie|kreuzen sie|ordnen sie|markieren sie|completez|choisissez|associez|ecoutez)\b/i.test(text)) return "body";
   if (/^(teil|part|section|abschnitt)\s*\d+\b/i.test(text)) return "sectionTitle";
   if (/^(quelle|source|text|texte|transkript|transcript|situation|scenario|szenario)\b\s*:?\s*/i.test(text)) return "subtitle";
   if (/^[A-Z][\p{L}\p{N}\s'().,:-]{2,72}:$/u.test(text)) return "subtitle";
@@ -1266,7 +1268,7 @@ function AdminExams() {
                             busy={busyAction === "save-section"}
                           />
                         ) : (
-                          <RichPreview label="Instructions preview" value={section.instructions || section.title} />
+                          <RichPreview label="Instructions preview" value={section.instructions} variant="material" />
                         )}
                         <div className={styles.questionList}>
                           {sectionQuestions.map((question) => (
@@ -1584,7 +1586,38 @@ function JsonTextarea({ label, value, onChange }) {
   );
 }
 
-function WebsiteTextPreview({ value }) {
+const getExamPreviewTextClass = (lineType) =>
+  examStyles[`examText${lineType[0].toUpperCase()}${lineType.slice(1)}`] ?? examStyles.examTextBody;
+
+const getExamPreviewWrapperClass = (variant = "material") => {
+  const baseClass = variant === "instruction" ? examStyles.instructionText : examStyles.examMaterial;
+  return `${baseClass} ${examStyles.readableScrollArea} ${styles.examPreviewSurface}`;
+};
+
+function WebsiteTextPreview({ value, variant = "material" }) {
+  if (variant === "instruction") {
+    const lines = String(value ?? "")
+      .replace(/\r/g, "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    if (!lines.length) return <p>No content yet.</p>;
+
+    return (
+      <div className={getExamPreviewWrapperClass(variant)}>
+        {lines.map((line, index) => {
+          const lineType = classifyAdminPreviewLine(line, index, lines.length);
+          return (
+            <p key={`${line}-${index}`} className={getExamPreviewTextClass(lineType)} translate="no">
+              {line}
+            </p>
+          );
+        })}
+      </div>
+    );
+  }
+
   const blocks = String(value ?? "")
     .replace(/\r/g, "")
     .split(/\n{2,}/)
@@ -1594,7 +1627,7 @@ function WebsiteTextPreview({ value }) {
   if (!blocks.length) return <p>No content yet.</p>;
 
   return (
-    <div className={styles.websitePreview}>
+    <div className={getExamPreviewWrapperClass(variant)}>
       {blocks.map((block, index) => {
         const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
         const listLineCount = lines.filter((line) => /^(\(?[a-j]\)|[-*]|\d+\.)\s+/i.test(line)).length;
@@ -1603,8 +1636,8 @@ function WebsiteTextPreview({ value }) {
           return (
             <ul key={`${block}-${index}`}>
               {lines.map((line) => (
-                <li key={line} className={styles.previewTextBody}>
-                  {line.replace(/^(\(?[a-j]\)|[-*]|\d+\.)\s*/i, "")}
+                <li key={line} className={examStyles.examTextBody} translate="no">
+                  {line.replace(/^[-*]\s*/, "")}
                 </li>
               ))}
             </ul>
@@ -1613,11 +1646,11 @@ function WebsiteTextPreview({ value }) {
 
         if (lines.length > 1) {
           return (
-            <div key={`${block}-${index}`} className={styles.previewTextGroup}>
+            <div key={`${block}-${index}`} className={examStyles.examTextGroup}>
               {lines.map((line, lineIndex) => {
                 const lineType = classifyAdminPreviewLine(line, lineIndex, lines.length);
                 return (
-                  <p key={`${line}-${lineIndex}`} className={styles[`previewText${lineType[0].toUpperCase()}${lineType.slice(1)}`]}>
+                  <p key={`${line}-${lineIndex}`} className={getExamPreviewTextClass(lineType)} translate="no">
                     {line}
                   </p>
                 );
@@ -1628,7 +1661,7 @@ function WebsiteTextPreview({ value }) {
 
         const blockType = classifyAdminPreviewLine(block, index, blocks.length);
         return (
-          <p key={`${block}-${index}`} className={styles[`previewText${blockType[0].toUpperCase()}${blockType.slice(1)}`]}>
+          <p key={`${block}-${index}`} className={getExamPreviewTextClass(blockType)} translate="no">
             {block}
           </p>
         );
@@ -1637,16 +1670,18 @@ function WebsiteTextPreview({ value }) {
   );
 }
 
-function RichPreview({ label, value }) {
+function RichPreview({ label, value, variant = "material" }) {
   const html = sanitizeRichTextHtml(value);
   const isRich = hasRichTextMarkup(value);
   return (
     <div className={styles.previewBox}>
-      <span><Eye size={15} /> {label}</span>
+      <span className={styles.previewLabel}><Eye size={15} /> {label}</span>
       {isRich && html ? (
-        <div className={styles.richPreview} dangerouslySetInnerHTML={{ __html: html }} />
+        <div className={getExamPreviewWrapperClass(variant)}>
+          <div className={examStyles.richExamText} translate="no" dangerouslySetInnerHTML={{ __html: html }} />
+        </div>
       ) : !isRich ? (
-        <WebsiteTextPreview value={value} />
+        <WebsiteTextPreview value={value} variant={variant} />
       ) : (
         <p>No content yet.</p>
       )}
@@ -1949,7 +1984,7 @@ function SectionForm({ draft, onChange, onSubmit, onCancel, busy }) {
         </label>
       </div>
       <RichTextEditor label="Instructions" value={draft.instructions} onChange={(value) => onChange((prev) => ({ ...prev, instructions: value }))} />
-      <RichPreview label="Preview" value={draft.instructions || draft.title} />
+      <RichPreview label="Preview" value={draft.instructions} variant="material" />
       <div className={styles.editorGrid}>
         <JsonTextarea label="Scoring JSON" value={draft.scoring} onChange={(value) => onChange((prev) => ({ ...prev, scoring: value }))} />
         <JsonTextarea label="Metadata JSON" value={draft.metadata} onChange={(value) => onChange((prev) => ({ ...prev, metadata: value }))} />
@@ -2015,7 +2050,7 @@ function QuestionForm({ draft, sections, onChange, onSubmit, onCancel, busy }) {
         {QUESTION_TYPE_OPTIONS.map((item) => <option key={item} value={item} />)}
       </datalist>
       <RichTextEditor label="Prompt / task text" value={draft.prompt} onChange={(value) => onChange((prev) => ({ ...prev, prompt: value }))} />
-      <RichPreview label="Candidate preview" value={draft.prompt} />
+      <RichPreview label="Candidate preview" value={draft.prompt} variant="instruction" />
       <RichTextEditor label="Explanation / examiner note" value={draft.explanation} onChange={(value) => onChange((prev) => ({ ...prev, explanation: value }))} />
       <RichTextEditor label="Transcript" value={draft.transcript} onChange={(value) => onChange((prev) => ({ ...prev, transcript: value }))} />
       <div className={styles.editorGrid}>
