@@ -1547,6 +1547,8 @@ const getWritingSuggestions = (task, text) => {
 };
 
 const calculateModuleScore = (module, answers) => {
+  if (!module?.tasks?.length) return 0;
+
   if (module.id === "write") {
     const total = module.tasks.reduce((sum, task, index) => sum + evaluateWriting(task, answers[index]), 0);
     return Math.round(total / module.tasks.length);
@@ -1678,6 +1680,29 @@ const buildSeriesTask = (moduleId, task, index, content, series) => {
 
 const buildSeriesModule = (baseModule, content, series) => {
   if (!content || !series) return baseModule;
+
+  if (content.available === false) {
+    return {
+      ...baseModule,
+      isImported: true,
+      unavailable: true,
+      unavailableTitle: "Section non disponible",
+      unavailableMessage:
+        "Le test de cette section n'est pas encore disponible. Les exercices de compréhension orale seront ajoutés prochainement.",
+      eyebrow: `${series.code} / ${baseModule.eyebrow}`,
+      examPart: `${series.examName} ${series.code} - ${baseModule.examPart}`,
+      focus: content.focus ?? baseModule.focus,
+      advancement: content.advancement ?? [],
+      seriesContext: {
+        examId: series.examId,
+        examName: series.examName,
+        seriesId: series.id,
+        seriesCode: series.code,
+        seriesTitle: series.title,
+        theme: content.theme ?? series.theme,
+      },
+    };
+  }
 
   if (content.isImported) {
     return {
@@ -1913,12 +1938,12 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const blockedSeriesAccess = Boolean(selectedSeries && !canOpenSeries(selectedSeries));
   const blockedVisitorRefresh = visitorSeriesAttempt && !visitorAccessAllowed;
   const waitingForImportedSeries = Boolean(params.seriesId && !selectedSeries && importedModuleState.loading);
-  const shouldPersistProgress =
-    !blockedSeriesAccess && !blockedVisitorRefresh && !waitingForImportedSeries;
   const module = useMemo(
     () => buildSeriesModule(baseModule, selectedSeriesContent, selectedSeries),
     [baseModule, selectedSeriesContent, selectedSeries]
   );
+  const shouldPersistProgress =
+    !module.unavailable && !blockedSeriesAccess && !blockedVisitorRefresh && !waitingForImportedSeries;
   const ModuleIcon = module.Icon;
   const moduleTitle = t.modules[module.id] ?? module.title;
   const totalTasks = module.tasks.length;
@@ -2012,7 +2037,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const level = selectedSeries?.level ?? currentTask?.level ?? "A1";
 
   useEffect(() => {
-    if (!auth?.id || !level) return;
+    if (!auth?.id || !level || module.unavailable) return;
     const key = `${auth.id}:${progressScopeId}:${module.id}:${level}`;
     if (levelActivityKeyRef.current === key) return;
     levelActivityKeyRef.current = key;
@@ -2021,7 +2046,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     }).catch(() => {
       // Starting-level tracking is helpful but should never block an exercise.
     });
-  }, [auth?.id, level, module.id, progressScopeId]);
+  }, [auth?.id, level, module.id, module.unavailable, progressScopeId]);
   const audioAtSessionEnd = module.id === "listen" && audioTimestamp >= currentAudioDuration;
   const audioReplayBlocked = module.id === "listen" && replaysUsed >= AUDIO_REPLAY_LIMIT && (!audioSessionActive || audioAtSessionEnd);
 
@@ -4165,8 +4190,30 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     );
   };
 
+  const renderUnavailableSection = () => (
+    <section className={styles.unavailablePanel} aria-labelledby="unavailable-section-title">
+      <div className={styles.unavailableIcon}>
+        <ModuleIcon size={34} />
+      </div>
+      <p className={styles.sectionLabel}>Non disponible</p>
+      <h2 id="unavailable-section-title">{module.unavailableTitle ?? "Section non disponible"}</h2>
+      <p>
+        {module.unavailableMessage ??
+          "Le test de cette section n'est pas encore disponible. Les exercices de compréhension orale seront ajoutés prochainement."}
+      </p>
+      <div className={styles.resultActions}>
+        <button type="button" className={styles.secondaryButton} onClick={() => navigate(seriesRoute)}>
+          <ChevronLeft size={16} />
+          Retour aux sections
+        </button>
+      </div>
+    </section>
+  );
+
 
   const renderModuleContent = () => {
+    if (module.unavailable) return renderUnavailableSection();
+
     if (completed) {
       const resultSummary = buildResultSummary(module, answers);
       const isWritingResult = module.id === "write";
@@ -4356,7 +4403,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               aria-label="Verbleibende Zeit"
             >
               <Clock3 size={22} />
-              {formatExamTime(simulationMode ? timerSeconds : currentTaskDuration)}
+              {module.unavailable ? "Non disponible" : formatExamTime(simulationMode ? timerSeconds : currentTaskDuration)}
             </div>
           </div>
 
@@ -4396,10 +4443,10 @@ export default function SimulationModulePage({ moduleIdOverride }) {
         <div className={`${styles.workArea} ${module.id === "read" ? styles.readingWorkArea : ""}`}>
           <section className={styles.mainContent}>{renderModuleContent()}</section>
 
-          {!completed ? renderExamSidebar() : null}
+          {!completed && !module.unavailable ? renderExamSidebar() : null}
         </div>
 
-        {!completed && !partIntroVisible ? (
+        {!completed && !module.unavailable && !partIntroVisible ? (
           <section
             className={`${styles.actionPanel} ${styles.stepActionPanel}`}
             aria-label="Aufgabennavigation"
