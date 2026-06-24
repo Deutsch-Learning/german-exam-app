@@ -133,6 +133,12 @@ export default function SeriesSimulationPage() {
     });
   };
   const requestStartModule = (moduleId) => {
+    if (series.modules?.[moduleId]?.available === false) {
+      navigate(`/simulation/${examId}/${seriesId}/${moduleId}`, {
+        state: visitorState,
+      });
+      return;
+    }
     setStartingModuleId(null);
     setPendingModuleId(moduleId);
   };
@@ -209,6 +215,7 @@ export default function SeriesSimulationPage() {
           <div className={styles.cardGrid}>
             {orderedModules.map((module) => {
               const content = series.modules[module.id] ?? module;
+              const unavailable = content.available === false;
               return (
                 <SimulationDisciplineCard
                   key={module.id}
@@ -218,6 +225,7 @@ export default function SeriesSimulationPage() {
                   time={content.durationMinutes ?? 60}
                   questions={content.questionCount ?? 39}
                   accent={content.accent ?? module.accent ?? series.accent}
+                  badge={unavailable ? "Non disponible" : undefined}
                   minuteLabel={t.simulations.minutes}
                   questionLabel={getModuleCountLabel(module.id, t.simulations.questions)}
                   onClick={() => requestStartModule(module.id)}

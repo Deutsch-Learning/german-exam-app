@@ -115,10 +115,10 @@ const TopNav = ({ onToggleMenu, onGoHome, onGoDashboard, onGoProfile, onGoActual
           <button type="button" className={`${styles.linkBtn} ${styles.withDropdown}`} onClick={() => setOpenFormation((v) => !v)}>{labels.training} <ChevronDownIcon /></button>
           {openFormation ? (
             <div className={styles.dropdownMenu}>
-              <button type="button" className={styles.dropdownItem} onClick={() => onGoModule("listen")}>{labels.modules.listen}</button>
               <button type="button" className={styles.dropdownItem} onClick={() => onGoModule("read")}>{labels.modules.read}</button>
-              <button type="button" className={styles.dropdownItem} onClick={() => onGoModule("speak")}>{labels.modules.speak}</button>
+              <button type="button" className={styles.dropdownItem} onClick={() => onGoModule("listen")}>{labels.modules.listen}</button>
               <button type="button" className={styles.dropdownItem} onClick={() => onGoModule("write")}>{labels.modules.write}</button>
+              <button type="button" className={styles.dropdownItem} onClick={() => onGoModule("speak")}>{labels.modules.speak}</button>
             </div>
           ) : null}
         </div>

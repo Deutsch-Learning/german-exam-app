@@ -2,28 +2,28 @@ import { examSimulations } from "./siteContent";
 
 export const simulationModules = [
   {
-    id: "listen",
-    label: "Compr\u00e9hension Orale",
-    shortLabel: "Oral comprehension",
-    description: "Audio tasks, details, order of information, and focused note-taking.",
-  },
-  {
     id: "read",
     label: "Compr\u00e9hension \u00c9crite",
     shortLabel: "Written comprehension",
     description: "Academic texts, inference, matching, and vocabulary in context.",
   },
   {
-    id: "speak",
-    label: "Expression Orale",
-    shortLabel: "Oral expression",
-    description: "Timed prompts, personal argumentation, image description, and role-play.",
+    id: "listen",
+    label: "Compr\u00e9hension Orale",
+    shortLabel: "Oral comprehension",
+    description: "Audio tasks, details, order of information, and focused note-taking.",
   },
   {
     id: "write",
     label: "Expression \u00c9crite",
     shortLabel: "Written expression",
     description: "Formal emails, essays, synthesis, and structured written answers.",
+  },
+  {
+    id: "speak",
+    label: "Expression Orale",
+    shortLabel: "Oral expression",
+    description: "Timed prompts, personal argumentation, image description, and role-play.",
   },
 ];
 

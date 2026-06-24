@@ -811,6 +811,22 @@ const PUBLIC_MODULE_META = {
 
 const MODULE_ORDER = ["read", "listen", "write", "speak"];
 
+const buildUnavailableModuleMeta = (moduleId) => {
+  const moduleMeta = PUBLIC_MODULE_META[moduleId];
+  if (!moduleMeta) return null;
+  return {
+    ...moduleMeta,
+    available: false,
+    sourceExamId: null,
+    sourceCode: null,
+    sourceLabel: null,
+    title: moduleMeta.label,
+    questionCount: 0,
+    sectionCount: 0,
+    durationMinutes: moduleMeta.defaultMinutes,
+  };
+};
+
 const normalizeProviderId = (value) => {
   const raw = String(value ?? "")
     .trim()
@@ -963,9 +979,18 @@ const toPublicSeriesList = (rows, routeMeta = {}) => {
   }
 
   return Array.from(groups.values()).map((series) => {
+    MODULE_ORDER.forEach((moduleId) => {
+      if (!series.modules[moduleId]) {
+        series.modules[moduleId] = buildUnavailableModuleMeta(moduleId);
+      }
+    });
     const moduleIds = MODULE_ORDER.filter((moduleId) => series.modules[moduleId]);
+    const orderedModules = Object.fromEntries(
+      moduleIds.map((moduleId) => [moduleId, series.modules[moduleId]])
+    );
     return {
       ...series,
+      modules: orderedModules,
       title: series.title || `${series.examName} ${series.code}`,
       theme: series.theme || series.examName,
       duration: `${moduleIds.length} module${moduleIds.length > 1 ? "s" : ""}`,
@@ -1201,6 +1226,7 @@ const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {} 
   return {
     id: moduleId,
     isImported: true,
+    available: tasks.length > 0,
     label: moduleMeta.label,
     shortLabel: moduleMeta.shortLabel,
     theme: title,
@@ -1264,8 +1290,29 @@ app.get("/api/exams/:provider/series/:seriesId/:moduleId", async (req, res) => {
     const exam =
       importedRows.rows.find((row) => Number(row.id) === sourceExamId) ||
       importedRows.rows.find((row) => row.section_type === moduleId);
-    if (!series || !exam) {
+    if (!series) {
       return res.status(404).json({ ok: false, error: "Imported module not found" });
+    }
+    if (!exam) {
+      const moduleMeta = PUBLIC_MODULE_META[moduleId];
+      return res.json({
+        ok: true,
+        source: "database",
+        series,
+        content: {
+          id: moduleId,
+          isImported: true,
+          available: false,
+          label: moduleMeta.label,
+          shortLabel: moduleMeta.shortLabel,
+          theme: series.title || series.examName,
+          focus: [series.examName, series.code, moduleMeta.label, "Non disponible"],
+          advancement: [],
+          parts: [],
+          tasks: [],
+          sourceExamId: null,
+        },
+      });
     }
 
     const sections = await pool.query(

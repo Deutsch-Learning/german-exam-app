@@ -1240,6 +1240,45 @@
   line-height: 1.6;
 }
 
+.unavailablePanel {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 8px 22px rgba(17, 24, 39, 0.05);
+  min-height: 360px;
+  padding: 44px 28px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 16px;
+  text-align: center;
+}
+
+.unavailablePanel h2 {
+  margin: 0;
+  color: #111827;
+  font-size: clamp(1.8rem, 4vw, 2.5rem);
+  letter-spacing: 0;
+}
+
+.unavailablePanel p {
+  margin: 0;
+  max-width: 620px;
+  color: #4b5563;
+  line-height: 1.65;
+  font-weight: 650;
+}
+
+.unavailableIcon {
+  width: 72px;
+  height: 72px;
+  border-radius: 18px;
+  background: var(--module-soft);
+  color: var(--module-accent);
+  display: grid;
+  place-items: center;
+}
+
 .resultStats {
   display: flex;
   justify-content: center;

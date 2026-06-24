@@ -94,17 +94,17 @@ export const SimulationTopNav = ({ onGoHome, onGoAbout, onGoProfile, onGoDashboa
           </button>
           {openFormation ? (
             <div className={styles.dropdownMenu}>
-              <button type="button" className={styles.dropdownItem} onClick={() => onGoModule("listen")}>
-                {t.modules.listen}
-              </button>
               <button type="button" className={styles.dropdownItem} onClick={() => onGoModule("read")}>
                 {t.modules.read}
               </button>
-              <button type="button" className={styles.dropdownItem} onClick={() => onGoModule("speak")}>
-                {t.modules.speak}
+              <button type="button" className={styles.dropdownItem} onClick={() => onGoModule("listen")}>
+                {t.modules.listen}
               </button>
               <button type="button" className={styles.dropdownItem} onClick={() => onGoModule("write")}>
                 {t.modules.write}
+              </button>
+              <button type="button" className={styles.dropdownItem} onClick={() => onGoModule("speak")}>
+                {t.modules.speak}
               </button>
             </div>
           ) : null}
