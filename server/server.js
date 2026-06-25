@@ -25,6 +25,10 @@ const {
   getWritingCorrectionForSimulation,
   isWritingSimulation,
 } = require("./services/writingCorrection");
+const {
+  ensureContentStyleSchema,
+  registerContentStyleRoutes,
+} = require("./services/contentStyleTemplates");
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -659,6 +663,7 @@ async function ensureSchema() {
 
   await ensureDocumentImportSchema(pool);
   await ensureWritingCorrectionSchema(pool);
+  await ensureContentStyleSchema(pool);
 }
 
 const getFeature = (req) => {
@@ -713,13 +718,16 @@ const requireAdmin = [requireAuth, adminMiddleware];
 
 const auditAdminAction = async (req, action, targetType, targetId, metadata = {}) => {
   try {
-    await pool.query(
+    const result = await pool.query(
       `INSERT INTO admin_audit_logs (admin_user_id, action, target_type, target_id, metadata)
-       VALUES ($1, $2, $3, $4, $5)`,
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id`,
       [req.user?.id ?? null, action, targetType, String(targetId ?? ""), metadata]
     );
+    return { id: result.rows?.[0]?.id ?? null };
   } catch (err) {
     console.error("Admin audit log failed", err);
+    return null;
   }
 };
 
@@ -2510,6 +2518,8 @@ const normalizeInteger = (value, fallback = null) => {
 
 const touchExam = (examId, client = pool) =>
   client.query(`UPDATE exams SET updated_at = NOW() WHERE id = $1`, [examId]);
+
+registerContentStyleRoutes({ app, pool, requireAdmin, auditAdminAction });
 
 app.get("/api/admin/exams", requireAdmin, async (req, res) => {
   try {

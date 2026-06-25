@@ -1,8 +1,11 @@
 const TAG_PATTERN = /<\/?[a-z][\s\S]*>/i;
 const SAFE_COLOR_PATTERN = /^(#[0-9a-f]{3,8}|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\))$/i;
 const SAFE_FONT_SIZE_PATTERN = /^(\d+(?:\.\d+)?(?:px|rem|em|%)|small|medium|large|x-large|xx-large)$/i;
+const SAFE_LENGTH_PATTERN = /^(\d+(?:\.\d+)?(?:px|rem|em|%)|0)$/i;
+const SAFE_LINE_HEIGHT_PATTERN = /^(\d+(?:\.\d+)?|normal|\d+(?:\.\d+)?(?:px|rem|em|%))$/i;
 const SAFE_FONT_FAMILIES = new Set(["arial", "georgia", "times new roman", "verdana", "tahoma", "courier new"]);
-const ALLOWED_TAGS = new Set(["B", "STRONG", "I", "EM", "U", "P", "BR", "UL", "OL", "LI", "SPAN", "FONT"]);
+const SAFE_TEXT_ALIGNMENTS = new Set(["left", "center", "right", "justify"]);
+const ALLOWED_TAGS = new Set(["B", "STRONG", "I", "EM", "U", "P", "DIV", "BR", "UL", "OL", "LI", "SPAN", "FONT"]);
 
 export const hasRichTextMarkup = (value) => TAG_PATTERN.test(String(value ?? ""));
 
@@ -25,6 +28,11 @@ const textToHtml = (value) =>
 const getSafeColor = (element) => {
   const inlineColor = element.style?.color || element.getAttribute?.("color") || "";
   const color = String(inlineColor).trim();
+  return SAFE_COLOR_PATTERN.test(color) ? color : "";
+};
+
+const getSafeBackgroundColor = (element) => {
+  const color = String(element.style?.backgroundColor || "").trim();
   return SAFE_COLOR_PATTERN.test(color) ? color : "";
 };
 
@@ -53,11 +61,23 @@ const getSafeFontSize = (element) => {
 const getSafeStyle = (element) => {
   const styles = [];
   const color = getSafeColor(element);
+  const backgroundColor = getSafeBackgroundColor(element);
   const fontFamily = getSafeFontFamily(element);
   const fontSize = getSafeFontSize(element);
+  const textAlign = String(element.style?.textAlign || "").trim().toLowerCase();
+  const lineHeight = String(element.style?.lineHeight || "").trim();
+  const marginBottom = String(element.style?.marginBottom || "").trim();
+  const paddingLeft = String(element.style?.paddingLeft || "").trim();
+  const textDecoration = String(element.style?.textDecoration || "").trim().toLowerCase();
   if (color) styles.push(`color: ${color}`);
+  if (backgroundColor) styles.push(`background-color: ${backgroundColor}`);
   if (fontFamily) styles.push(`font-family: ${fontFamily}`);
   if (fontSize) styles.push(`font-size: ${fontSize}`);
+  if (SAFE_TEXT_ALIGNMENTS.has(textAlign)) styles.push(`text-align: ${textAlign}`);
+  if (SAFE_LINE_HEIGHT_PATTERN.test(lineHeight)) styles.push(`line-height: ${lineHeight}`);
+  if (SAFE_LENGTH_PATTERN.test(marginBottom)) styles.push(`margin-bottom: ${marginBottom}`);
+  if (SAFE_LENGTH_PATTERN.test(paddingLeft)) styles.push(`padding-left: ${paddingLeft}`);
+  if (textDecoration.includes("underline")) styles.push("text-decoration: underline");
   return styles.length ? ` style="${styles.join("; ")}"` : "";
 };
 
@@ -77,8 +97,13 @@ const sanitizeNode = (node) => {
     return style ? `<span${style}>${children}</span>` : children;
   }
   if (tagName === "BR") return "<br>";
+  if (tagName === "DIV") {
+    const style = getSafeStyle(node);
+    return `<p${style}>${children}</p>`;
+  }
 
-  return `<${tagName.toLowerCase()}>${children}</${tagName.toLowerCase()}>`;
+  const style = getSafeStyle(node);
+  return `<${tagName.toLowerCase()}${style}>${children}</${tagName.toLowerCase()}>`;
 };
 
 export const sanitizeRichTextHtml = (value) => {

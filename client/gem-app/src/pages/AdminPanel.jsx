@@ -3,6 +3,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import {
   Activity,
+  AlignCenter,
+  AlignLeft,
+  AlignRight,
   BarChart3,
   BookOpen,
   Bold,
@@ -15,6 +18,7 @@ import {
   FileJson,
   FileText,
   Headphones,
+  Highlighter,
   Italic,
   List,
   ListOrdered,
@@ -43,6 +47,15 @@ import { examSimulations } from "../data/siteContent";
 import { clearImportedExamCache, fetchImportedSeries } from "../services/importedExams";
 import { hasRichTextMarkup, richTextToPlainText, sanitizeRichTextHtml } from "../utils/richText";
 import { stripQuestionMaterial } from "../utils/examText";
+import {
+  DEFAULT_STYLE_OPTIONS,
+  STYLE_BLOCK_TYPES,
+  STYLE_PROPERTY_OPTIONS,
+  STYLE_SCOPE_OPTIONS,
+  describeStyleTemplate,
+  extractContentStyleTemplate,
+  getStyleBlockTypeLabel,
+} from "../utils/contentStyle";
 
 const formatDate = (value) => {
   if (!value) return "-";
@@ -207,6 +220,100 @@ const clipPreview = (value, max = 180) => {
 };
 
 const cleanRichTextValue = (value) => sanitizeRichTextHtml(value);
+const cleanTitleValue = (value) => (hasRichTextMarkup(value) ? sanitizeRichTextHtml(value) : String(value ?? "").trim());
+
+const getPlainDisplayText = (value, fallback = "") => {
+  const text = richTextToPlainText(value);
+  return text || fallback;
+};
+
+const makeStyleBlockId = (blockType, ids = {}) =>
+  `${blockType}:${ids.questionId ?? ids.sectionId ?? ids.examId ?? ""}`;
+
+const makeStyleSourceBlock = (blockType, ids = {}) => ({
+  blockType,
+  blockId: makeStyleBlockId(blockType, ids),
+  examId: ids.examId ?? null,
+  sectionId: ids.sectionId ?? null,
+  questionId: ids.questionId ?? null,
+});
+
+const getExamStyleLabel = (exam) =>
+  [getExamBody(exam).toUpperCase(), exam?.level, exam?.series_number ? `Series ${exam.series_number}` : null, getModuleLabel(exam?.section_type)]
+    .filter(Boolean)
+    .join(" / ");
+
+const getSectionPlainTitle = (section) => getPlainDisplayText(section?.title, "Anweisungen");
+
+const getQuestionOptionText = (question) =>
+  (Array.isArray(question?.options) ? question.options : [])
+    .map((option, index) => `${option?.value ?? String.fromCharCode(97 + index)}) ${option?.label ?? option?.text ?? option?.title ?? ""}`.trim())
+    .filter(Boolean)
+    .join("\n");
+
+const buildAdminStyleBlocks = (exams = [], sections = [], questions = []) => {
+  const examMap = new Map(exams.map((exam) => [exam.id, exam]));
+  const sectionMap = new Map(sections.map((section) => [section.id, section]));
+  const blocks = [];
+
+  exams.forEach((exam) => {
+    blocks.push({
+      ...makeStyleSourceBlock("exam_intro", { examId: exam.id }),
+      label: `${getExamStyleLabel(exam)} - Website intro`,
+      context: getExamStyleLabel(exam),
+    });
+  });
+
+  sections.forEach((section) => {
+    const exam = examMap.get(section.exam_id);
+    const context = `${getExamStyleLabel(exam)} - Teil ${section.part_number ?? section.position ?? section.id}`;
+    blocks.push({
+      ...makeStyleSourceBlock("section_title", { examId: section.exam_id, sectionId: section.id }),
+      label: `${context} title`,
+      context,
+    });
+    blocks.push({
+      ...makeStyleSourceBlock("section_instructions", { examId: section.exam_id, sectionId: section.id }),
+      label: `${context} instructions`,
+      context,
+    });
+  });
+
+  questions.forEach((question) => {
+    const exam = examMap.get(question.exam_id);
+    const section = question.section_id ? sectionMap.get(question.section_id) : null;
+    const sectionLabel = section ? `Teil ${section.part_number ?? section.position ?? section.id}: ${getSectionPlainTitle(section)}` : "Unassigned";
+    const context = `${getExamStyleLabel(exam)} - ${sectionLabel} - Task ${question.position ?? question.id}`;
+    blocks.push({
+      ...makeStyleSourceBlock("question_prompt", { examId: question.exam_id, sectionId: question.section_id, questionId: question.id }),
+      label: `${context} prompt`,
+      context,
+    });
+    if (question.explanation) {
+      blocks.push({
+        ...makeStyleSourceBlock("question_explanation", { examId: question.exam_id, sectionId: question.section_id, questionId: question.id }),
+        label: `${context} explanation`,
+        context,
+      });
+    }
+    if (question.transcript) {
+      blocks.push({
+        ...makeStyleSourceBlock("question_transcript", { examId: question.exam_id, sectionId: question.section_id, questionId: question.id }),
+        label: `${context} transcript`,
+        context,
+      });
+    }
+    if (getQuestionOptionText(question)) {
+      blocks.push({
+        ...makeStyleSourceBlock("answer_options", { examId: question.exam_id, sectionId: question.section_id, questionId: question.id }),
+        label: `${context} answer options`,
+        context,
+      });
+    }
+  });
+
+  return blocks;
+};
 
 const classifyAdminPreviewLine = (line, index = 0, total = 1) => {
   const text = String(line ?? "").trim();
@@ -731,8 +838,11 @@ function AdminApiUsage() {
 
 function AdminExams() {
   const loader = useCallback(async () => {
-    const res = await API.get("/api/admin/exams");
-    return res.data;
+    const [contentRes, styleRes] = await Promise.all([
+      API.get("/api/admin/exams"),
+      API.get("/api/admin/style-templates"),
+    ]);
+    return { ...contentRes.data, styleTemplates: styleRes.data.templates ?? [] };
   }, []);
   const { data, loading, error, reload } = useAdminData(loader);
   const [form, setForm] = useState({ code: "", name: "", examType: "custom", level: "B2" });
@@ -757,11 +867,16 @@ function AdminExams() {
   const [examDraft, setExamDraft] = useState(null);
   const [sectionDraft, setSectionDraft] = useState(null);
   const [questionDraft, setQuestionDraft] = useState(null);
+  const [stylePanel, setStylePanel] = useState(null);
+  const [stylePreview, setStylePreview] = useState(null);
+  const [styleBusy, setStyleBusy] = useState("");
 
   const exams = useMemo(() => data?.exams ?? [], [data?.exams]);
   const sections = useMemo(() => data?.sections ?? [], [data?.sections]);
   const questions = useMemo(() => data?.questions ?? [], [data?.questions]);
   const imports = useMemo(() => data?.imports ?? [], [data?.imports]);
+  const styleTemplates = useMemo(() => data?.styleTemplates ?? [], [data?.styleTemplates]);
+  const styleBlocks = useMemo(() => buildAdminStyleBlocks(exams, sections, questions), [exams, sections, questions]);
 
   const sectionsByExam = useMemo(() => {
     const map = new Map();
@@ -946,7 +1061,7 @@ function AdminExams() {
   };
 
   const deleteSection = async (section) => {
-    if (!selectedExam || !window.confirm(`Delete section "${section.title}"? Empty sections only can be deleted.`)) return;
+    if (!selectedExam || !window.confirm(`Delete section "${getSectionPlainTitle(section)}"? Empty sections only can be deleted.`)) return;
     await runAction("delete-section", async () => {
       await API.delete(`/api/admin/exams/${selectedExam.id}/sections/${section.id}`);
     }, "Section deleted.");
@@ -1065,6 +1180,154 @@ function AdminExams() {
       }
       return next;
     });
+  };
+
+  const openStylePanel = ({ sourceBlock, value, label }) => {
+    if (!sourceBlock?.blockId || !sourceBlock.blockType) return;
+    const styleJson = extractContentStyleTemplate(value, sourceBlock.blockType);
+    setStylePreview(null);
+    setStylePanel({
+      sourceBlock,
+      sourceLabel: label,
+      sourceValue: value,
+      styleJson,
+      styleOptions: { ...DEFAULT_STYLE_OPTIONS },
+      scope: "section",
+      manualBlockIds: [],
+      allowCrossType: false,
+      selectedTemplateId: "",
+      templateName: `${getStyleBlockTypeLabel(sourceBlock.blockType)} style`,
+      templateDescription: "",
+    });
+  };
+
+  const updateStylePanel = (updater) => {
+    setStylePanel((prev) => {
+      if (!prev) return prev;
+      const next = typeof updater === "function" ? updater(prev) : { ...prev, ...updater };
+      return next;
+    });
+    setStylePreview(null);
+  };
+
+  const useStyleTemplate = (templateId) => {
+    const template = styleTemplates.find((item) => String(item.id) === String(templateId));
+    updateStylePanel((prev) => {
+      if (!template) {
+        return { ...prev, selectedTemplateId: "", styleJson: extractContentStyleTemplate(prev.sourceValue, prev.sourceBlock.blockType) };
+      }
+      return {
+        ...prev,
+        selectedTemplateId: String(template.id),
+        styleJson: template.style_json,
+        templateName: template.name,
+        templateDescription: template.description ?? "",
+      };
+    });
+  };
+
+  const previewStyleApplication = async () => {
+    if (!stylePanel) return;
+    setStyleBusy("preview");
+    setDocumentError("");
+    try {
+      const res = await API.post("/api/admin/style-templates/preview", {
+        sourceBlock: stylePanel.sourceBlock,
+        scope: stylePanel.scope,
+        manualBlockIds: stylePanel.manualBlockIds,
+        allowCrossType: stylePanel.allowCrossType,
+        styleJson: stylePanel.styleJson,
+        styleOptions: stylePanel.styleOptions,
+      });
+      setStylePreview(res.data);
+    } catch (err) {
+      setDocumentError(err.response?.data?.error ?? "Style preview failed.");
+    } finally {
+      setStyleBusy("");
+    }
+  };
+
+  const applyStyleApplication = async () => {
+    if (!stylePanel || !stylePreview?.count) return;
+    setStyleBusy("apply");
+    setDocumentError("");
+    try {
+      const res = await API.post("/api/admin/style-templates/apply", {
+        sourceBlock: stylePanel.sourceBlock,
+        scope: stylePanel.scope,
+        manualBlockIds: stylePanel.manualBlockIds,
+        allowCrossType: stylePanel.allowCrossType,
+        styleJson: stylePanel.styleJson,
+        styleOptions: stylePanel.styleOptions,
+        confirmed: true,
+      });
+      clearImportedExamCache();
+      setStatus(`Style applied to ${res.data.count ?? 0} block(s).`);
+      setStylePanel(null);
+      setStylePreview(null);
+      await reload();
+    } catch (err) {
+      setDocumentError(err.response?.data?.error ?? "Style apply failed.");
+    } finally {
+      setStyleBusy("");
+    }
+  };
+
+  const saveStyleTemplate = async () => {
+    if (!stylePanel) return;
+    setStyleBusy("save-template");
+    setDocumentError("");
+    try {
+      await API.post("/api/admin/style-templates", {
+        name: stylePanel.templateName,
+        description: stylePanel.templateDescription,
+        blockType: stylePanel.sourceBlock.blockType,
+        styleJson: stylePanel.styleJson,
+      });
+      setStatus("Reusable style template saved.");
+      await reload();
+    } catch (err) {
+      setDocumentError(err.response?.data?.error ?? "Could not save style template.");
+    } finally {
+      setStyleBusy("");
+    }
+  };
+
+  const archiveStyleTemplate = async () => {
+    if (!stylePanel?.selectedTemplateId) return;
+    setStyleBusy("archive-template");
+    setDocumentError("");
+    try {
+      await API.delete(`/api/admin/style-templates/${stylePanel.selectedTemplateId}`);
+      setStatus("Style template archived.");
+      updateStylePanel((prev) => ({
+        ...prev,
+        selectedTemplateId: "",
+        styleJson: extractContentStyleTemplate(prev.sourceValue, prev.sourceBlock.blockType),
+      }));
+      await reload();
+    } catch (err) {
+      setDocumentError(err.response?.data?.error ?? "Could not archive style template.");
+    } finally {
+      setStyleBusy("");
+    }
+  };
+
+  const undoLastStyleApply = async () => {
+    setStyleBusy("undo");
+    setDocumentError("");
+    try {
+      const res = await API.post("/api/admin/style-templates/undo-last");
+      clearImportedExamCache();
+      setStatus(`Last style apply undone for ${res.data.count ?? 0} block(s).`);
+      setStylePanel(null);
+      setStylePreview(null);
+      await reload();
+    } catch (err) {
+      setDocumentError(err.response?.data?.error ?? "No style apply action could be undone.");
+    } finally {
+      setStyleBusy("");
+    }
   };
 
   const initialLoading = loading && !data;
@@ -1261,6 +1524,11 @@ function AdminExams() {
                   value={examDraft.websiteInstructions}
                   variant="instruction"
                   onChange={updateExamWebsiteInstructions}
+                  onApplyStyle={(value) => openStylePanel({
+                    sourceBlock: makeStyleSourceBlock("exam_intro", { examId: selectedExam.id }),
+                    value,
+                    label: `${getExamStyleLabel(selectedExam)} - Website intro`,
+                  })}
                 />
                 <RichPreview label="Website intro preview" value={examDraft.websiteInstructions} variant="instruction" />
                 <JsonTextarea label="Metadata JSON" value={examDraft.metadata} onChange={updateExamMetadata} />
@@ -1287,12 +1555,14 @@ function AdminExams() {
                 {sectionDraft && !sectionDraft.id ? (
                   <SectionForm
                     draft={sectionDraft}
+                    exam={selectedExam}
                     examIntro={getExamWebsiteInstructions(examDraft)}
                     sectionQuestions={[]}
                     onChange={setSectionDraft}
                     onSubmit={saveSection}
                     onCancel={() => setSectionDraft(null)}
                     busy={busyAction === "save-section"}
+                    onApplyStyle={openStylePanel}
                   />
                 ) : null}
 
@@ -1310,7 +1580,7 @@ function AdminExams() {
                               <Icon size={15} />
                               {getModuleLabel(section.section_type)}
                             </span>
-                            <h4>Teil {section.part_number}: {section.title}</h4>
+                            <h4>Teil {section.part_number}: {getSectionPlainTitle(section)}</h4>
                             <p>{section.duration_minutes ?? "-"} min - {section.points ?? "-"} points - position {section.position}</p>
                           </div>
                           <div className={styles.actions}>
@@ -1327,12 +1597,14 @@ function AdminExams() {
                         {sectionIsEditing ? (
                           <SectionForm
                             draft={sectionDraft}
+                            exam={selectedExam}
                             examIntro={getExamWebsiteInstructions(examDraft)}
                             sectionQuestions={sectionQuestions}
                             onChange={setSectionDraft}
                             onSubmit={saveSection}
                             onCancel={() => setSectionDraft(null)}
                             busy={busyAction === "save-section"}
+                            onApplyStyle={openStylePanel}
                           />
                         ) : (
                           <SectionWebsitePreview
@@ -1352,11 +1624,13 @@ function AdminExams() {
                               {String(questionDraft?.id ?? "") === String(question.id) ? (
                                 <QuestionForm
                                   draft={questionDraft}
+                                  exam={selectedExam}
                                   sections={selectedSections}
                                   onChange={setQuestionDraft}
                                   onSubmit={saveQuestion}
                                   onCancel={() => setQuestionDraft(null)}
                                   busy={busyAction === "save-question"}
+                                  onApplyStyle={openStylePanel}
                                 />
                               ) : null}
                             </div>
@@ -1364,11 +1638,13 @@ function AdminExams() {
                           {questionDraft && !questionDraft.id && String(questionDraft.sectionId) === String(section.id) ? (
                             <QuestionForm
                               draft={questionDraft}
+                              exam={selectedExam}
                               sections={selectedSections}
                               onChange={setQuestionDraft}
                               onSubmit={saveQuestion}
                               onCancel={() => setQuestionDraft(null)}
                               busy={busyAction === "save-question"}
+                              onApplyStyle={openStylePanel}
                             />
                           ) : null}
                           <button className={styles.secondaryButton} type="button" onClick={() => startQuestionEdit(null, section)}>
@@ -1397,26 +1673,30 @@ function AdminExams() {
                               onDelete={() => deleteQuestion(question)}
                             />
                             {String(questionDraft?.id ?? "") === String(question.id) ? (
-                              <QuestionForm
-                                draft={questionDraft}
-                                sections={selectedSections}
-                                onChange={setQuestionDraft}
-                                onSubmit={saveQuestion}
-                                onCancel={() => setQuestionDraft(null)}
-                                busy={busyAction === "save-question"}
-                              />
+                                <QuestionForm
+                                  draft={questionDraft}
+                                  exam={selectedExam}
+                                  sections={selectedSections}
+                                  onChange={setQuestionDraft}
+                                  onSubmit={saveQuestion}
+                                  onCancel={() => setQuestionDraft(null)}
+                                  busy={busyAction === "save-question"}
+                                  onApplyStyle={openStylePanel}
+                                />
                             ) : null}
                           </div>
                         ))}
                         {questionDraft && !questionDraft.id && !questionDraft.sectionId ? (
-                          <QuestionForm
-                            draft={questionDraft}
-                            sections={selectedSections}
-                            onChange={setQuestionDraft}
-                            onSubmit={saveQuestion}
-                            onCancel={() => setQuestionDraft(null)}
-                            busy={busyAction === "save-question"}
-                          />
+                            <QuestionForm
+                              draft={questionDraft}
+                              exam={selectedExam}
+                              sections={selectedSections}
+                              onChange={setQuestionDraft}
+                              onSubmit={saveQuestion}
+                              onCancel={() => setQuestionDraft(null)}
+                              busy={busyAction === "save-question"}
+                              onApplyStyle={openStylePanel}
+                            />
                         ) : null}
                         <button className={styles.secondaryButton} type="button" onClick={() => startQuestionEdit(null, null)}>
                           <Plus size={15} />
