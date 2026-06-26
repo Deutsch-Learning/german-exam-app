@@ -2699,6 +2699,45 @@ const loadListeningExamAudioContext = async (examId) => {
   };
 };
 
+const generateListeningAudioForPublishedExams = async ({ exams = [], adminId = null }) => {
+  const results = [];
+  for (const exam of exams) {
+    if (String(exam?.section_type ?? "").toLowerCase() !== "listen") continue;
+    const examId = Number(exam.id);
+    const provider = getConfiguredProvider();
+    try {
+      const context = await loadListeningExamAudioContext(examId);
+      if (context.error) {
+        results.push({ examId, ok: false, error: context.error });
+        continue;
+      }
+      const generated = await generateAndStoreExamAudio({
+        pool,
+        examId,
+        audio: context.audio,
+        adminId,
+        provider,
+        force: false,
+      });
+      results.push({
+        examId,
+        ok: true,
+        cached: Boolean(generated.cached),
+        assetId: generated.asset?.id ?? null,
+        provider,
+      });
+    } catch (err) {
+      results.push({
+        examId,
+        ok: false,
+        setupRequired: err instanceof TtsConfigurationError,
+        error: err.publicMessage || "Production audio generation failed. You can regenerate it from the CMS.",
+      });
+    }
+  }
+  return results;
+};
+
 app.get("/api/audio/generated/:assetId", async (req, res) => {
   try {
     const assetId = Number(req.params.assetId);
@@ -2723,6 +2762,14 @@ app.get("/api/admin/tts/status", requireAdmin, async (req, res) => {
     console.error(err);
     return res.status(500).json({ ok: false, error: "Server error" });
   }
+});
+
+app.get("/api/health", async (req, res) => {
+  return res.json({
+    ok: true,
+    service: "german-exam-app-api",
+    timestamp: new Date().toISOString(),
+  });
 });
 
 app.get("/api/admin/exams/:examId/audio", requireAdmin, async (req, res) => {
@@ -3154,16 +3201,22 @@ app.post("/api/admin/exams/import-wizard/:id/publish", requireAdmin, async (req,
       importId: Number(req.params.id),
       adminId: req.user.id,
     });
+    const audioGeneration = await generateListeningAudioForPublishedExams({
+      exams: result.exams,
+      adminId: req.user.id,
+    });
     await auditAdminAction(req, result.duplicate ? "exam.import_wizard_duplicate" : "exam.import_wizard_publish", "document_import", req.params.id, {
       exams: result.exams.length,
       provider: result.parsed?.metadata?.provider,
       sectionType: result.parsed?.metadata?.sectionType,
       questions: result.validation?.counts?.questionCount,
+      audioGeneration,
     });
     return res.status(result.duplicate ? 200 : 201).json({
       ok: true,
       duplicate: result.duplicate,
       exams: result.exams,
+      audioGeneration,
       ...toImportWizardPayload(result.import, result.parsed, result.validation),
     });
   } catch (err) {
