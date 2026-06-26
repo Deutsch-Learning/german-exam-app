@@ -1180,6 +1180,11 @@
   --module-soft: #fffbeb;
 }
 
+.examPreviewSurface,
+.examPreviewSurface * {
+  text-transform: none !important;
+}
+
 .examPreviewPane {
   max-height: none;
   overflow: visible;
@@ -1394,6 +1399,42 @@
   font-size: 0.76rem;
   font-weight: 900;
   text-transform: uppercase;
+}
+
+.styleApplyProgress {
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff6ff;
+  padding: 10px 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.styleApplyProgress > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #1e3a8a;
+  font-weight: 850;
+}
+
+.styleApplyProgress > div span {
+  color: #475569;
+}
+
+.styleApplyProgress > span {
+  height: 9px;
+  border-radius: 999px;
+  background: #dbeafe;
+  overflow: hidden;
+}
+
+.styleApplyProgress i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #2563eb;
+  transition: width 0.22s ease;
 }
 
 .websitePreview {

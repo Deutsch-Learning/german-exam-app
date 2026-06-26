@@ -126,6 +126,7 @@ const RICH_FONT_SIZES = [
 ];
 const RICH_COLORS = ["#111827", "#c10016", "#2563eb", "#047857", "#92400e", "#7c3aed"];
 const STYLE_TEMPLATE_REQUEST_TIMEOUT_MS = 120000;
+const STYLE_TEMPLATE_BATCH_SIZE = 100;
 
 const getModuleLabel = (value) => MODULE_LABELS[String(value ?? "").toLowerCase()] ?? value ?? "-";
 
@@ -257,6 +258,11 @@ const getAdminRequestError = (err, fallback) => {
   }
   return err.response?.data?.error ?? err.message ?? fallback;
 };
+
+const makeClientBatchId = () =>
+  typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `style-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
 const handleLocalScrollableWheel = (event) => {
   const target = event.currentTarget;
@@ -893,6 +899,7 @@ function AdminExams() {
   const [stylePanel, setStylePanel] = useState(null);
   const [stylePreview, setStylePreview] = useState(null);
   const [styleBusy, setStyleBusy] = useState("");
+  const [styleProgress, setStyleProgress] = useState(null);
 
   const exams = useMemo(() => data?.exams ?? [], [data?.exams]);
   const sections = useMemo(() => data?.sections ?? [], [data?.sections]);
@@ -1210,6 +1217,7 @@ function AdminExams() {
     if (!sourceBlock?.blockId || !sourceBlock.blockType) return;
     const styleJson = extractContentStyleTemplate(value, sourceBlock.blockType);
     setStylePreview(null);
+    setStyleProgress(null);
     setStylePanel({
       sourceBlock,
       sourceLabel: label,
@@ -1232,6 +1240,7 @@ function AdminExams() {
       return next;
     });
     setStylePreview(null);
+    setStyleProgress(null);
   };
 
   const useStyleTemplate = (templateId) => {
@@ -1253,6 +1262,7 @@ function AdminExams() {
   const previewStyleApplication = async () => {
     if (!stylePanel) return;
     setStyleBusy("preview");
+    setStyleProgress(null);
     setDocumentError("");
     try {
       const res = await API.post("/api/admin/style-templates/preview", {
@@ -1277,22 +1287,50 @@ function AdminExams() {
     if (!stylePanel || !stylePreview?.count) return;
     setStyleBusy("apply");
     setDocumentError("");
+    const blockIds = Array.isArray(stylePreview.blockIds) && stylePreview.blockIds.length
+      ? stylePreview.blockIds
+      : stylePanel.scope === "manual"
+        ? stylePanel.manualBlockIds
+        : [];
+    const total = Number(stylePreview.count) || blockIds.length;
+    const chunks = blockIds.length
+      ? Array.from({ length: Math.ceil(blockIds.length / STYLE_TEMPLATE_BATCH_SIZE) }, (_, index) =>
+          blockIds.slice(index * STYLE_TEMPLATE_BATCH_SIZE, (index + 1) * STYLE_TEMPLATE_BATCH_SIZE)
+        )
+      : [[]];
+    const batchId = makeClientBatchId();
+    let appliedCount = 0;
+    setStyleProgress({ current: 0, total, percent: 0 });
     try {
-      const res = await API.post("/api/admin/style-templates/apply", {
-        sourceBlock: stylePanel.sourceBlock,
-        scope: stylePanel.scope,
-        manualBlockIds: stylePanel.manualBlockIds,
-        allowCrossType: stylePanel.allowCrossType,
-        styleJson: stylePanel.styleJson,
-        styleOptions: stylePanel.styleOptions,
-        confirmed: true,
-      }, {
-        timeout: STYLE_TEMPLATE_REQUEST_TIMEOUT_MS,
-      });
+      for (let index = 0; index < chunks.length; index += 1) {
+        const chunk = chunks[index];
+        const res = await API.post("/api/admin/style-templates/apply", {
+          sourceBlock: stylePanel.sourceBlock,
+          scope: chunk.length ? "manual" : stylePanel.scope,
+          manualBlockIds: chunk.length ? chunk : stylePanel.manualBlockIds,
+          allowCrossType: true,
+          styleJson: stylePanel.styleJson,
+          styleOptions: stylePanel.styleOptions,
+          confirmed: true,
+          batchId,
+          batchIndex: index + 1,
+          batchTotal: chunks.length,
+        }, {
+          timeout: STYLE_TEMPLATE_REQUEST_TIMEOUT_MS,
+        });
+        appliedCount += Number(res.data.count) || chunk.length;
+        const nextCurrent = Math.min(total, appliedCount);
+        setStyleProgress({
+          current: nextCurrent,
+          total,
+          percent: total ? Math.round((nextCurrent / total) * 100) : 100,
+        });
+      }
       clearImportedExamCache();
-      setStatus(`Style applied to ${res.data.count ?? 0} block(s).`);
+      setStatus(`Style applied to ${appliedCount} block(s).`);
       setStylePanel(null);
       setStylePreview(null);
+      setStyleProgress(null);
       await reload();
     } catch (err) {
       setDocumentError(getAdminRequestError(err, "Style apply failed."));
@@ -1918,12 +1956,14 @@ function AdminExams() {
         <StyleTemplatePanel
           state={stylePanel}
           preview={stylePreview}
+          progress={styleProgress}
           templates={styleTemplates}
           blocks={styleBlocks}
           busy={styleBusy}
           onClose={() => {
             setStylePanel(null);
             setStylePreview(null);
+            setStyleProgress(null);
           }}
           onUpdate={updateStylePanel}
           onUseTemplate={useStyleTemplate}
@@ -1941,6 +1981,7 @@ function AdminExams() {
 function StyleTemplatePanel({
   state,
   preview,
+  progress,
   templates,
   blocks,
   busy,
@@ -2061,7 +2102,7 @@ function StyleTemplatePanel({
                     </button>
                   </div>
                 </div>
-                {manualBlocks.slice(0, 160).map((block) => (
+                {manualBlocks.map((block) => (
                   <label key={block.blockId} className={styles.manualBlockItem}>
                     <input
                       type="checkbox"
@@ -2122,10 +2163,21 @@ function StyleTemplatePanel({
               </button>
               <button className={styles.button} type="button" onClick={onApply} disabled={busy === "apply" || !preview?.count}>
                 <CheckCircle2 size={15} />
-                Confirm apply
+                {busy === "apply" ? "Applying..." : "Confirm apply"}
               </button>
             </div>
           </div>
+          {progress ? (
+            <div className={styles.styleApplyProgress} role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={progress.percent}>
+              <div>
+                <strong>{progress.percent}%</strong>
+                <span>{progress.current}/{progress.total} blocks applied</span>
+              </div>
+              <span>
+                <i style={{ width: `${progress.percent}%` }} />
+              </span>
+            </div>
+          ) : null}
           {preview?.blocks?.length ? (
             <div className={styles.stylePreviewList} onWheel={handleLocalScrollableWheel}>
               {preview.blocks.slice(0, 12).map((block) => (

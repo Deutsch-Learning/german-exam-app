@@ -11,7 +11,9 @@ const STYLE_BLOCK_TYPES = new Set([
 const STYLE_OPTION_KEYS = [
   "fontSize",
   "fontFamily",
-  "emphasis",
+  "bold",
+  "italic",
+  "underline",
   "textColor",
   "backgroundColor",
   "spacing",
@@ -159,10 +161,15 @@ const normalizeStyleJson = (styleJson, blockType = "section_instructions") => {
 
 const normalizeStyleOptions = (value) => {
   const input = asObject(value);
+  const legacyEmphasis = input.emphasis;
   return STYLE_OPTION_KEYS.reduce(
     (acc, key) => ({
       ...acc,
-      [key]: input[key] === undefined ? DEFAULT_STYLE_OPTIONS[key] : Boolean(input[key]),
+      [key]: input[key] === undefined
+        ? ["bold", "italic", "underline"].includes(key) && legacyEmphasis !== undefined
+          ? Boolean(legacyEmphasis)
+          : DEFAULT_STYLE_OPTIONS[key]
+        : Boolean(input[key]),
     }),
     {}
   );
@@ -185,7 +192,7 @@ const applyStyleToText = (value, styleJson, styleOptions) => {
   if (options.backgroundColor && style.inline.backgroundColor) inlineStyles["background-color"] = style.inline.backgroundColor;
   if (options.fontFamily && style.inline.fontFamily) inlineStyles["font-family"] = style.inline.fontFamily;
   if (options.fontSize && style.inline.fontSize) inlineStyles["font-size"] = style.inline.fontSize;
-  if (options.emphasis && style.marks.underline) inlineStyles["text-decoration"] = "underline";
+  if (options.underline && style.marks.underline) inlineStyles["text-decoration"] = "underline";
   if (options.alignment && style.block.textAlign) blockStyles["text-align"] = style.block.textAlign;
   if (options.spacing && style.block.lineHeight) blockStyles["line-height"] = style.block.lineHeight;
   if (options.spacing && style.block.marginBottom) blockStyles["margin-bottom"] = style.block.marginBottom;
@@ -193,9 +200,9 @@ const applyStyleToText = (value, styleJson, styleOptions) => {
 
   const wrapMarks = (text) => {
     let output = `<span${styleAttr(inlineStyles)}>${escapeHtml(text)}</span>`;
-    if (options.emphasis && style.marks.underline && !inlineStyles["text-decoration"]) output = `<u>${output}</u>`;
-    if (options.emphasis && style.marks.italic) output = `<em>${output}</em>`;
-    if (options.emphasis && style.marks.bold) output = `<strong>${output}</strong>`;
+    if (options.underline && style.marks.underline && !inlineStyles["text-decoration"]) output = `<u>${output}</u>`;
+    if (options.italic && style.marks.italic) output = `<em>${output}</em>`;
+    if (options.bold && style.marks.bold) output = `<strong>${output}</strong>`;
     return output;
   };
 
@@ -580,12 +587,14 @@ const registerContentStyleRoutes = ({ app, pool, requireAdmin, auditAdminAction 
       const styleJson = normalizeStyleJson(req.body?.styleJson ?? req.body?.style_json, req.body?.sourceBlock?.blockType);
       const styleOptions = normalizeStyleOptions(req.body?.styleOptions ?? req.body?.style_options);
       const { source, blocks } = await resolveBlocks(pool, req.body ?? {});
-      const previews = buildPreviewBlocks(blocks, styleJson, styleOptions);
+      const previewBlocks = blocks.slice(0, 50);
+      const previews = buildPreviewBlocks(previewBlocks, styleJson, styleOptions);
       return res.json({
         ok: true,
         source: compactBlock(source),
-        count: previews.length,
-        blocks: previews.slice(0, 50),
+        count: blocks.length,
+        blockIds: blocks.map((block) => block.blockId),
+        blocks: previews,
         styleJson,
         styleOptions,
       });
@@ -605,7 +614,7 @@ const registerContentStyleRoutes = ({ app, pool, requireAdmin, auditAdminAction 
       const styleOptions = normalizeStyleOptions(req.body?.styleOptions ?? req.body?.style_options);
       const { source, blocks } = await resolveBlocks(pool, req.body ?? {});
       if (!blocks.length) return res.status(400).json({ ok: false, error: "No compatible blocks found" });
-      if (blocks.length > 500) return res.status(400).json({ ok: false, error: "Too many blocks selected. Narrow the scope first." });
+      if (blocks.length > 150) return res.status(400).json({ ok: false, error: "Too many blocks in one batch. Apply in smaller batches." });
 
       const undoBlocks = [];
       const affectedBlocks = [];
@@ -631,6 +640,9 @@ const registerContentStyleRoutes = ({ app, pool, requireAdmin, auditAdminAction 
       const audit = await auditAdminAction(req, "style.apply", "content_style", source.blockId, {
         sourceBlock: compactBlock(source),
         scope: req.body?.scope || "block",
+        batchId: req.body?.batchId || null,
+        batchIndex: Number(req.body?.batchIndex) || null,
+        batchTotal: Number(req.body?.batchTotal) || null,
         styleOptions,
         styleJson,
         affectedBlocks: undoBlocks,
@@ -659,8 +671,25 @@ const registerContentStyleRoutes = ({ app, pool, requireAdmin, auditAdminAction 
         [req.user?.id ?? null]
       );
       const audit = result.rows[0];
-      const affectedBlocks = Array.isArray(audit?.metadata?.affectedBlocks) ? audit.metadata.affectedBlocks : [];
-      if (!audit || !affectedBlocks.length) {
+      if (!audit) {
+        return res.status(404).json({ ok: false, error: "No style apply action available to undo" });
+      }
+      const batchId = audit.metadata?.batchId;
+      const audits = batchId
+        ? (await pool.query(
+            `SELECT id, metadata
+             FROM admin_audit_logs
+             WHERE action = 'style.apply'
+               AND metadata->>'batchId' = $1
+               AND ($2::int IS NULL OR admin_user_id = $2)
+             ORDER BY COALESCE((metadata->>'batchIndex')::int, 0) DESC, created_at DESC`,
+            [String(batchId), req.user?.id ?? null]
+          )).rows
+        : [audit];
+      const affectedBlocks = audits.flatMap((item) =>
+        Array.isArray(item?.metadata?.affectedBlocks) ? item.metadata.affectedBlocks : []
+      );
+      if (!affectedBlocks.length) {
         return res.status(404).json({ ok: false, error: "No style apply action available to undo" });
       }
 
