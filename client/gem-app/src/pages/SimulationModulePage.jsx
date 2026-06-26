@@ -58,7 +58,7 @@ import {
 import NotFoundPage from "./NotFoundPage";
 import ComingSoonPage from "./ComingSoonPage";
 import { getModuleCountLabel, isTopicModule } from "../utils/moduleLabels";
-import { hasRichTextMarkup, sanitizeRichTextHtml } from "../utils/richText";
+import { hasRichTextMarkup, richTextToPlainText, sanitizeRichTextHtml } from "../utils/richText";
 import { stripQuestionMaterial } from "../utils/examText";
 
 const LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"];
@@ -1346,6 +1346,11 @@ const normalizePartKey = (value, fallback = "part-1") => {
   return safe ? `part-${safe}` : fallback;
 };
 
+const plainRichText = (value, fallback = "") => {
+  const text = hasRichTextMarkup(value) ? richTextToPlainText(value) : String(value ?? "");
+  return text.replace(/\s+/g, " ").trim() || fallback;
+};
+
 const getTaskPartKey = (task, index = 0) => {
   if (task?.partKey) return task.partKey;
   if (task?.partNumber) return `part-${task.partNumber}`;
@@ -1396,7 +1401,7 @@ const buildExamParts = (module) => {
     .map((part, index) => ({
       ...part,
       number: part.number || index + 1,
-      displayTitle: `Teil ${part.number || index + 1} - ${String(part.title || "").replace(/^Teil\s+\d+\s*:?\s*/i, "") || "Anweisungen"}`,
+      displayTitle: `Teil ${part.number || index + 1} - ${plainRichText(part.title, "Anweisungen").replace(/^Teil\s+\d+\s*:?\s*/i, "") || "Anweisungen"}`,
       sourceText: stripQuestionMaterial(part.instructions, part.taskIndexes.map((taskIndex) => module.tasks[taskIndex])),
       firstIndex: part.taskIndexes[0],
       lastIndex: part.taskIndexes[part.taskIndexes.length - 1],
@@ -2929,6 +2934,21 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     />
   );
 
+  const renderContentTitle = (title, keyPrefix = "content-title") => {
+    const safeHtml = sanitizeRichTextHtml(title);
+    if (hasRichTextMarkup(title) && safeHtml) {
+      return (
+        <h2
+          key={keyPrefix}
+          className={styles.richHeadingTitle}
+          translate="no"
+          dangerouslySetInnerHTML={{ __html: safeHtml }}
+        />
+      );
+    }
+    return <h2 translate="no">{plainRichText(title)}</h2>;
+  };
+
   const renderQuestionHeading = (text, keyPrefix) => {
     if (hasRichTextMarkup(text)) {
       return renderRichExamText(text, keyPrefix, styles.questionText);
@@ -3180,9 +3200,41 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     </section>
   );
 
+  const getAnswerOptionStyle = (task) => {
+    const style = task?.contentStyle?.answerOptions;
+    if (!style || typeof style !== "object") return { buttonStyle: undefined, labelStyle: undefined };
+    const inline = style.inline && typeof style.inline === "object" ? style.inline : {};
+    const marks = style.marks && typeof style.marks === "object" ? style.marks : {};
+    const block = style.block && typeof style.block === "object" ? style.block : {};
+    const safe = (value, max = 80) => {
+      const text = String(value ?? "").trim();
+      return text && text.length <= max ? text : undefined;
+    };
+    const buttonStyle = {
+      textAlign: safe(block.textAlign),
+      lineHeight: safe(block.lineHeight),
+      marginBottom: safe(block.marginBottom),
+      paddingLeft: safe(block.paddingLeft),
+      backgroundColor: safe(inline.backgroundColor),
+    };
+    const labelStyle = {
+      color: safe(inline.color),
+      fontFamily: safe(inline.fontFamily),
+      fontSize: safe(inline.fontSize),
+      fontWeight: marks.bold ? 800 : undefined,
+      fontStyle: marks.italic ? "italic" : undefined,
+      textDecoration: marks.underline ? "underline" : undefined,
+    };
+    return {
+      buttonStyle: Object.fromEntries(Object.entries(buttonStyle).filter(([, value]) => value)),
+      labelStyle: Object.fromEntries(Object.entries(labelStyle).filter(([, value]) => value)),
+    };
+  };
+
   const renderQuestionControl = (task, answer) => {
     if (task.type === "multiple" || task.type === "trueFalse") {
       const options = task.type === "trueFalse" ? TRUE_FALSE_OPTIONS : task.options;
+      const optionStyle = getAnswerOptionStyle(task);
 
       return (
         <div className={styles.optionList}>
@@ -3201,9 +3253,10 @@ export default function SimulationModulePage({ moduleIdOverride }) {
                   showCorrectness && isCorrect ? styles.optionCorrect : "",
                   showCorrectness && isSelected && !isCorrect ? styles.optionWrong : "",
                 ].join(" ")}
+                style={optionStyle.buttonStyle}
                 onClick={() => setAnswerForCurrent(option.value)}
               >
-                <span translate="no">{getProtectedChoiceLabel(task, option)}</span>
+                <span translate="no" style={optionStyle.labelStyle}>{getProtectedChoiceLabel(task, option)}</span>
                 {showCorrectness && isCorrect ? <CheckCircle2 size={18} /> : null}
               </button>
             );
@@ -3590,7 +3643,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               <span>{level}</span>
             </div>
             <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
-            <h2>{currentTask.title}</h2>
+            {renderContentTitle(currentTask.title, `write-title-${currentTask.id}`)}
             <div className={`${styles.instructionText} ${styles.readableScrollArea}`} onWheel={handleReadableWheel}>
               {renderStructuredExamText(currentTask.prompt, `write-prompt-${currentTask.id}`)}
             </div>
@@ -3670,7 +3723,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             <span>{level}</span>
           </div>
           <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
-          <h2>{currentTask.title}</h2>
+          {renderContentTitle(currentTask.title, `write-title-${currentTask.id}`)}
           <div className={`${styles.instructionText} ${styles.readableScrollArea}`} onWheel={handleReadableWheel}>
             {renderStructuredExamText(currentTask.prompt, `write-prompt-${currentTask.id}`)}
           </div>
@@ -3755,7 +3808,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               <span>{level}</span>
             </div>
             <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
-            <h2>{currentTask.title}</h2>
+            {renderContentTitle(currentTask.title, `speak-title-${currentTask.id}`)}
             <div className={`${styles.instructionText} ${styles.readableScrollArea}`} onWheel={handleReadableWheel}>
               {renderStructuredExamText(currentTask.prompt, `speak-prompt-${currentTask.id}`)}
             </div>
@@ -3854,7 +3907,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             <span>{level}</span>
           </div>
           <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
-          <h2>{currentTask.title}</h2>
+          {renderContentTitle(currentTask.title, `speak-title-${currentTask.id}`)}
           <div className={`${styles.instructionText} ${styles.readableScrollArea}`} onWheel={handleReadableWheel}>
             {renderStructuredExamText(currentTask.prompt, `speak-prompt-${currentTask.id}`)}
           </div>

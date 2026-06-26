@@ -1070,6 +1070,7 @@ const buildReadingTask = (question, index = 0) => {
   const questionType = String(question.question_type || "").toLowerCase();
   const correctValue = extractCorrectValue(question.correct_answer);
   const options = normalizeChoiceOptions(question.options);
+  const metadata = asJsonObject(question.source_metadata);
   const base = {
     id: `db-question-${question.id}`,
     level: question.level || "B1",
@@ -1078,6 +1079,7 @@ const buildReadingTask = (question, index = 0) => {
     hint: question.section_title ? `Relisez ${question.section_title}.` : "Relisez le texte source.",
     explanation: question.explanation || "Réponse issue du document importé.",
     sourceQuestionId: question.id,
+    contentStyle: asJsonObject(metadata.contentStyle),
     ...buildTaskPartMeta(question, index),
   };
 
@@ -1173,11 +1175,13 @@ const buildWritingTask = (question, index) => {
     },
     sampleAnswer: correct.sampleAnswer ? clipText(correct.sampleAnswer, 1600) : undefined,
     sourceQuestionId: question.id,
+    contentStyle: asJsonObject(metadata.contentStyle),
     ...buildTaskPartMeta(question, index),
   };
 };
 
 const buildSpeakingTask = (question, index) => {
+  const metadata = asJsonObject(question.source_metadata);
   const scoring = asJsonObject(question.scoring);
   const durationMinutes = Number(scoring.durationMinutes) || Number(question.section_duration_minutes) || 2;
   const points = Number(scoring.points) || Number(question.section_points) || 0;
@@ -1197,6 +1201,7 @@ const buildSpeakingTask = (question, index) => {
       points ? `${points} Punkte` : null,
     ].filter(Boolean),
     sourceQuestionId: question.id,
+    contentStyle: asJsonObject(metadata.contentStyle),
     ...buildTaskPartMeta(question, index),
   };
 };
@@ -2986,7 +2991,7 @@ app.post("/api/admin/exams/:examId/sections", requireAdmin, async (req, res) => 
         examId,
         normalizeOptionalText(req.body?.sectionType, 40) || exam.rows[0].section_type || "read",
         normalizeInteger(req.body?.partNumber, 1) || 1,
-        normalizeOptionalText(req.body?.title, 160) || "New section",
+        normalizeOptionalText(req.body?.title, 2000) || "New section",
         normalizeOptionalText(req.body?.instructions, 12000),
         normalizeInteger(req.body?.durationMinutes),
         normalizeInteger(req.body?.points),
@@ -3034,7 +3039,7 @@ app.put("/api/admin/exams/:examId/sections/:sectionId", requireAdmin, async (req
       [
         normalizeOptionalText(req.body?.sectionType, 40),
         normalizeInteger(req.body?.partNumber),
-        normalizeOptionalText(req.body?.title, 160),
+        normalizeOptionalText(req.body?.title, 2000),
         normalizeOptionalText(req.body?.instructions, 12000),
         normalizeInteger(req.body?.durationMinutes),
         normalizeInteger(req.body?.points),
