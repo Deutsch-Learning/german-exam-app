@@ -599,7 +599,7 @@ const registerContentStyleRoutes = ({ app, pool, requireAdmin, auditAdminAction 
     if (!req.body?.confirmed) {
       return res.status(400).json({ ok: false, error: "Bulk style apply must be confirmed" });
     }
-    const client = await pool.connect();
+    let client;
     try {
       const styleJson = normalizeStyleJson(req.body?.styleJson ?? req.body?.style_json, req.body?.sourceBlock?.blockType);
       const styleOptions = normalizeStyleOptions(req.body?.styleOptions ?? req.body?.style_options);
@@ -609,6 +609,7 @@ const registerContentStyleRoutes = ({ app, pool, requireAdmin, auditAdminAction 
 
       const undoBlocks = [];
       const affectedBlocks = [];
+      client = await pool.connect();
       await client.query("BEGIN");
       for (const block of blocks) {
         const nextValue = applyStyleToText(block.currentValue, styleJson, styleOptions);
@@ -637,16 +638,16 @@ const registerContentStyleRoutes = ({ app, pool, requireAdmin, auditAdminAction 
       });
       return res.json({ ok: true, count: affectedBlocks.length, auditId: audit?.id ?? null, affectedBlocks });
     } catch (err) {
-      await client.query("ROLLBACK").catch(() => {});
+      if (client) await client.query("ROLLBACK").catch(() => {});
       console.error("Style apply failed", err);
       return res.status(400).json({ ok: false, error: err.message || "Style apply failed" });
     } finally {
-      client.release();
+      if (client) client.release();
     }
   });
 
   app.post("/api/admin/style-templates/undo-last", requireAdmin, async (req, res) => {
-    const client = await pool.connect();
+    let client;
     try {
       const result = await pool.query(
         `SELECT id, metadata
@@ -663,6 +664,7 @@ const registerContentStyleRoutes = ({ app, pool, requireAdmin, auditAdminAction 
         return res.status(404).json({ ok: false, error: "No style apply action available to undo" });
       }
 
+      client = await pool.connect();
       await client.query("BEGIN");
       for (const item of affectedBlocks) {
         await restoreBlock(client, item);
@@ -686,11 +688,11 @@ const registerContentStyleRoutes = ({ app, pool, requireAdmin, auditAdminAction 
       });
       return res.json({ ok: true, count: affectedBlocks.length, undoneAuditId: audit.id });
     } catch (err) {
-      await client.query("ROLLBACK").catch(() => {});
+      if (client) await client.query("ROLLBACK").catch(() => {});
       console.error("Style undo failed", err);
       return res.status(400).json({ ok: false, error: err.message || "Style undo failed" });
     } finally {
-      client.release();
+      if (client) client.release();
     }
   });
 };
