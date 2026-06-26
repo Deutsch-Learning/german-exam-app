@@ -1211,6 +1211,77 @@ const buildSpeakingTask = (question, index) => {
   };
 };
 
+const buildImportedListeningAudio = ({ title, sourceLabel, sections, questions }) => {
+  const sectionQuestionsById = new Map();
+  questions.forEach((question) => {
+    const key = question.section_id ?? "unassigned";
+    if (!sectionQuestionsById.has(key)) sectionQuestionsById.set(key, []);
+    sectionQuestionsById.get(key).push(question);
+  });
+
+  const tracks = sections.map((section, index) => {
+    const sectionQuestions = sectionQuestionsById.get(section.id) || [];
+    const sectionMetadata = asJsonObject(section.metadata);
+    const firstQuestionWithAudio = sectionQuestions.find((question) => Object.keys(asJsonObject(question.audio)).length);
+    const firstQuestionWithTranscript = sectionQuestions.find((question) => question.transcript);
+    const sectionAudio = {
+      ...asJsonObject(firstQuestionWithAudio?.audio),
+      ...asJsonObject(sectionMetadata.audio),
+    };
+    const transcript = cleanText(
+      sectionMetadata.transcript ||
+      firstQuestionWithTranscript?.transcript ||
+      sectionAudio.transcript ||
+      ""
+    );
+    return {
+      id: `track-${section.part_number || section.position || index + 1}`,
+      partNumber: Number(section.part_number) || Number(section.position) || index + 1,
+      title: section.title || `Teil ${index + 1}`,
+      transcript,
+      audio: {
+        ...sectionAudio,
+        transcript,
+      },
+    };
+  }).filter((track) => track.transcript || Object.keys(track.audio || {}).length);
+
+  const primaryAudio = tracks[0]?.audio || asJsonObject(questions[0]?.audio);
+  const transcriptSet = new Set();
+  const transcript = tracks
+    .map((track) => track.transcript)
+    .filter(Boolean)
+    .filter((text) => {
+      const key = text.slice(0, 240);
+      if (transcriptSet.has(key)) return false;
+      transcriptSet.add(key);
+      return true;
+    })
+    .join("\n\n");
+  const speakers = tracks.flatMap((track) => Array.isArray(track.audio?.speakers) ? track.audio.speakers : []);
+  const speakerMap = new Map();
+  speakers.forEach((speaker) => {
+    const key = String(speaker?.speaker || speaker?.voiceName || speaker?.id || "").toLowerCase();
+    if (key && !speakerMap.has(key)) speakerMap.set(key, speaker);
+  });
+  const ambience = tracks.flatMap((track) => Array.isArray(track.audio?.ambience) ? track.audio.ambience : []);
+
+  return {
+    ...primaryAudio,
+    title: primaryAudio.documentType || `${sourceLabel}: ${title}`,
+    speaker:
+      primaryAudio.situation ||
+      Array.from(speakerMap.values()).map((speaker) => speaker.speaker || speaker.voiceName).filter(Boolean).join(" / ") ||
+      "Standarddeutsch, moderates Tempo",
+    transcript,
+    tracks,
+    speakers: Array.from(speakerMap.values()),
+    ambience: ambience.length ? ambience : primaryAudio.ambience,
+    sfx: primaryAudio.sfx || ambience.map((item) => item.name).filter(Boolean).join(", "),
+    rate: primaryAudio.rate || 0.9,
+  };
+};
+
 const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {} }) => {
   const moduleId = exam.section_type;
   const moduleMeta = PUBLIC_MODULE_META[moduleId] ?? PUBLIC_MODULE_META.read;
@@ -1271,7 +1342,7 @@ const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {} 
               : [{ id: "A", text: "Texte importé depuis le document source." }],
           }
         : undefined,
-    audio: moduleId === "listen" ? asJsonObject(questions[0]?.audio) : undefined,
+    audio: moduleId === "listen" ? buildImportedListeningAudio({ title, sourceLabel, sections, questions }) : undefined,
     tasks,
     sourceExamId: exam.id,
   };
