@@ -2764,6 +2764,14 @@ app.get("/api/admin/tts/status", requireAdmin, async (req, res) => {
   }
 });
 
+app.get("/api/health", async (req, res) => {
+  return res.json({
+    ok: true,
+    service: "german-exam-app-api",
+    timestamp: new Date().toISOString(),
+  });
+});
+
 app.get("/api/admin/exams/:examId/audio", requireAdmin, async (req, res) => {
   try {
     const examId = Number(req.params.examId);
