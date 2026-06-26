@@ -2370,21 +2370,77 @@ function ImportWizardPanel({
   onPublish,
   onLoadImport,
 }) {
+  const [audioTarget, setAudioTarget] = useState({ seriesIndex: 0, sectionIndex: 0 });
   const draft = wizard?.draft || {};
+  const parsedWizardJson = useMemo(() => {
+    if (!wizardJson?.trim()) return { value: draft, error: "" };
+    try {
+      return { value: JSON.parse(wizardJson), error: "" };
+    } catch (err) {
+      return { value: draft, error: err.message || "Invalid JSON" };
+    }
+  }, [draft, wizardJson]);
+  const editableDraft = parsedWizardJson.value || {};
+  const draftSeries = Array.isArray(editableDraft.series) ? editableDraft.series : [];
   const validation = analysis?.validation || {};
   const counts = validation.counts || {};
   const confidence = analysis?.confidence || wizard?.import?.confidence || {};
-  const firstSeries = draft.series?.[0];
-  const firstSection = firstSeries?.sections?.[0];
+  const selectedSeries = draftSeries[audioTarget.seriesIndex] || draftSeries[0];
+  const selectedSections = Array.isArray(selectedSeries?.sections) ? selectedSeries.sections : [];
+  const selectedSection = selectedSections[audioTarget.sectionIndex] || selectedSections[0];
+  const firstSeries = selectedSeries || draftSeries[0];
+  const firstSection = selectedSection || firstSeries?.sections?.[0];
   const firstQuestion = firstSection?.questions?.[0];
-  const audio = firstSection?.metadata?.audio || firstQuestion?.audio || {};
-  const transcript = firstSection?.metadata?.transcript || firstQuestion?.transcript || "";
+  const firstQuestionWithAudio = firstSection?.questions?.find((question) => question.audio && Object.keys(question.audio).length);
+  const firstQuestionWithTranscript = firstSection?.questions?.find((question) => question.transcript);
+  const audio = firstSection?.metadata?.audio || firstQuestionWithAudio?.audio || firstQuestion?.audio || {};
+  const transcript = firstSection?.metadata?.transcript || firstQuestionWithTranscript?.transcript || firstQuestion?.transcript || "";
   const isPublished = wizard?.import?.parseStatus === "published";
   const accept = ".pdf,.docx,.txt,.png,.jpg,.jpeg,.webp,.tif,.tiff,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/*";
 
   const handleFiles = (files) => {
     const file = files?.[0];
     if (file) onFileSelect(file);
+  };
+
+  const updateWizardDraft = (updater) => {
+    if (parsedWizardJson.error) return;
+    const next = JSON.parse(JSON.stringify(editableDraft || {}));
+    updater(next);
+    onWizardJsonChange(formatJson(next, {}));
+  };
+
+  const updateSelectedSectionAudio = (updater) => {
+    updateWizardDraft((next) => {
+      const series = next.series?.[audioTarget.seriesIndex] || next.series?.[0];
+      const section = series?.sections?.[audioTarget.sectionIndex] || series?.sections?.[0];
+      if (!section) return;
+      section.metadata = asPlainObject(section.metadata);
+      const currentAudio = {
+        ...(asPlainObject(section.metadata.audio)),
+        ...(asPlainObject(section.questions?.find((question) => question.audio && Object.keys(question.audio).length)?.audio)),
+      };
+      const nextAudio = updater(currentAudio) || currentAudio;
+      section.metadata.audio = nextAudio;
+      section.questions = Array.isArray(section.questions) ? section.questions : [];
+      section.questions.forEach((question) => {
+        question.audio = nextAudio;
+      });
+    });
+  };
+
+  const updateSelectedSectionTranscript = (value) => {
+    updateWizardDraft((next) => {
+      const series = next.series?.[audioTarget.seriesIndex] || next.series?.[0];
+      const section = series?.sections?.[audioTarget.sectionIndex] || series?.sections?.[0];
+      if (!section) return;
+      section.metadata = asPlainObject(section.metadata);
+      section.metadata.transcript = value;
+      section.questions = Array.isArray(section.questions) ? section.questions : [];
+      section.questions.forEach((question) => {
+        question.transcript = value;
+      });
+    });
   };
 
   return (
@@ -2495,6 +2551,10 @@ function ImportWizardPanel({
                 <Eye size={15} />
                 Preview
               </button>
+              <button className={wizardView === "audio" ? styles.button : styles.secondaryButton} type="button" onClick={() => onWizardViewChange("audio")}>
+                <Volume2 size={15} />
+                Audio and voices
+              </button>
               <button className={wizardView === "validate" ? styles.button : styles.secondaryButton} type="button" onClick={onValidate} disabled={busy === "wizard-validate"}>
                 <CheckCircle2 size={15} />
                 Validate
@@ -2525,7 +2585,23 @@ function ImportWizardPanel({
               <label className={`${styles.field} ${styles.wizardJsonEditor}`}>Editable draft JSON
                 <textarea value={wizardJson} onChange={(event) => onWizardJsonChange(event.target.value)} spellCheck="false" />
               </label>
+              {parsedWizardJson.error ? <p className={styles.formError}>{parsedWizardJson.error}</p> : null}
             </div>
+          ) : null}
+
+          {wizardView === "audio" ? (
+            <ImportAudioEditor
+              series={draftSeries}
+              audioTarget={audioTarget}
+              onAudioTargetChange={setAudioTarget}
+              selectedSeries={selectedSeries}
+              selectedSection={selectedSection}
+              audio={audio}
+              transcript={transcript}
+              jsonError={parsedWizardJson.error}
+              onAudioChange={updateSelectedSectionAudio}
+              onTranscriptChange={updateSelectedSectionTranscript}
+            />
           ) : null}
 
           {wizardView === "preview" ? (
@@ -2595,6 +2671,239 @@ function ImportWizardPanel({
           ))}
         </div>
       ) : null}
+    </section>
+  );
+}
+
+function ImportAudioEditor({
+  series,
+  audioTarget,
+  onAudioTargetChange,
+  selectedSeries,
+  selectedSection,
+  audio,
+  transcript,
+  jsonError,
+  onAudioChange,
+  onTranscriptChange,
+}) {
+  const sections = Array.isArray(selectedSeries?.sections) ? selectedSeries.sections : [];
+  const speakers = Array.isArray(audio?.speakers) ? audio.speakers : [];
+  const ambience = Array.isArray(audio?.ambience) ? audio.ambience : [];
+
+  const updateAudioField = (field, value) => {
+    onAudioChange((current) => ({ ...current, [field]: value }));
+  };
+
+  const updateSpeaker = (index, field, value) => {
+    onAudioChange((current) => {
+      const nextSpeakers = Array.isArray(current.speakers) ? [...current.speakers] : [];
+      nextSpeakers[index] = { ...(nextSpeakers[index] || {}), [field]: value };
+      return { ...current, speakers: nextSpeakers };
+    });
+  };
+
+  const addSpeaker = () => {
+    onAudioChange((current) => ({
+      ...current,
+      speakers: [
+        ...(Array.isArray(current.speakers) ? current.speakers : []),
+        {
+          id: `speaker-${Date.now()}`,
+          speaker: "Speaker",
+          voiceName: "",
+          suggestedGender: "",
+          suggestedAge: null,
+          style: "natural",
+          emotion: "neutral",
+          speed: "1.0x",
+          accent: "Standard German",
+        },
+      ],
+    }));
+  };
+
+  const removeSpeaker = (index) => {
+    onAudioChange((current) => ({
+      ...current,
+      speakers: (Array.isArray(current.speakers) ? current.speakers : []).filter((_, itemIndex) => itemIndex !== index),
+    }));
+  };
+
+  const updateAmbience = (index, field, value) => {
+    onAudioChange((current) => {
+      const nextAmbience = Array.isArray(current.ambience) ? [...current.ambience] : [];
+      nextAmbience[index] = { ...(nextAmbience[index] || {}), [field]: value };
+      return { ...current, ambience: nextAmbience };
+    });
+  };
+
+  const addAmbience = () => {
+    onAudioChange((current) => ({
+      ...current,
+      ambience: [
+        ...(Array.isArray(current.ambience) ? current.ambience : []),
+        { name: "Room tone", volume: 0.35, timing: "" },
+      ],
+    }));
+  };
+
+  const removeAmbience = (index) => {
+    onAudioChange((current) => ({
+      ...current,
+      ambience: (Array.isArray(current.ambience) ? current.ambience : []).filter((_, itemIndex) => itemIndex !== index),
+    }));
+  };
+
+  if (jsonError) {
+    return (
+      <section className={styles.validationPanel}>
+        <strong>Fix draft JSON first</strong>
+        <p>{jsonError}</p>
+      </section>
+    );
+  }
+
+  if (!series.length || !selectedSection) {
+    return <p className={styles.emptyState}>No listening section is available in this draft.</p>;
+  }
+
+  return (
+    <section className={styles.wizardAudioEditor}>
+      <div className={styles.audioTargetBar}>
+        <label className={styles.field}>Series
+          <select
+            value={audioTarget.seriesIndex}
+            onChange={(event) => onAudioTargetChange({ seriesIndex: Number(event.target.value), sectionIndex: 0 })}
+          >
+            {series.map((item, index) => (
+              <option key={`${item.seriesNumber}-${item.title}-${index}`} value={index}>
+                {item.sourceLabel || `Series ${index + 1}`} - {item.title || "Untitled"}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className={styles.field}>Section
+          <select
+            value={audioTarget.sectionIndex}
+            onChange={(event) => onAudioTargetChange((prev) => ({ ...prev, sectionIndex: Number(event.target.value) }))}
+          >
+            {sections.map((item, index) => (
+              <option key={`${item.partNumber}-${item.title}-${index}`} value={index}>
+                Teil {item.partNumber || index + 1} - {item.title || "Listening"}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div className={styles.audioEditorGrid}>
+        <section className={styles.wizardPreviewBox}>
+          <h3>Sound setup</h3>
+          <div className={styles.audioFieldGrid}>
+            <label className={styles.field}>Document type
+              <input value={audio.documentType || ""} onChange={(event) => updateAudioField("documentType", event.target.value)} />
+            </label>
+            <label className={styles.field}>Situation
+              <input value={audio.situation || ""} onChange={(event) => updateAudioField("situation", event.target.value)} />
+            </label>
+            <label className={styles.field}>Scene
+              <input value={audio.scene || ""} onChange={(event) => updateAudioField("scene", event.target.value)} />
+            </label>
+            <label className={styles.field}>SFX
+              <input value={audio.sfx || ""} onChange={(event) => updateAudioField("sfx", event.target.value)} />
+            </label>
+            <label className={styles.field}>SFX timing
+              <input value={audio.timing || ""} onChange={(event) => updateAudioField("timing", event.target.value)} />
+            </label>
+            <label className={styles.field}>Audio prompt
+              <input value={audio.prompt || ""} onChange={(event) => updateAudioField("prompt", event.target.value)} />
+            </label>
+          </div>
+          <label className={styles.field}>Transcript
+            <textarea value={transcript || ""} onChange={(event) => onTranscriptChange(event.target.value)} />
+          </label>
+        </section>
+
+        <section className={styles.wizardPreviewBox}>
+          <div className={styles.audioListHeader}>
+            <h3>Voices</h3>
+            <button className={styles.secondaryButton} type="button" onClick={addSpeaker}>
+              <Plus size={14} />
+              Add voice
+            </button>
+          </div>
+          <div className={styles.audioList}>
+            {speakers.map((speaker, index) => (
+              <article className={styles.audioRow} key={speaker.id || `${speaker.speaker}-${index}`}>
+                <label className={styles.field}>Speaker
+                  <input value={speaker.speaker || ""} onChange={(event) => updateSpeaker(index, "speaker", event.target.value)} />
+                </label>
+                <label className={styles.field}>Voice
+                  <input value={speaker.voiceName || ""} onChange={(event) => updateSpeaker(index, "voiceName", event.target.value)} />
+                </label>
+                <label className={styles.field}>Gender
+                  <select value={speaker.suggestedGender || ""} onChange={(event) => updateSpeaker(index, "suggestedGender", event.target.value)}>
+                    <option value="">Any</option>
+                    <option value="female">Female</option>
+                    <option value="male">Male</option>
+                  </select>
+                </label>
+                <label className={styles.field}>Age
+                  <input type="number" min="0" value={speaker.suggestedAge ?? ""} onChange={(event) => updateSpeaker(index, "suggestedAge", event.target.value ? Number(event.target.value) : null)} />
+                </label>
+                <label className={styles.field}>Style
+                  <input value={speaker.style || ""} onChange={(event) => updateSpeaker(index, "style", event.target.value)} />
+                </label>
+                <label className={styles.field}>Emotion
+                  <input value={speaker.emotion || ""} onChange={(event) => updateSpeaker(index, "emotion", event.target.value)} />
+                </label>
+                <label className={styles.field}>Speed
+                  <input value={speaker.speed || ""} onChange={(event) => updateSpeaker(index, "speed", event.target.value)} />
+                </label>
+                <label className={styles.field}>Accent
+                  <input value={speaker.accent || ""} onChange={(event) => updateSpeaker(index, "accent", event.target.value)} />
+                </label>
+                <button className={styles.dangerButton} type="button" onClick={() => removeSpeaker(index)}>
+                  <Trash2 size={14} />
+                  Remove
+                </button>
+              </article>
+            ))}
+            {!speakers.length ? <p className={styles.emptyState}>No voice suggestions yet.</p> : null}
+          </div>
+        </section>
+
+        <section className={styles.wizardPreviewBox}>
+          <div className={styles.audioListHeader}>
+            <h3>Ambience and effects</h3>
+            <button className={styles.secondaryButton} type="button" onClick={addAmbience}>
+              <Plus size={14} />
+              Add sound
+            </button>
+          </div>
+          <div className={styles.audioList}>
+            {ambience.map((item, index) => (
+              <article className={styles.audioRowCompact} key={`${item.name}-${index}`}>
+                <label className={styles.field}>Name
+                  <input value={item.name || ""} onChange={(event) => updateAmbience(index, "name", event.target.value)} />
+                </label>
+                <label className={styles.field}>Volume
+                  <input type="number" step="0.05" min="0" max="1" value={item.volume ?? ""} onChange={(event) => updateAmbience(index, "volume", event.target.value ? Number(event.target.value) : "")} />
+                </label>
+                <label className={styles.field}>Timing
+                  <input value={item.timing || ""} onChange={(event) => updateAmbience(index, "timing", event.target.value)} />
+                </label>
+                <button className={styles.dangerButton} type="button" onClick={() => removeAmbience(index)}>
+                  <Trash2 size={14} />
+                  Remove
+                </button>
+              </article>
+            ))}
+            {!ambience.length ? <p className={styles.emptyState}>No ambience or sound effect rows yet.</p> : null}
+          </div>
+        </section>
+      </div>
     </section>
   );
 }
