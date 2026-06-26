@@ -707,6 +707,15 @@
   margin: 0.25em 0;
 }
 
+.richHeadingTitle p {
+  display: inline;
+  margin: 0;
+}
+
+.richHeadingTitle span {
+  line-height: inherit;
+}
+
 .sectionLabel {
   color: var(--module-accent);
   font-size: 0.82rem;

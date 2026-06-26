@@ -49,7 +49,6 @@ import { hasRichTextMarkup, richTextToPlainText, sanitizeRichTextHtml } from "..
 import { stripQuestionMaterial } from "../utils/examText";
 import {
   DEFAULT_STYLE_OPTIONS,
-  STYLE_BLOCK_TYPES,
   STYLE_PROPERTY_OPTIONS,
   STYLE_SCOPE_OPTIONS,
   describeStyleTemplate,
@@ -1047,6 +1046,7 @@ function AdminExams() {
     await runAction("save-section", async () => {
       const payload = {
         ...sectionDraft,
+        title: cleanTitleValue(sectionDraft.title),
         instructions: cleanRichTextValue(sectionDraft.instructions),
         scoring: parseJsonField(sectionDraft.scoring, "Section scoring") ?? {},
         metadata: parseJsonField(sectionDraft.metadata, "Section metadata") ?? {},
@@ -1886,7 +1886,225 @@ function AdminExams() {
       ) : null}
         </>
       )}
+      {stylePanel ? (
+        <StyleTemplatePanel
+          state={stylePanel}
+          preview={stylePreview}
+          templates={styleTemplates}
+          blocks={styleBlocks}
+          busy={styleBusy}
+          onClose={() => {
+            setStylePanel(null);
+            setStylePreview(null);
+          }}
+          onUpdate={updateStylePanel}
+          onUseTemplate={useStyleTemplate}
+          onPreview={previewStyleApplication}
+          onApply={applyStyleApplication}
+          onSaveTemplate={saveStyleTemplate}
+          onArchiveTemplate={archiveStyleTemplate}
+          onUndo={undoLastStyleApply}
+        />
+      ) : null}
     </>
+  );
+}
+
+function StyleTemplatePanel({
+  state,
+  preview,
+  templates,
+  blocks,
+  busy,
+  onClose,
+  onUpdate,
+  onUseTemplate,
+  onPreview,
+  onApply,
+  onSaveTemplate,
+  onArchiveTemplate,
+  onUndo,
+}) {
+  const compatibleTemplates = templates.filter((template) => template.block_type === state.sourceBlock.blockType);
+  const manualBlocks = blocks.filter((block) =>
+    state.allowCrossType ? block.blockId !== state.sourceBlock.blockId : block.blockType === state.sourceBlock.blockType
+  );
+  const selectedCount = state.manualBlockIds.length;
+  const blockTypeLabel = getStyleBlockTypeLabel(state.sourceBlock.blockType);
+  const scopeLabel = STYLE_SCOPE_OPTIONS.find((item) => item.id === state.scope)?.label ?? state.scope;
+
+  return (
+    <div className={styles.modalOverlay} role="presentation">
+      <section className={styles.styleModal} role="dialog" aria-modal="true" aria-labelledby="style-template-title">
+        <div className={styles.styleModalHeader}>
+          <div>
+            <p className={styles.modalEyebrow}>Reusable style</p>
+            <h2 id="style-template-title">Apply this style</h2>
+            <p>{blockTypeLabel} - {state.sourceLabel}</p>
+          </div>
+          <button className={styles.secondaryButton} type="button" onClick={onClose}>Close</button>
+        </div>
+
+        <div className={styles.styleModalGrid}>
+          <section className={styles.stylePanelSection}>
+            <h3>Source</h3>
+            <div className={styles.styleSummary}>
+              <span>{describeStyleTemplate(state.styleJson)}</span>
+              <small>{state.styleJson?.sourcePreview || "No text preview"}</small>
+            </div>
+            <RichPreview label="Source appearance" value={state.sourceValue} variant="material" />
+          </section>
+
+          <section className={styles.stylePanelSection}>
+            <h3>Template</h3>
+            <label className={styles.field}>Saved templates
+              <select value={state.selectedTemplateId} onChange={(event) => onUseTemplate(event.target.value)}>
+                <option value="">Current block style</option>
+                {compatibleTemplates.map((template) => (
+                  <option key={template.id} value={template.id}>{template.name}</option>
+                ))}
+              </select>
+            </label>
+            <div className={styles.editorGrid}>
+              <label className={styles.field}>Template name
+                <input value={state.templateName} onChange={(event) => onUpdate({ templateName: event.target.value })} />
+              </label>
+              <label className={styles.field}>Description
+                <input value={state.templateDescription} onChange={(event) => onUpdate({ templateDescription: event.target.value })} />
+              </label>
+            </div>
+            <div className={styles.actions}>
+              <button className={styles.secondaryButton} type="button" onClick={onSaveTemplate} disabled={busy === "save-template" || !state.templateName.trim()}>
+                <Plus size={15} />
+                Save as template
+              </button>
+              <button className={styles.dangerGhostButton} type="button" onClick={onArchiveTemplate} disabled={busy === "archive-template" || !state.selectedTemplateId}>
+                <Trash2 size={15} />
+                Archive
+              </button>
+            </div>
+          </section>
+
+          <section className={styles.stylePanelSection}>
+            <h3>Apply to</h3>
+            <div className={styles.styleScopeGrid}>
+              {STYLE_SCOPE_OPTIONS.map((scope) => (
+                <label key={scope.id} className={styles.radioCard}>
+                  <input
+                    type="radio"
+                    name="style-scope"
+                    value={scope.id}
+                    checked={state.scope === scope.id}
+                    onChange={(event) => onUpdate({ scope: event.target.value })}
+                  />
+                  <span>{scope.label}</span>
+                </label>
+              ))}
+            </div>
+            <label className={styles.checkLine}>
+              <input
+                type="checkbox"
+                checked={state.allowCrossType}
+                onChange={(event) => onUpdate({ allowCrossType: event.target.checked, manualBlockIds: [] })}
+              />
+              Manual override across block types
+            </label>
+            {state.scope === "manual" ? (
+              <div className={styles.manualBlockList}>
+                <div className={styles.panelHeader}>
+                  <h3>Selected blocks</h3>
+                  <span>{selectedCount}/{manualBlocks.length}</span>
+                </div>
+                {manualBlocks.slice(0, 160).map((block) => (
+                  <label key={block.blockId} className={styles.manualBlockItem}>
+                    <input
+                      type="checkbox"
+                      checked={state.manualBlockIds.includes(block.blockId)}
+                      onChange={(event) => {
+                        const nextIds = event.target.checked
+                          ? [...state.manualBlockIds, block.blockId]
+                          : state.manualBlockIds.filter((id) => id !== block.blockId);
+                        onUpdate({ manualBlockIds: nextIds });
+                      }}
+                    />
+                    <span>
+                      <strong>{getStyleBlockTypeLabel(block.blockType)}</strong>
+                      {block.label}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            ) : null}
+          </section>
+
+          <section className={styles.stylePanelSection}>
+            <h3>Formatting</h3>
+            <div className={styles.styleOptionsGrid}>
+              {STYLE_PROPERTY_OPTIONS.map((option) => (
+                <label key={option.id} className={styles.checkLine}>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(state.styleOptions[option.id])}
+                    onChange={(event) => onUpdate({
+                      styleOptions: {
+                        ...state.styleOptions,
+                        [option.id]: event.target.checked,
+                      },
+                    })}
+                  />
+                  {option.label}
+                </label>
+              ))}
+            </div>
+          </section>
+        </div>
+
+        <section className={styles.stylePreviewPanel}>
+          <div className={styles.panelHeader}>
+            <div>
+              <h3>Preview</h3>
+              <p className={styles.panelHint}>{scopeLabel}{preview ? ` - ${preview.count} block(s)` : ""}</p>
+            </div>
+            <div className={styles.actions}>
+              <button className={styles.secondaryButton} type="button" onClick={onUndo} disabled={busy === "undo"}>
+                <Undo2 size={15} />
+                Undo last style apply
+              </button>
+              <button className={styles.secondaryButton} type="button" onClick={onPreview} disabled={busy === "preview"}>
+                <Eye size={15} />
+                Preview changes
+              </button>
+              <button className={styles.button} type="button" onClick={onApply} disabled={busy === "apply" || !preview?.count}>
+                <CheckCircle2 size={15} />
+                Confirm apply
+              </button>
+            </div>
+          </div>
+          {preview?.blocks?.length ? (
+            <div className={styles.stylePreviewList}>
+              {preview.blocks.slice(0, 12).map((block) => (
+                <article key={block.blockId} className={styles.stylePreviewItem}>
+                  <strong>{block.label}</strong>
+                  <div className={styles.stylePreviewCompare}>
+                    <div>
+                      <span>Current</span>
+                      <ExamTextPreview value={block.currentValue} variant="material" />
+                    </div>
+                    <div>
+                      <span>After</span>
+                      <ExamTextPreview value={block.nextValue} variant="material" />
+                    </div>
+                  </div>
+                </article>
+              ))}
+              {preview.blocks.length > 12 ? <p className={styles.panelHint}>Showing first 12 affected blocks.</p> : null}
+            </div>
+          ) : (
+            <p className={styles.emptyState}>Preview the selected scope before applying.</p>
+          )}
+        </section>
+      </section>
+    </div>
   );
 }
 
@@ -1947,9 +2165,24 @@ const getExamPreviewWrapperClass = (variant = "material") => {
 
 const getSectionDisplayTitle = (section) => {
   const number = Number(section?.part_number ?? section?.partNumber) || 1;
-  const title = String(section?.title ?? "").replace(/^Teil\s+\d+\s*:?\s*/i, "").trim() || "Anweisungen";
+  const title = getPlainDisplayText(section?.title, "Anweisungen").replace(/^Teil\s+\d+\s*:?\s*/i, "").trim() || "Anweisungen";
   return `Teil ${number} - ${title}`;
 };
+
+function SectionTitlePreview({ section }) {
+  const number = Number(section?.part_number ?? section?.partNumber) || 1;
+  const title = section?.title ?? "";
+  const plainTitle = getPlainDisplayText(title, "Anweisungen").replace(/^Teil\s+\d+\s*:?\s*/i, "").trim() || "Anweisungen";
+  if (!hasRichTextMarkup(title)) {
+    return <h2 translate="no">{`Teil ${number} - ${plainTitle}`}</h2>;
+  }
+  return (
+    <h2 translate="no" className={styles.richTitleHeading}>
+      <span>{`Teil ${number} - `}</span>
+      <span dangerouslySetInnerHTML={{ __html: sanitizeRichTextHtml(title) }} />
+    </h2>
+  );
+}
 
 function WebsiteTextPreview({ value, variant = "material" }) {
   if (variant === "instruction") {
@@ -2062,7 +2295,7 @@ function SectionWebsitePreview({ label = "Instructions preview", examIntro = "",
           <BookOpen size={18} />
           {moduleId === "read" ? "Quelle" : getModuleLabel(moduleId)} Teil {number}
         </div>
-        <h2 translate="no">{getSectionDisplayTitle(section)}</h2>
+        <SectionTitlePreview section={section} />
         {moduleId === "read" && examIntro ? <ExamTextPreview value={examIntro} variant="instruction" /> : null}
         <ExamTextPreview value={displayText} variant="material" />
       </section>
@@ -2070,7 +2303,7 @@ function SectionWebsitePreview({ label = "Instructions preview", examIntro = "",
   );
 }
 
-function RichTextEditor({ label, value, onChange, variant = "material" }) {
+function RichTextEditor({ label, value, onChange, variant = "material", onApplyStyle }) {
   const fieldRef = useRef(null);
   const editorRef = useRef(null);
   const savedRangeRef = useRef(null);
@@ -2258,6 +2491,15 @@ function RichTextEditor({ label, value, onChange, variant = "material" }) {
         <button type="button" title="Underline" onMouseDown={handleToolbarMouseDown} onClick={() => runCommand("underline")}>
           <Underline size={16} />
         </button>
+        <button type="button" title="Align left" onMouseDown={handleToolbarMouseDown} onClick={() => runCommand("justifyLeft")}>
+          <AlignLeft size={16} />
+        </button>
+        <button type="button" title="Align center" onMouseDown={handleToolbarMouseDown} onClick={() => runCommand("justifyCenter")}>
+          <AlignCenter size={16} />
+        </button>
+        <button type="button" title="Align right" onMouseDown={handleToolbarMouseDown} onClick={() => runCommand("justifyRight")}>
+          <AlignRight size={16} />
+        </button>
         <button type="button" title="Bullet list" onMouseDown={handleToolbarMouseDown} onClick={() => runCommand("insertUnorderedList")}>
           <List size={16} />
         </button>
@@ -2313,6 +2555,35 @@ function RichTextEditor({ label, value, onChange, variant = "material" }) {
             onChange={(event) => runCommand("foreColor", event.target.value)}
           />
         </label>
+        <label className={styles.colorTool} title="Highlight color" onMouseDown={markToolbarInteraction}>
+          <Highlighter size={16} />
+          <input
+            type="color"
+            onBlur={() => window.setTimeout(() => { toolbarInteractingRef.current = false; }, 80)}
+            onChange={(event) => runCommand("hiliteColor", event.target.value)}
+          />
+        </label>
+        {onApplyStyle ? (
+          <>
+            <span className={styles.toolbarDivider} />
+            <button
+              type="button"
+              className={styles.styleReuseButton}
+              title="Apply this style"
+              onMouseDown={handleToolbarMouseDown}
+              onClick={() => {
+                rememberSelection();
+                onApplyStyle(currentHtmlRef.current || sanitizeRichTextHtml(value));
+                window.setTimeout(() => {
+                  toolbarInteractingRef.current = false;
+                }, 80);
+              }}
+            >
+              <Copy size={16} />
+              <span>Apply style</span>
+            </button>
+          </>
+        ) : null}
       </div>
       <div
         ref={editorRef}
@@ -2332,13 +2603,14 @@ function RichTextEditor({ label, value, onChange, variant = "material" }) {
   );
 }
 
-function SectionForm({ draft, examIntro = "", sectionQuestions = [], onChange, onSubmit, onCancel, busy }) {
+function SectionForm({ draft, exam, examIntro = "", sectionQuestions = [], onChange, onSubmit, onCancel, busy, onApplyStyle }) {
   const previewSection = {
     sectionType: draft.sectionType,
     part_number: draft.partNumber,
     title: draft.title,
     instructions: draft.instructions,
   };
+  const sectionIds = draft.id && exam?.id ? { examId: exam.id, sectionId: draft.id } : null;
   return (
     <form className={styles.inlineEditor} onSubmit={onSubmit}>
       <div className={styles.panelHeader}>
@@ -2363,9 +2635,6 @@ function SectionForm({ draft, examIntro = "", sectionQuestions = [], onChange, o
         <label className={styles.field}>Part number
           <input type="number" min="1" value={draft.partNumber} onChange={(event) => onChange((prev) => ({ ...prev, partNumber: event.target.value }))} />
         </label>
-        <label className={styles.field}>Title
-          <input value={draft.title} onChange={(event) => onChange((prev) => ({ ...prev, title: event.target.value }))} />
-        </label>
         <label className={styles.field}>Duration minutes
           <input type="number" min="0" value={draft.durationMinutes} onChange={(event) => onChange((prev) => ({ ...prev, durationMinutes: event.target.value }))} />
         </label>
@@ -2377,10 +2646,26 @@ function SectionForm({ draft, examIntro = "", sectionQuestions = [], onChange, o
         </label>
       </div>
       <RichTextEditor
+        label="Section / task title"
+        value={draft.title}
+        variant="instruction"
+        onChange={(value) => onChange((prev) => ({ ...prev, title: value }))}
+        onApplyStyle={sectionIds && onApplyStyle ? (value) => onApplyStyle({
+          sourceBlock: makeStyleSourceBlock("section_title", sectionIds),
+          value,
+          label: `${getExamStyleLabel(exam)} - Teil ${draft.partNumber || draft.position || draft.id} title`,
+        }) : undefined}
+      />
+      <RichTextEditor
         label="Instructions"
         value={draft.instructions}
         variant="material"
         onChange={(value) => onChange((prev) => ({ ...prev, instructions: value }))}
+        onApplyStyle={sectionIds && onApplyStyle ? (value) => onApplyStyle({
+          sourceBlock: makeStyleSourceBlock("section_instructions", sectionIds),
+          value,
+          label: `${getExamStyleLabel(exam)} - Teil ${draft.partNumber || draft.position || draft.id} instructions`,
+        }) : undefined}
       />
       <div className={styles.editorGrid}>
         <JsonTextarea label="Scoring JSON" value={draft.scoring} onChange={(value) => onChange((prev) => ({ ...prev, scoring: value }))} />
@@ -2412,7 +2697,16 @@ function QuestionCard({ question, onEdit, onDelete }) {
   );
 }
 
-function QuestionForm({ draft, sections, onChange, onSubmit, onCancel, busy }) {
+function QuestionForm({ draft, exam, sections, onChange, onSubmit, onCancel, busy, onApplyStyle }) {
+  const questionIds = draft.id && exam?.id ? { examId: exam.id, sectionId: draft.sectionId || null, questionId: draft.id } : null;
+  const selectedSection = sections.find((section) => String(section.id) === String(draft.sectionId));
+  const taskLabel = `${getExamStyleLabel(exam)} - ${selectedSection ? `Teil ${selectedSection.part_number}: ${getSectionPlainTitle(selectedSection)}` : "Unassigned"} - Task ${draft.position || draft.id || "new"}`;
+  let optionPreview = "";
+  try {
+    optionPreview = getQuestionOptionText({ options: JSON.parse(draft.options || "[]") });
+  } catch {
+    optionPreview = "";
+  }
   return (
     <form className={styles.inlineEditor} onSubmit={onSubmit}>
       <div className={styles.panelHeader}>
@@ -2427,7 +2721,7 @@ function QuestionForm({ draft, sections, onChange, onSubmit, onCancel, busy }) {
           <select value={draft.sectionId} onChange={(event) => onChange((prev) => ({ ...prev, sectionId: event.target.value }))}>
             <option value="">Unassigned</option>
             {sections.map((section) => (
-              <option key={section.id} value={section.id}>Teil {section.part_number}: {section.title}</option>
+              <option key={section.id} value={section.id}>Teil {section.part_number}: {getSectionPlainTitle(section)}</option>
             ))}
           </select>
         </label>
@@ -2452,9 +2746,52 @@ function QuestionForm({ draft, sections, onChange, onSubmit, onCancel, busy }) {
         value={draft.prompt}
         variant="instruction"
         onChange={(value) => onChange((prev) => ({ ...prev, prompt: value }))}
+        onApplyStyle={questionIds && onApplyStyle ? (value) => onApplyStyle({
+          sourceBlock: makeStyleSourceBlock("question_prompt", questionIds),
+          value,
+          label: `${taskLabel} prompt`,
+        }) : undefined}
       />
-      <RichTextEditor label="Explanation / examiner note" value={draft.explanation} onChange={(value) => onChange((prev) => ({ ...prev, explanation: value }))} />
-      <RichTextEditor label="Transcript" value={draft.transcript} onChange={(value) => onChange((prev) => ({ ...prev, transcript: value }))} />
+      <RichTextEditor
+        label="Explanation / examiner note"
+        value={draft.explanation}
+        onChange={(value) => onChange((prev) => ({ ...prev, explanation: value }))}
+        onApplyStyle={questionIds && onApplyStyle ? (value) => onApplyStyle({
+          sourceBlock: makeStyleSourceBlock("question_explanation", questionIds),
+          value,
+          label: `${taskLabel} explanation`,
+        }) : undefined}
+      />
+      <RichTextEditor
+        label="Transcript"
+        value={draft.transcript}
+        onChange={(value) => onChange((prev) => ({ ...prev, transcript: value }))}
+        onApplyStyle={questionIds && onApplyStyle ? (value) => onApplyStyle({
+          sourceBlock: makeStyleSourceBlock("question_transcript", questionIds),
+          value,
+          label: `${taskLabel} transcript`,
+        }) : undefined}
+      />
+      {optionPreview && questionIds && onApplyStyle ? (
+        <div className={styles.optionStyleBox}>
+          <div>
+            <span className={styles.previewLabel}><Eye size={15} /> Answer options preview</span>
+            <pre>{optionPreview}</pre>
+          </div>
+          <button
+            className={styles.secondaryButton}
+            type="button"
+            onClick={() => onApplyStyle({
+              sourceBlock: makeStyleSourceBlock("answer_options", questionIds),
+              value: optionPreview,
+              label: `${taskLabel} answer options`,
+            })}
+          >
+            <Copy size={15} />
+            Apply option style
+          </button>
+        </div>
+      ) : null}
       <div className={styles.editorGrid}>
         <JsonTextarea label="Options JSON" value={draft.options} onChange={(value) => onChange((prev) => ({ ...prev, options: value }))} />
         <JsonTextarea label="Correct answer JSON" value={draft.correctAnswer} onChange={(value) => onChange((prev) => ({ ...prev, correctAnswer: value }))} />

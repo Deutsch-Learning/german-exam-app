@@ -1050,6 +1050,16 @@
   cursor: pointer;
 }
 
+.richToolbar .styleReuseButton {
+  width: auto;
+  min-width: 112px;
+  padding: 0 10px;
+  grid-auto-flow: column;
+  gap: 6px;
+  color: #0369a1;
+  font-weight: 900;
+}
+
 .richToolbar button:hover,
 .colorTool:hover,
 .richSelectTool:hover {
@@ -1173,6 +1183,196 @@
   max-height: none;
   overflow: visible;
   box-shadow: none;
+}
+
+.richTitleHeading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25em;
+}
+
+.richTitleHeading p {
+  display: inline;
+  margin: 0;
+}
+
+.optionStyleBox {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 12px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.optionStyleBox pre {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  color: #334155;
+  font: inherit;
+  line-height: 1.55;
+}
+
+.styleModal {
+  width: min(1180px, 100%);
+  max-height: min(92vh, 980px);
+  overflow: auto;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #111827;
+  padding: 20px;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.32);
+  animation: adminModalIn 0.18s ease-out both;
+}
+
+.styleModalHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.styleModalHeader h2,
+.stylePanelSection h3,
+.stylePreviewPanel h3 {
+  margin: 0;
+}
+
+.styleModalHeader p:not(.modalEyebrow) {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-weight: 750;
+}
+
+.styleModalGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.stylePanelSection,
+.stylePreviewPanel {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.styleSummary {
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 11px 12px;
+  display: grid;
+  gap: 4px;
+}
+
+.styleSummary span {
+  color: #0f172a;
+  font-weight: 900;
+}
+
+.styleSummary small {
+  color: #64748b;
+  line-height: 1.45;
+}
+
+.styleScopeGrid,
+.styleOptionsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 8px;
+}
+
+.radioCard,
+.checkLine,
+.manualBlockItem {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 9px 10px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: #334155;
+  font-weight: 800;
+}
+
+.radioCard input,
+.checkLine input,
+.manualBlockItem input {
+  width: 16px;
+  height: 16px;
+  accent-color: #f9c415;
+  margin-top: 2px;
+}
+
+.manualBlockList {
+  max-height: 280px;
+  overflow: auto;
+  display: grid;
+  gap: 7px;
+  padding-right: 4px;
+}
+
+.manualBlockItem span {
+  display: grid;
+  gap: 3px;
+  line-height: 1.35;
+}
+
+.manualBlockItem strong {
+  color: #0369a1;
+  font-size: 0.76rem;
+  text-transform: uppercase;
+}
+
+.stylePreviewPanel {
+  margin-top: 12px;
+}
+
+.stylePreviewList {
+  display: grid;
+  gap: 10px;
+}
+
+.stylePreviewItem {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.stylePreviewCompare {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.stylePreviewCompare > div {
+  min-width: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 10px;
+}
+
+.stylePreviewCompare span {
+  display: block;
+  margin-bottom: 6px;
+  color: #64748b;
+  font-size: 0.76rem;
+  font-weight: 900;
+  text-transform: uppercase;
 }
 
 .websitePreview {
