@@ -47,14 +47,9 @@ import { useTestProtection } from "../utils/testProtection";
 import { useSimulationLanguage } from "../utils/simulationLanguage";
 import SmoothedAudioPlayer from "../components/SmoothedAudioPlayer";
 import {
-  SPEECH_START_DELAY_MS,
-  createListeningUtterances,
   createRecordingBlob,
   getMicrophoneConstraints,
   getPreferredRecorderOptions,
-  gracefulStopSpeech,
-  startListeningAmbience,
-  startSpeechWatchdog,
 } from "../utils/audio";
 import NotFoundPage from "./NotFoundPage";
 import ComingSoonPage from "./ComingSoonPage";
@@ -1225,7 +1220,7 @@ const getProtectedChoiceLabel = (task, option, index = 0) =>
   option;
 
 const AUDIO_REPLAY_LIMIT = 5;
-const SPEECH_WORDS_PER_MINUTE = 132;
+const AUDIO_WORDS_PER_MINUTE = 132;
 
 const normalizeText = (value) =>
   String(value ?? "")
@@ -1268,8 +1263,11 @@ const toGermanStatus = (value) => {
   if (text.includes("Sauvegarde locale impossible")) return "Lokale Speicherung nicht moeglich: Der Browserspeicher ist voll.";
   if (text.includes("Simulation d")) return "Simulation gestartet: Die Navigation ist gesperrt.";
   if (text.includes("Limite de 5")) return "Die Grenze von 5 Hoerdurchgaengen ist fuer dieses Modul erreicht.";
-  if (text.includes("synth")) return "Die Sprachausgabe ist in diesem Browser nicht verfuegbar.";
-  if (text.includes("lecture audio")) return "Die Audiowiedergabe ist auf diesem Geraet fehlgeschlagen. Pruefen Sie die Lautstaerke und erlauben Sie die Sprachausgabe im Browser.";
+  if (text.includes("Production audio has not been generated")) return "Das Produktionsaudio wurde noch nicht generiert. Bitte einen Administrator, die Hoeren-Audio-Datei zu erzeugen.";
+  if (text.includes("Production audio cannot be played")) return "Die Produktionsaudio-Datei kann auf diesem Geraet gerade nicht abgespielt werden.";
+  if (text.includes("Production audio is not available")) return "Das Produktionsaudio ist im Moment nicht verfuegbar.";
+  if (text.includes("synth")) return "Die Produktionsaudio-Datei ist in diesem Browser nicht verfuegbar.";
+  if (text.includes("lecture audio")) return "Die Audiowiedergabe ist auf diesem Geraet fehlgeschlagen. Pruefen Sie die Lautstaerke.";
   if (text.includes("brouillon est vide")) return "Der Entwurf ist leer.";
   if (text.includes("Brouillon")) return `Entwurf gespeichert um ${extractTime(text)}`;
   if (text.includes("Micro non disponible")) return "Mikrofon nicht verfuegbar: Stattdessen wird der Trainingstimer verwendet.";
@@ -1296,7 +1294,7 @@ const getEstimatedAudioDuration = (audio) => {
   const wordCount = countWords(audio?.transcript);
   const punctuationPauses = (String(audio?.transcript ?? "").match(/[.,;:!?]/g) ?? []).length * 0.45;
   const rate = Math.max(0.6, Number(audio?.rate) || 1);
-  const spokenSeconds = (wordCount / (SPEECH_WORDS_PER_MINUTE * rate)) * 60;
+  const spokenSeconds = (wordCount / (AUDIO_WORDS_PER_MINUTE * rate)) * 60;
   return Math.max(18, Math.ceil(spokenSeconds + punctuationPauses + 6));
 };
 
@@ -1993,6 +1991,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const [audioPlaying, setAudioPlaying] = useState(false);
   const [audioSessionActive, setAudioSessionActive] = useState(false);
   const [audioError, setAudioError] = useState("");
+  const [listeningAudioDuration, setListeningAudioDuration] = useState(0);
   const [replaysUsed, setReplaysUsed] = useState(0);
   const [prepRemaining, setPrepRemaining] = useState(speakingTasks[0].prepSeconds);
   const [prepActive, setPrepActive] = useState(false);
@@ -2005,16 +2004,9 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const mediaRecorderRef = useRef(null);
   const mediaStreamRef = useRef(null);
   const audioChunksRef = useRef([]);
+  const listeningAudioRef = useRef(null);
   const audioSessionRef = useRef(false);
-  const audioStartedAtRef = useRef(0);
-  const audioStartOffsetRef = useRef(0);
   const audioTimestampRef = useRef(0);
-  const speechStartTimerRef = useRef(null);
-  const speechStopTimerRef = useRef(null);
-  const speechWatchdogRef = useRef(null);
-  const speechQueueRef = useRef([]);
-  const speechQueueIndexRef = useRef(0);
-  const ambienceControllerRef = useRef(null);
   const recordingIntervalRef = useRef(null);
   const recordingSecondsRef = useRef(0);
   const recordingTaskIndexRef = useRef(0);
@@ -2034,7 +2026,9 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const moduleItemSingular = isTopicModule(module.id) ? "Thema" : "Frage";
   const moduleItemPlural = getModuleCountLabel(module.id);
   const currentTaskDuration = getTaskDuration(module, currentTask);
-  const currentAudioDuration = module.id === "listen" ? getEstimatedAudioDuration(module.audio) : 0;
+  const currentAudioDuration = module.id === "listen"
+    ? Math.round(Number(module.audio?.durationSeconds) || listeningAudioDuration || getEstimatedAudioDuration(module.audio))
+    : 0;
   const answeredCount = module.tasks.filter((task, index) => getTaskAnswered(module, task, answers[index])).length;
   const remainingCount = Math.max(0, totalTasks - answeredCount);
   const completedPartCount = examParts.filter((part) =>
@@ -2255,8 +2249,9 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setCompleted(true);
     setPartIntroVisible(false);
     setAudioPlaying(false);
-    if ("speechSynthesis" in window) {
-      gracefulStopSpeech(80);
+    if (listeningAudioRef.current) {
+      listeningAudioRef.current.pause();
+      listeningAudioRef.current.currentTime = 0;
     }
     void saveResultToBackend(score);
   }, [saveResultToBackend, score]);
@@ -2390,30 +2385,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   }, [audioTimestamp]);
 
   useEffect(() => {
-    if (module.id !== "listen" || !audioPlaying) return undefined;
-
-    const interval = window.setInterval(() => {
-      const elapsed = audioStartOffsetRef.current + (Date.now() - audioStartedAtRef.current) / 1000;
-      const nextValue = Math.min(currentAudioDuration, Math.round(elapsed));
-      audioTimestampRef.current = nextValue;
-      setAudioTimestamp(nextValue);
-
-      if (nextValue >= currentAudioDuration) {
-        setAudioPlaying(false);
-        audioSessionRef.current = false;
-        setAudioSessionActive(false);
-        if ("speechSynthesis" in window) {
-          speechStopTimerRef.current = gracefulStopSpeech();
-        }
-        ambienceControllerRef.current?.stop();
-        ambienceControllerRef.current = null;
-      }
-    }, 250);
-
-    return () => window.clearInterval(interval);
-  }, [audioPlaying, currentAudioDuration, module.id]);
-
-  useEffect(() => {
     if (module.id !== "speak") return;
     setPrepRemaining(currentTask.prepSeconds);
     setSpeakingPhase("prep");
@@ -2423,24 +2394,9 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setRecordError("");
   }, [completed, currentIndex, currentTask.prepSeconds, module.id, simulationMode]);
 
-  useEffect(() => {
-    if (!("speechSynthesis" in window)) return undefined;
-    const warmVoices = () => window.speechSynthesis.getVoices();
-    warmVoices();
-    window.speechSynthesis.addEventListener?.("voiceschanged", warmVoices);
-    return () => window.speechSynthesis.removeEventListener?.("voiceschanged", warmVoices);
-  }, []);
-
   useEffect(
     () => () => {
-      if (speechStartTimerRef.current) window.clearTimeout(speechStartTimerRef.current);
-      if (speechStopTimerRef.current) window.clearTimeout(speechStopTimerRef.current);
-      if (speechWatchdogRef.current) window.clearInterval(speechWatchdogRef.current);
-      ambienceControllerRef.current?.stop();
-      ambienceControllerRef.current = null;
-      if ("speechSynthesis" in window) {
-        window.speechSynthesis.cancel();
-      }
+      listeningAudioRef.current?.pause();
       if (recordingIntervalRef.current) {
         window.clearInterval(recordingIntervalRef.current);
       }
@@ -2480,9 +2436,9 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setWritingCorrectionError("");
     setAudioTimestamp(0);
     audioTimestampRef.current = 0;
-    audioStartOffsetRef.current = 0;
     audioSessionRef.current = false;
     setAudioSessionActive(false);
+    setListeningAudioDuration(0);
     setReplaysUsed(0);
     setAudioPlaying(false);
     setSpeakingPhase("prep");
@@ -2492,8 +2448,9 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     recordingSecondsRef.current = 0;
     setResultStatus("");
     setSaveStatus("Simulation démarrée : navigation verrouillée.");
-    if ("speechSynthesis" in window) {
-      gracefulStopSpeech(80);
+    if (listeningAudioRef.current) {
+      listeningAudioRef.current.pause();
+      listeningAudioRef.current.currentTime = 0;
     }
   }, [examParts, module, totalExamDuration]);
 
@@ -2536,40 +2493,14 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setNavPanelOpen(false);
   }, [currentPart?.id, examParts, isRecording, module, totalTasks]);
 
-  const clearSpeechTimers = useCallback(() => {
-    if (speechStartTimerRef.current) {
-      window.clearTimeout(speechStartTimerRef.current);
-      speechStartTimerRef.current = null;
-    }
-    if (speechStopTimerRef.current) {
-      window.clearTimeout(speechStopTimerRef.current);
-      speechStopTimerRef.current = null;
-    }
-    if (speechWatchdogRef.current) {
-      window.clearInterval(speechWatchdogRef.current);
-      speechWatchdogRef.current = null;
-    }
-  }, []);
-
-  const stopListeningAmbience = useCallback(() => {
-    ambienceControllerRef.current?.stop();
-    ambienceControllerRef.current = null;
-  }, []);
-
-  const stopListeningSpeech = useCallback((soft = true) => {
-    clearSpeechTimers();
-    speechQueueRef.current = [];
-    speechQueueIndexRef.current = 0;
-    if (!("speechSynthesis" in window)) return;
-    if (soft) {
-      speechStopTimerRef.current = gracefulStopSpeech();
+  const playListeningAudio = useCallback(async () => {
+    if (module.id !== "listen") return;
+    if (!module.audio?.audioUrl) {
+      setAudioError("Production audio has not been generated yet. Ask an administrator to generate the Hoeren audio.");
       return;
     }
-    window.speechSynthesis.cancel();
-  }, [clearSpeechTimers]);
-
-  const playListeningAudio = useCallback(() => {
-    if (module.id !== "listen") return;
+    const audioElement = listeningAudioRef.current;
+    if (!audioElement) return;
 
     const replayLimit = AUDIO_REPLAY_LIMIT;
     const startingFresh = audioTimestamp <= 0 || audioTimestamp >= currentAudioDuration || !audioSessionActive;
@@ -2579,98 +2510,71 @@ export default function SimulationModulePage({ moduleIdOverride }) {
         setSaveStatus("Limite de 5 ecoutes atteinte pour ce module.");
         return;
       }
-
       setReplaysUsed((value) => value + 1);
       setAudioTimestamp(0);
       audioTimestampRef.current = 0;
-      audioStartOffsetRef.current = 0;
       audioSessionRef.current = true;
       setAudioSessionActive(true);
-      setAudioError("");
-
-      if ("speechSynthesis" in window) {
-        stopListeningAmbience();
-        stopListeningSpeech(false);
-        const utterances = createListeningUtterances(module.audio);
-        if (!utterances.length) {
-          setAudioPlaying(false);
-          audioSessionRef.current = false;
-          setAudioSessionActive(false);
-          setAudioError("Aucun transkript audio n'a ete trouve pour ce module.");
-          return;
-        }
-        const utterance = utterances[0];
-        ambienceControllerRef.current = startListeningAmbience(module.audio);
-        utterance.onstart = () => {
-          setAudioError("");
-          if (speechWatchdogRef.current) window.clearInterval(speechWatchdogRef.current);
-          speechWatchdogRef.current = startSpeechWatchdog();
-        };
-        utterance.onend = () => {
-          clearSpeechTimers();
-          stopListeningAmbience();
-          setAudioTimestamp(currentAudioDuration);
-          audioTimestampRef.current = currentAudioDuration;
-          setAudioPlaying(false);
-          audioSessionRef.current = false;
-          setAudioSessionActive(false);
-        };
-        utterance.onerror = () => {
-          clearSpeechTimers();
-          stopListeningAmbience();
-          setAudioPlaying(false);
-          audioSessionRef.current = false;
-          setAudioSessionActive(false);
-          setAudioError(
-            "La lecture audio a échoué sur cet appareil. Vérifiez le volume système et autorisez la synthèse vocale dans le navigateur."
-          );
-        };
-        speechStartTimerRef.current = window.setTimeout(() => {
-          speechStartTimerRef.current = null;
-          window.speechSynthesis.speak(utterance);
-        }, SPEECH_START_DELAY_MS);
-      } else {
-        setAudioPlaying(false);
-        audioSessionRef.current = false;
-        setAudioSessionActive(false);
-        setAudioError("La synthèse vocale n'est pas prise en charge sur ce navigateur.");
-        return;
-      }
-    } else if ("speechSynthesis" in window) {
-      clearSpeechTimers();
-      window.speechSynthesis.resume();
-      ambienceControllerRef.current?.resume?.();
-      speechWatchdogRef.current = startSpeechWatchdog();
+      audioElement.currentTime = 0;
     }
 
-    audioStartOffsetRef.current = startingFresh ? 0 : audioTimestampRef.current;
-    audioStartedAtRef.current = Date.now();
-    setAudioPlaying(true);
-  }, [audioSessionActive, audioTimestamp, clearSpeechTimers, currentAudioDuration, module, replaysUsed, stopListeningAmbience, stopListeningSpeech]);
+    try {
+      setAudioError("");
+      await audioElement.play();
+      setAudioPlaying(true);
+    } catch {
+      setAudioPlaying(false);
+      audioSessionRef.current = false;
+      setAudioSessionActive(false);
+      setAudioError("Production audio cannot be played on this device right now.");
+    }
+  }, [audioSessionActive, audioTimestamp, currentAudioDuration, module.audio, module.id, replaysUsed]);
 
   const pauseListeningAudio = useCallback(() => {
     setAudioPlaying(false);
-    audioStartOffsetRef.current = audioTimestampRef.current;
-    if (speechWatchdogRef.current) {
-      window.clearInterval(speechWatchdogRef.current);
-      speechWatchdogRef.current = null;
-    }
-    if ("speechSynthesis" in window) {
-      window.speechSynthesis.pause();
-    }
-    ambienceControllerRef.current?.pause?.();
+    audioTimestampRef.current = listeningAudioRef.current?.currentTime || audioTimestampRef.current;
+    listeningAudioRef.current?.pause();
   }, []);
 
   const resetListeningAudio = useCallback(() => {
+    const audioElement = listeningAudioRef.current;
+    if (audioElement) {
+      audioElement.pause();
+      audioElement.currentTime = 0;
+    }
     setAudioPlaying(false);
     setAudioTimestamp(0);
     audioTimestampRef.current = 0;
-    audioStartOffsetRef.current = 0;
     audioSessionRef.current = false;
     setAudioSessionActive(false);
-    stopListeningSpeech(true);
-    stopListeningAmbience();
-  }, [stopListeningAmbience, stopListeningSpeech]);
+  }, []);
+
+  const handleListeningAudioLoadedMetadata = useCallback((event) => {
+    const duration = Math.round(Number(event.currentTarget.duration) || 0);
+    setListeningAudioDuration(duration);
+  }, []);
+
+  const handleListeningAudioTimeUpdate = useCallback((event) => {
+    const nextValue = Math.round(Number(event.currentTarget.currentTime) || 0);
+    audioTimestampRef.current = nextValue;
+    setAudioTimestamp(nextValue);
+  }, []);
+
+  const handleListeningAudioEnded = useCallback((event) => {
+    const finalDuration = Math.round(Number(event.currentTarget.duration) || currentAudioDuration || 0);
+    setAudioTimestamp(finalDuration);
+    audioTimestampRef.current = finalDuration;
+    setAudioPlaying(false);
+    audioSessionRef.current = false;
+    setAudioSessionActive(false);
+  }, [currentAudioDuration]);
+
+  const handleListeningAudioError = useCallback(() => {
+    setAudioPlaying(false);
+    audioSessionRef.current = false;
+    setAudioSessionActive(false);
+    setAudioError("Production audio is not available yet.");
+  }, []);
 
   const saveWritingVersion = useCallback(() => {
     if (module.id !== "write") return;
@@ -3500,6 +3404,18 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     const audioProgressPercent = currentAudioDuration
       ? Math.min(100, (audioTimestamp / currentAudioDuration) * 100)
       : 0;
+    const productionAudioMissing = !module.audio?.audioUrl;
+    const listeningAudioElement = (
+      <audio
+        ref={listeningAudioRef}
+        src={module.audio?.audioUrl || undefined}
+        preload="metadata"
+        onLoadedMetadata={handleListeningAudioLoadedMetadata}
+        onTimeUpdate={handleListeningAudioTimeUpdate}
+        onEnded={handleListeningAudioEnded}
+        onError={handleListeningAudioError}
+      />
+    );
 
     if (module.id === "listen") {
       return (
@@ -3519,6 +3435,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               </div>
             </div>
 
+            {listeningAudioElement}
             <div className={styles.playerControls}>
               <button
                 type="button"
@@ -3551,6 +3468,11 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               <Lock size={18} />
               Transkript zum Schutz des Tests ausgeblendet.
             </div>
+            {productionAudioMissing ? (
+              <p className={styles.warningText}>
+                <AlertCircle size={16} /> Produktionsaudio wurde noch nicht generiert. Ein Administrator muss die Hoeren-Audio-Datei erzeugen.
+              </p>
+            ) : null}
             {audioError ? (
               <p className={styles.warningText}>
                 <AlertCircle size={16} /> {toGermanStatus(audioError)}
@@ -3594,6 +3516,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             </div>
           </div>
 
+          {listeningAudioElement}
           <div className={styles.playerControls}>
             <button
               type="button"
@@ -3626,6 +3549,11 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             <Lock size={18} />
             Transcript hidden for test protection.
           </div>
+          {productionAudioMissing ? (
+            <p className={styles.warningText}>
+              <AlertCircle size={16} /> Production audio has not been generated yet. Ask an administrator to generate it.
+            </p>
+          ) : null}
           {audioError ? (
             <p className={styles.warningText}>
               <AlertCircle size={16} /> {toGermanStatus(audioError)}
