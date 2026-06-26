@@ -16,8 +16,13 @@ const adminMiddleware = require("./middleware/admin");
 const {
   analyzeExamDocument,
   ensureDocumentImportSchema,
+  getExamImportDraft,
   importParsedExamDocument,
+  publishExamImportDraft,
+  saveExamImportDraft,
   summarizeOutline,
+  updateExamImportDraft,
+  validateImportDraftContent,
 } = require("./services/documentImport");
 const {
   correctWritingSimulation,
@@ -114,7 +119,7 @@ app.use(
     credentials: true,
   })
 );
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "8mb" }));
 
 const documentUpload = multer({
   storage: multer.memoryStorage(),
@@ -2563,9 +2568,11 @@ app.get("/api/admin/exams", requireAdmin, async (req, res) => {
     `);
     const imports = await pool.query(`
       SELECT id, filename, provider, exam_type, level, section_type, total_series,
-             total_sections, total_questions, parse_status, validation_warnings, created_at
+             total_sections, total_questions, parse_status, validation_warnings,
+             confidence, imported_exam_ids, error_message, created_at, updated_at, published_at,
+             CASE WHEN draft_content <> '{}'::jsonb THEN TRUE ELSE FALSE END AS has_draft
       FROM exam_document_imports
-      ORDER BY created_at DESC
+      ORDER BY updated_at DESC, created_at DESC
       LIMIT 25
     `);
     return res.json({
@@ -2724,6 +2731,49 @@ app.post("/api/admin/exams/upload-json", requireAdmin, async (req, res) => {
   }
 });
 
+const toImportWizardPayload = (row, parsed = row?.draft_content, validation = null) => {
+  if (!row) return null;
+  const draft = parsed && typeof parsed === "object" ? parsed : {};
+  const currentValidation = validation || validateImportDraftContent(draft);
+  return {
+    import: {
+      id: row.id,
+      filename: row.filename,
+      provider: row.provider,
+      examType: row.exam_type,
+      level: row.level,
+      sectionType: row.section_type,
+      totalSeries: row.total_series,
+      totalSections: row.total_sections,
+      totalQuestions: row.total_questions,
+      parseStatus: row.parse_status,
+      validationWarnings: row.validation_warnings,
+      confidence: row.confidence,
+      importedExamIds: row.imported_exam_ids,
+      errorMessage: row.error_message,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      publishedAt: row.published_at,
+    },
+    analysis: {
+      documentHash: draft.documentHash || row.document_hash,
+      filename: draft.filename || row.filename,
+      sizeBytes: draft.sizeBytes || row.size_bytes,
+      extraction: draft.extraction || { method: row.extraction_method },
+      metadata: draft.metadata || {
+        provider: row.provider,
+        examType: row.exam_type,
+        level: row.level,
+        sectionType: row.section_type,
+      },
+      confidence: draft.confidence || row.confidence || {},
+      validation: currentValidation,
+      outline: summarizeOutline(draft),
+    },
+    draft,
+  };
+};
+
 app.post("/api/admin/exams/analyze-document", requireAdmin, documentUpload.single("document"), async (req, res) => {
   try {
     if (!req.file?.buffer) {
@@ -2756,6 +2806,116 @@ app.post("/api/admin/exams/analyze-document", requireAdmin, documentUpload.singl
   } catch (err) {
     console.error("Document analysis failed", err);
     return res.status(400).json({ ok: false, error: err.message || "Document analysis failed" });
+  }
+});
+
+app.post("/api/admin/exams/import-wizard/analyze", requireAdmin, documentUpload.single("document"), async (req, res) => {
+  try {
+    if (!req.file?.buffer) {
+      return res.status(400).json({ ok: false, error: "Document file is required" });
+    }
+    const parsed = await analyzeExamDocument({
+      buffer: req.file.buffer,
+      filename: req.file.originalname,
+      mimetype: req.file.mimetype,
+    });
+    const draft = await saveExamImportDraft({
+      pool,
+      parsed,
+      adminId: req.user.id,
+    });
+    await auditAdminAction(req, "exam.import_wizard_analyze", "document", parsed.documentHash, {
+      importId: draft.import?.id,
+      duplicate: draft.duplicate,
+      filename: parsed.filename,
+      provider: parsed.metadata.provider,
+      sectionType: parsed.metadata.sectionType,
+      series: parsed.series.length,
+      questions: draft.validation?.counts?.questionCount ?? parsed.validation.questionCount,
+    });
+    return res.status(draft.duplicate ? 200 : 201).json({
+      ok: true,
+      duplicate: draft.duplicate,
+      ...toImportWizardPayload(draft.import, draft.parsed, draft.validation),
+    });
+  } catch (err) {
+    console.error("Import wizard analysis failed", err);
+    return res.status(400).json({ ok: false, error: err.message || "Import wizard analysis failed" });
+  }
+});
+
+app.get("/api/admin/exams/import-wizard/:id", requireAdmin, async (req, res) => {
+  try {
+    const row = await getExamImportDraft({ pool, importId: Number(req.params.id) });
+    if (!row) return res.status(404).json({ ok: false, error: "Import draft not found" });
+    return res.json({ ok: true, ...toImportWizardPayload(row) });
+  } catch (err) {
+    console.error("Import wizard lookup failed", err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.put("/api/admin/exams/import-wizard/:id", requireAdmin, async (req, res) => {
+  try {
+    const draftContent = req.body?.draft ?? req.body?.draftContent;
+    if (!draftContent || typeof draftContent !== "object") {
+      return res.status(400).json({ ok: false, error: "Draft content is required" });
+    }
+    const updated = await updateExamImportDraft({
+      pool,
+      importId: Number(req.params.id),
+      draftContent,
+    });
+    if (!updated.import) return res.status(404).json({ ok: false, error: "Import draft not found" });
+    await auditAdminAction(req, "exam.import_wizard_update", "document_import", req.params.id, {
+      questions: updated.validation.counts.questionCount,
+      errors: updated.validation.errors.length,
+    });
+    return res.json({ ok: true, ...toImportWizardPayload(updated.import, updated.parsed, updated.validation) });
+  } catch (err) {
+    console.error("Import wizard save failed", err);
+    return res.status(400).json({ ok: false, error: err.message || "Import wizard save failed" });
+  }
+});
+
+app.post("/api/admin/exams/import-wizard/:id/validate", requireAdmin, async (req, res) => {
+  try {
+    const row = await getExamImportDraft({ pool, importId: Number(req.params.id) });
+    if (!row) return res.status(404).json({ ok: false, error: "Import draft not found" });
+    const validation = validateImportDraftContent(row.draft_content);
+    return res.json({ ok: true, validation });
+  } catch (err) {
+    console.error("Import wizard validation failed", err);
+    return res.status(400).json({ ok: false, error: err.message || "Import wizard validation failed" });
+  }
+});
+
+app.post("/api/admin/exams/import-wizard/:id/publish", requireAdmin, async (req, res) => {
+  try {
+    const result = await publishExamImportDraft({
+      pool,
+      importId: Number(req.params.id),
+      adminId: req.user.id,
+    });
+    await auditAdminAction(req, result.duplicate ? "exam.import_wizard_duplicate" : "exam.import_wizard_publish", "document_import", req.params.id, {
+      exams: result.exams.length,
+      provider: result.parsed?.metadata?.provider,
+      sectionType: result.parsed?.metadata?.sectionType,
+      questions: result.validation?.counts?.questionCount,
+    });
+    return res.status(result.duplicate ? 200 : 201).json({
+      ok: true,
+      duplicate: result.duplicate,
+      exams: result.exams,
+      ...toImportWizardPayload(result.import, result.parsed, result.validation),
+    });
+  } catch (err) {
+    console.error("Import wizard publish failed", err);
+    return res.status(400).json({
+      ok: false,
+      error: err.message || "Import wizard publish failed",
+      validation: err.validation || null,
+    });
   }
 });
 

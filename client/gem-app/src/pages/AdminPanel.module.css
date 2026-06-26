@@ -484,6 +484,100 @@
   gap: 14px;
 }
 
+.importWizardPanel {
+  margin: 18px 0;
+}
+
+.wizardSteps {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin: 14px 0;
+}
+
+.wizardSteps span {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #64748b;
+  padding: 9px 10px;
+  text-align: center;
+  font-weight: 850;
+}
+
+.wizardStepActive {
+  border-color: #f9c415 !important;
+  background: #fffbeb !important;
+  color: #111827 !important;
+}
+
+.importDropZone {
+  border: 1px dashed #94a3b8;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 16px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+}
+
+.importDropZoneActive {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+
+.importDropZone input {
+  max-width: 220px;
+}
+
+.importDropZone div {
+  display: grid;
+  gap: 4px;
+}
+
+.importDropZone strong {
+  color: #111827;
+}
+
+.importDropZone span {
+  color: #64748b;
+  font-weight: 750;
+}
+
+.wizardProgress {
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff6ff;
+  padding: 10px 12px;
+  margin-top: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.wizardProgress div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #1e3a8a;
+  font-weight: 850;
+}
+
+.wizardProgress > span {
+  height: 9px;
+  border-radius: 999px;
+  background: #dbeafe;
+  overflow: hidden;
+}
+
+.wizardProgress i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #2563eb;
+  transition: width 0.22s ease;
+}
+
 .importSummary {
   margin-top: 16px;
   display: grid;
@@ -513,6 +607,93 @@
   font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+.confidenceGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.confidenceGrid span {
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 9px 10px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: #334155;
+  font-weight: 800;
+}
+
+.confidenceGrid strong {
+  text-transform: capitalize;
+}
+
+.confidenceGrid em {
+  color: #1d4ed8;
+  font-style: normal;
+  font-weight: 950;
+}
+
+.wizardReview {
+  margin-top: 16px;
+  display: grid;
+  gap: 14px;
+}
+
+.importActionBar {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.wizardReviewGrid,
+.wizardPreviewGrid {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.8fr) minmax(0, 1.2fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.wizardJsonEditor textarea {
+  min-height: 520px;
+  max-height: 70vh;
+  overflow: auto;
+}
+
+.wizardPreviewBox,
+.validationPanel {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.wizardPreviewBox h3 {
+  margin: 0;
+}
+
+.wizardPreviewBox p {
+  margin: 0;
+  color: #334155;
+  line-height: 1.6;
+}
+
+.wizardPreviewBox pre {
+  max-height: 340px;
+  overflow: auto;
+  white-space: pre-wrap;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 10px;
+  color: #111827;
+  font: 0.82rem/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 .warningList {

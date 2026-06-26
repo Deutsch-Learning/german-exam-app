@@ -882,6 +882,11 @@ function AdminExams() {
   const [documentBusy, setDocumentBusy] = useState("");
   const [documentAnalysis, setDocumentAnalysis] = useState(null);
   const [documentError, setDocumentError] = useState("");
+  const [importWizard, setImportWizard] = useState(null);
+  const [importWizardJson, setImportWizardJson] = useState("");
+  const [importWizardView, setImportWizardView] = useState("upload");
+  const [importWizardProgress, setImportWizardProgress] = useState(null);
+  const [importDragActive, setImportDragActive] = useState(false);
   const [status, setStatus] = useState("");
   const [busyAction, setBusyAction] = useState("");
   const [filters, setFilters] = useState({
@@ -1146,6 +1151,141 @@ function AdminExams() {
       await API.post("/api/admin/exams/upload-json", { payload });
       setJsonPayload("");
     }, "JSON exam upload complete.");
+  };
+
+  const setImportWizardPayload = (payload) => {
+    const next = {
+      import: payload.import,
+      analysis: payload.analysis,
+      draft: payload.draft,
+    };
+    setImportWizard(next);
+    setDocumentAnalysis(payload.analysis);
+    setImportWizardJson(formatJson(payload.draft, {}));
+    setImportWizardView("review");
+  };
+
+  const updateImportWizardProgress = (phase, percent) => {
+    setImportWizardProgress({ phase, percent });
+  };
+
+  const analyzeWithImportWizard = async () => {
+    if (!documentFile) return;
+    setDocumentBusy("wizard-analyze");
+    setDocumentError("");
+    setStatus("");
+    updateImportWizardProgress("Uploading document", 12);
+    try {
+      const formData = new FormData();
+      formData.append("document", documentFile);
+      updateImportWizardProgress("Extracting full document", 32);
+      const res = await API.post("/api/admin/exams/import-wizard/analyze", formData, {
+        timeout: 180000,
+      });
+      updateImportWizardProgress("Building review draft", 82);
+      setImportWizardPayload(res.data);
+      setStatus(res.data.duplicate ? "Existing import draft loaded." : "Import draft created. Review it before publishing.");
+      updateImportWizardProgress("Draft ready for review", 100);
+      await reload();
+    } catch (err) {
+      setDocumentError(err.response?.data?.error ?? "Import wizard analysis failed.");
+    } finally {
+      setDocumentBusy("");
+      setTimeout(() => setImportWizardProgress(null), 900);
+    }
+  };
+
+  const saveImportWizardDraft = async () => {
+    if (!importWizard?.import?.id) return;
+    setDocumentBusy("wizard-save");
+    setDocumentError("");
+    try {
+      const draft = JSON.parse(importWizardJson);
+      const res = await API.put(`/api/admin/exams/import-wizard/${importWizard.import.id}`, { draft }, {
+        timeout: 120000,
+      });
+      setImportWizardPayload(res.data);
+      setStatus("Import draft saved.");
+      await reload();
+    } catch (err) {
+      setDocumentError(err.response?.data?.error ?? err.message ?? "Could not save import draft.");
+    } finally {
+      setDocumentBusy("");
+    }
+  };
+
+  const validateImportWizardDraft = async () => {
+    if (!importWizard?.import?.id) return;
+    setDocumentBusy("wizard-validate");
+    setDocumentError("");
+    try {
+      const res = await API.post(`/api/admin/exams/import-wizard/${importWizard.import.id}/validate`);
+      setImportWizard((prev) => prev ? {
+        ...prev,
+        analysis: {
+          ...prev.analysis,
+          validation: res.data.validation,
+        },
+      } : prev);
+      setDocumentAnalysis((prev) => prev ? { ...prev, validation: res.data.validation } : prev);
+      setImportWizardView("validate");
+      setStatus(res.data.validation?.ok ? "Draft validation passed. Ready to publish." : "Draft validation found issues.");
+    } catch (err) {
+      setDocumentError(err.response?.data?.error ?? "Could not validate import draft.");
+    } finally {
+      setDocumentBusy("");
+    }
+  };
+
+  const publishImportWizardDraft = async () => {
+    if (!importWizard?.import?.id) return;
+    setDocumentBusy("wizard-publish");
+    setDocumentError("");
+    updateImportWizardProgress("Publishing draft", 20);
+    try {
+      const res = await API.post(`/api/admin/exams/import-wizard/${importWizard.import.id}/publish`, null, {
+        timeout: 180000,
+      });
+      updateImportWizardProgress("Creating learner-ready content", 78);
+      clearImportedExamCache();
+      setImportWizardPayload(res.data);
+      setImportWizardView("published");
+      setStatus(
+        res.data.duplicate
+          ? "This import was already published."
+          : `${res.data.exams?.length ?? 0} exam series published from the import draft.`
+      );
+      updateImportWizardProgress("Published", 100);
+      await reload();
+    } catch (err) {
+      const validation = err.response?.data?.validation;
+      if (validation && importWizard) {
+        setImportWizard((prev) => prev ? {
+          ...prev,
+          analysis: { ...prev.analysis, validation },
+        } : prev);
+        setImportWizardView("validate");
+      }
+      setDocumentError(err.response?.data?.error ?? "Could not publish import draft.");
+    } finally {
+      setDocumentBusy("");
+      setTimeout(() => setImportWizardProgress(null), 900);
+    }
+  };
+
+  const loadImportDraft = async (importId) => {
+    if (!importId) return;
+    setDocumentBusy(`load-import-${importId}`);
+    setDocumentError("");
+    try {
+      const res = await API.get(`/api/admin/exams/import-wizard/${importId}`);
+      setImportWizardPayload(res.data);
+      setStatus("Import draft loaded.");
+    } catch (err) {
+      setDocumentError(err.response?.data?.error ?? "Could not load import draft.");
+    } finally {
+      setDocumentBusy("");
+    }
   };
 
   const processDocument = async (mode) => {
@@ -1792,74 +1932,33 @@ function AdminExams() {
         {EXAM_BODY_OPTIONS.map((item) => <option key={item} value={item} />)}
       </datalist>
 
-      <section className={styles.panel}>
-        <div className={styles.panelHeader}>
-          <div>
-            <h2>Intelligent document import</h2>
-            <p className={styles.panelHint}>Upload PDF, DOCX, TXT, or image files. The parser detects provider, level, section, series, questions, scoring, and prevents duplicate imports.</p>
-          </div>
-          <span className={styles.badge}>
-            <Upload size={14} />
-            Auto parser
-          </span>
-        </div>
-        <div className={styles.documentImportGrid}>
-          <label className={styles.field}>Exam document
-            <input
-              type="file"
-              accept=".pdf,.docx,.txt,.png,.jpg,.jpeg,.webp,.tif,.tiff,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/*"
-              onChange={(event) => {
-                setDocumentFile(event.target.files?.[0] ?? null);
-                setDocumentAnalysis(null);
-                setDocumentError("");
-              }}
-            />
-          </label>
-          <div className={styles.actions}>
-            <button
-              className={styles.secondaryButton}
-              type="button"
-              disabled={!documentFile || Boolean(documentBusy)}
-              onClick={() => processDocument("analyze")}
-            >
-              {documentBusy === "analyze" ? "Analyzing..." : "Analyze only"}
-            </button>
-            <button
-              className={styles.button}
-              type="button"
-              disabled={!documentFile || Boolean(documentBusy)}
-              onClick={() => processDocument("import")}
-            >
-              {documentBusy === "import" ? "Importing..." : "Analyze & import"}
-            </button>
-          </div>
-        </div>
-        {documentAnalysis ? (
-          <div className={styles.importSummary}>
-            <div className={styles.summaryGrid}>
-              <span><strong>Provider</strong>{documentAnalysis.metadata?.provider ?? "-"}</span>
-              <span><strong>Exam</strong>{documentAnalysis.metadata?.examType ?? "-"}</span>
-              <span><strong>Level</strong>{documentAnalysis.metadata?.level ?? "-"}</span>
-              <span><strong>Section</strong>{documentAnalysis.metadata?.sectionLabel ?? documentAnalysis.metadata?.sectionType ?? "-"}</span>
-              <span><strong>Series</strong>{documentAnalysis.outline?.series?.length ?? 0}</span>
-              <span><strong>Questions</strong>{documentAnalysis.validation?.questionCount ?? 0}</span>
-            </div>
-            {documentAnalysis.validation?.warnings?.length ? (
-              <ul className={styles.warningList}>
-                {documentAnalysis.validation.warnings.map((warning) => <li key={warning}>{warning}</li>)}
-              </ul>
-            ) : null}
-            <div className={styles.outlineList}>
-              {(documentAnalysis.outline?.series ?? []).slice(0, 8).map((series) => (
-                <article key={`${series.seriesNumber}-${series.title}`}>
-                  <strong>{series.sourceLabel}: {series.title}</strong>
-                  <span>{series.sectionCount} sections - {series.questionCount} questions</span>
-                </article>
-              ))}
-            </div>
-          </div>
-        ) : null}
-      </section>
+      <ImportWizardPanel
+        documentFile={documentFile}
+        busy={documentBusy}
+        analysis={documentAnalysis}
+        wizard={importWizard}
+        wizardJson={importWizardJson}
+        wizardView={importWizardView}
+        progress={importWizardProgress}
+        dragActive={importDragActive}
+        imports={imports}
+        onDragActive={setImportDragActive}
+        onFileSelect={(file) => {
+          setDocumentFile(file);
+          setDocumentAnalysis(null);
+          setDocumentError("");
+          setImportWizard(null);
+          setImportWizardJson("");
+          setImportWizardView("upload");
+        }}
+        onAnalyze={analyzeWithImportWizard}
+        onWizardJsonChange={setImportWizardJson}
+        onWizardViewChange={setImportWizardView}
+        onSaveDraft={saveImportWizardDraft}
+        onValidate={validateImportWizardDraft}
+        onPublish={publishImportWizardDraft}
+        onLoadImport={loadImportDraft}
+      />
 
       <div className={styles.intakeGrid}>
         <section className={styles.panel}>
@@ -2248,6 +2347,255 @@ function AdminCmsLoading() {
         </section>
       </div>
     </div>
+  );
+}
+
+function ImportWizardPanel({
+  documentFile,
+  busy,
+  analysis,
+  wizard,
+  wizardJson,
+  wizardView,
+  progress,
+  dragActive,
+  imports,
+  onDragActive,
+  onFileSelect,
+  onAnalyze,
+  onWizardJsonChange,
+  onWizardViewChange,
+  onSaveDraft,
+  onValidate,
+  onPublish,
+  onLoadImport,
+}) {
+  const draft = wizard?.draft || {};
+  const validation = analysis?.validation || {};
+  const counts = validation.counts || {};
+  const confidence = analysis?.confidence || wizard?.import?.confidence || {};
+  const firstSeries = draft.series?.[0];
+  const firstSection = firstSeries?.sections?.[0];
+  const firstQuestion = firstSection?.questions?.[0];
+  const audio = firstSection?.metadata?.audio || firstQuestion?.audio || {};
+  const transcript = firstSection?.metadata?.transcript || firstQuestion?.transcript || "";
+  const isPublished = wizard?.import?.parseStatus === "published";
+  const accept = ".pdf,.docx,.txt,.png,.jpg,.jpeg,.webp,.tif,.tiff,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/*";
+
+  const handleFiles = (files) => {
+    const file = files?.[0];
+    if (file) onFileSelect(file);
+  };
+
+  return (
+    <section className={`${styles.panel} ${styles.importWizardPanel}`}>
+      <div className={styles.panelHeader}>
+        <div>
+          <p className={styles.modalEyebrow}>AI Import Wizard</p>
+          <h2>Import Exam</h2>
+          <p className={styles.panelHint}>Upload a full exam document, review the detected draft, validate it, then publish only when it is ready for learners.</p>
+        </div>
+        <span className={styles.badge}>
+          <Upload size={14} />
+          Draft first
+        </span>
+      </div>
+
+      <div className={styles.wizardSteps}>
+        {["Upload", "Analyze", "Review", "Validate", "Publish"].map((step, index) => {
+          const activeIndex = isPublished ? 4 : wizardView === "validate" ? 3 : wizard ? 2 : documentFile ? 1 : 0;
+          return (
+            <span key={step} className={index <= activeIndex ? styles.wizardStepActive : ""}>
+              {step}
+            </span>
+          );
+        })}
+      </div>
+
+      <div
+        className={`${styles.importDropZone} ${dragActive ? styles.importDropZoneActive : ""}`}
+        onDragEnter={(event) => {
+          event.preventDefault();
+          onDragActive(true);
+        }}
+        onDragOver={(event) => {
+          event.preventDefault();
+          onDragActive(true);
+        }}
+        onDragLeave={(event) => {
+          event.preventDefault();
+          onDragActive(false);
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          onDragActive(false);
+          handleFiles(event.dataTransfer.files);
+        }}
+      >
+        <input
+          type="file"
+          accept={accept}
+          onChange={(event) => handleFiles(event.target.files)}
+        />
+        <div>
+          <strong>{documentFile ? documentFile.name : "Drop a PDF, DOCX, TXT, or image here"}</strong>
+          <span>{documentFile ? `${Math.round(documentFile.size / 1024)} KB selected` : "The wizard reads the full document before creating a review draft."}</span>
+        </div>
+        <button className={styles.button} type="button" disabled={!documentFile || Boolean(busy)} onClick={onAnalyze}>
+          <FileText size={16} />
+          {busy === "wizard-analyze" ? "Analyzing..." : "Analyze and create draft"}
+        </button>
+      </div>
+
+      {progress ? (
+        <div className={styles.wizardProgress} role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={progress.percent}>
+          <div>
+            <strong>{progress.phase}</strong>
+            <span>{progress.percent}%</span>
+          </div>
+          <span><i style={{ width: `${progress.percent}%` }} /></span>
+        </div>
+      ) : null}
+
+      {analysis ? (
+        <div className={styles.importSummary}>
+          <div className={styles.summaryGrid}>
+            <span><strong>Provider</strong>{analysis.metadata?.provider ?? "-"}</span>
+            <span><strong>Exam</strong>{analysis.metadata?.examType ?? "-"}</span>
+            <span><strong>Level</strong>{analysis.metadata?.level ?? "-"}</span>
+            <span><strong>Module</strong>{analysis.metadata?.sectionLabel ?? getModuleLabel(analysis.metadata?.sectionType) ?? "-"}</span>
+            <span><strong>Series</strong>{counts.seriesCount ?? analysis.outline?.series?.length ?? 0}</span>
+            <span><strong>Questions</strong>{counts.questionCount ?? analysis.validation?.questionCount ?? 0}</span>
+          </div>
+          <div className={styles.confidenceGrid}>
+            {Object.entries(confidence).map(([key, value]) => (
+              <span key={key}>
+                <strong>{key}</strong>
+                <em>{value}%</em>
+              </span>
+            ))}
+          </div>
+          {validation.warnings?.length ? (
+            <ul className={styles.warningList}>
+              {validation.warnings.slice(0, 10).map((warning) => <li key={warning}>{warning}</li>)}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
+
+      {wizard ? (
+        <div className={styles.wizardReview}>
+          <div className={styles.importActionBar}>
+            <div className={styles.actions}>
+              <button className={wizardView === "review" ? styles.button : styles.secondaryButton} type="button" onClick={() => onWizardViewChange("review")}>
+                <Edit3 size={15} />
+                Review draft
+              </button>
+              <button className={wizardView === "preview" ? styles.button : styles.secondaryButton} type="button" onClick={() => onWizardViewChange("preview")}>
+                <Eye size={15} />
+                Preview
+              </button>
+              <button className={wizardView === "validate" ? styles.button : styles.secondaryButton} type="button" onClick={onValidate} disabled={busy === "wizard-validate"}>
+                <CheckCircle2 size={15} />
+                Validate
+              </button>
+            </div>
+            <div className={styles.actions}>
+              <button className={styles.secondaryButton} type="button" onClick={onSaveDraft} disabled={busy === "wizard-save" || isPublished}>
+                <FileJson size={15} />
+                Save review edits
+              </button>
+              <button className={styles.button} type="button" onClick={onPublish} disabled={Boolean(busy) || isPublished}>
+                <Upload size={15} />
+                {isPublished ? "Published" : "Publish to learner app"}
+              </button>
+            </div>
+          </div>
+
+          {wizardView === "review" ? (
+            <div className={styles.wizardReviewGrid}>
+              <div className={styles.outlineList}>
+                {(analysis?.outline?.series ?? []).slice(0, 20).map((series) => (
+                  <article key={`${series.seriesNumber}-${series.title}`}>
+                    <strong>{series.sourceLabel}: {series.title}</strong>
+                    <span>{series.sectionCount} sections - {series.questionCount} questions</span>
+                  </article>
+                ))}
+              </div>
+              <label className={`${styles.field} ${styles.wizardJsonEditor}`}>Editable draft JSON
+                <textarea value={wizardJson} onChange={(event) => onWizardJsonChange(event.target.value)} spellCheck="false" />
+              </label>
+            </div>
+          ) : null}
+
+          {wizardView === "preview" ? (
+            <div className={styles.wizardPreviewGrid}>
+              <section className={styles.wizardPreviewBox}>
+                <h3>Learner preview</h3>
+                <strong>{firstSeries?.sourceLabel}: {firstSeries?.title}</strong>
+                <p>{firstSection?.title}</p>
+                <p>{firstSection?.instructions}</p>
+                {firstQuestion ? (
+                  <div>
+                    <b>{firstQuestion.position}. {firstQuestion.prompt}</b>
+                    {firstQuestion.options?.length ? (
+                      <ul>
+                        {firstQuestion.options.map((option) => <li key={option.value}>{option.value}. {option.label}</li>)}
+                      </ul>
+                    ) : null}
+                  </div>
+                ) : null}
+              </section>
+              <section className={styles.wizardPreviewBox}>
+                <h3>Admin preview</h3>
+                <p><strong>Transcript</strong></p>
+                <pre>{transcript || "No transcript detected."}</pre>
+                <p><strong>Voice suggestions</strong></p>
+                <ul>
+                  {(audio.speakers ?? []).map((speaker) => (
+                    <li key={speaker.id || speaker.speaker}>{speaker.speaker} - {speaker.voiceName} - {speaker.suggestedGender || "voice"} {speaker.suggestedAge || ""}</li>
+                  ))}
+                </ul>
+                <p><strong>Ambience</strong> {(audio.ambience ?? []).map((item) => item.name).join(", ") || audio.sfx || "None"}</p>
+              </section>
+            </div>
+          ) : null}
+
+          {wizardView === "validate" || isPublished ? (
+            <div className={styles.validationPanel}>
+              <strong>{validation.ok ? "Validation passed" : "Validation needs review"}</strong>
+              {validation.errors?.length ? (
+                <ul className={styles.warningList}>
+                  {validation.errors.map((item) => <li key={item}>{item}</li>)}
+                </ul>
+              ) : <p>No blocking validation errors.</p>}
+              {validation.warnings?.length ? (
+                <ul className={styles.warningList}>
+                  {validation.warnings.slice(0, 12).map((item) => <li key={item}>{item}</li>)}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {imports.length ? (
+        <div className={styles.importHistory}>
+          {imports.slice(0, 6).map((item) => (
+            <article key={item.id}>
+              <div>
+                <strong>{item.filename}</strong>
+                <span>{item.provider?.toUpperCase() ?? "-"} {item.level ?? ""} - {getModuleLabel(item.section_type)} - {item.total_series} series</span>
+                <small>{item.parse_status} - {formatDate(item.updated_at || item.created_at)}</small>
+              </div>
+              <button className={styles.secondaryButton} type="button" onClick={() => onLoadImport(item.id)} disabled={Boolean(busy)}>
+                Review
+              </button>
+            </article>
+          ))}
+        </div>
+      ) : null}
+    </section>
   );
 }
 

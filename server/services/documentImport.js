@@ -10,6 +10,7 @@ const execFileAsync = promisify(execFile);
 
 const MAX_PROMPT_CHARS = 12000;
 const MAX_EXPLANATION_CHARS = 12000;
+const IMPORT_ANALYZER_VERSION = "documentImport.v2";
 const SECTION_LABELS = {
   read: "Compréhension écrite",
   listen: "Compréhension orale",
@@ -1053,6 +1054,306 @@ const parseEclReadingSeries = (text, metadata) => {
   });
 };
 
+const findEclListeningCorrectionStart = (text) => {
+  const index = String(text ?? "").search(/(?:^|\n)\s*n?\s*CORRECTIONS\s+[-–—]\s+ALLE\s+20\s+SUJETS/i);
+  return index >= 0 ? index : -1;
+};
+
+const parseEclListeningAnswerKeys = (solutionText) => {
+  const blocks = splitByMatches(solutionText, /(?:^|\n)SUJET\s+N[°º]?\s*0?(\d{1,2})\s*[-–—]\s*([^\n]+)/gi);
+  const answerKeys = new Map();
+  blocks.forEach((block) => {
+    const seriesNumber = Number(block.match[1]);
+    const parts = new Map();
+    const partMatches = [...block.text.matchAll(/(?:^|\n)\s*TEIL\s+([12])\s*[-–—]\s*([^\n:]+)\s*:/gi)];
+    partMatches.forEach((match, index) => {
+      const next = partMatches[index + 1];
+      const body = block.text.slice(match.index + match[0].length, next ? next.index : block.text.length);
+      const answers = new Map();
+      compactText(body).split("\n").forEach((line) => {
+        const answerMatch = line.match(/^\s*(\d{1,2})\.\s+(.+?)\s*(?:→|->|=>)\s*(.+?)\s*$/);
+        if (!answerMatch) return;
+        answers.set(Number(answerMatch[1]), compactText(answerMatch[3]));
+      });
+      parts.set(Number(match[1]), answers);
+    });
+    answerKeys.set(seriesNumber, parts);
+  });
+  return answerKeys;
+};
+
+const getEclListeningPartBlocks = (taskText) =>
+  splitByMatches(
+    taskText,
+    /(?:^|\n)SUJET\s+N[°º]?\s*0?(\d{1,2})\s*[-–—]\s*TEIL\s+([12])\s*:\s*([^\n]+)/gi
+  ).filter((block) => {
+    const seriesNumber = Number(block.match[1]);
+    const partNumber = Number(block.match[2]);
+    return seriesNumber >= 1 && seriesNumber <= 99 && [1, 2].includes(partNumber);
+  });
+
+const extractEclListeningHeader = (partText) => ({
+  documentType: compactText(partText.match(/Type\s+de\s+document\s*:\s*([^\n]+)/i)?.[1] || ""),
+  situation: compactText(partText.match(/Situation\s*:\s*([^\n]+)/i)?.[1] || ""),
+});
+
+const extractEclTranscript = (partText) => {
+  const block = getBetweenMarkers(partText, /TRANSKRIPT\s+DES\s+AUDIODOKUMENTS/i, [
+    /(?:^|\n)\s*Beispiel\s*\(0\)/i,
+    /(?:^|\n)\s*AUFGABEN\b/i,
+    /(?:^|\n)\s*n{1,2}\s*FICHE\s+AUDIO/i,
+  ]);
+  return trimForDb(
+    block
+      .replace(/^\s*n?\s*TRANSKRIPT\s+DES\s+AUDIODOKUMENTS\s*/i, "")
+      .trim(),
+    MAX_EXPLANATION_CHARS
+  );
+};
+
+const extractEclTaskArea = (partText) =>
+  getBetweenMarkers(partText, /(?:^|\n)\s*AUFGABEN\b/i, [
+    /(?:^|\n)\s*n{1,2}\s*FICHE\s+AUDIO/i,
+    /(?:^|\n)SUJET\s+N[°º]?\s*0?\d{1,2}\s*[-–—]\s*TEIL\s+[12]\s*:/i,
+  ])
+    .replace(/^\s*AUFGABEN\s*/i, "")
+    .trim();
+
+const normalizeChoiceValue = (value) => String(value ?? "").trim().slice(0, 1).toUpperCase();
+
+const extractEclListeningQcmQuestions = ({ taskArea, answers, transcript, audio, seriesNumber, partNumber }) => {
+  const questions = [];
+  const blocks = splitByMatches(compactText(taskArea), /(?:^|\n)\s*(\d{1,2})\.\s+/g);
+  for (const block of blocks) {
+    const sourceNumber = Number(block.match[1]);
+    const raw = block.text.slice(block.match[0].length).trim();
+    const optionStart = raw.search(/(?:^|\n)\s*A\//i);
+    if (optionStart < 0) continue;
+    const prompt = compactText(raw.slice(0, optionStart));
+    const optionsText = raw.slice(optionStart);
+    const options = [...optionsText.matchAll(/(?:^|\n)\s*([ABC])\/\s*([\s\S]*?)(?=\n\s*[ABC]\/|$)/gi)]
+      .map((optionMatch) => ({
+        value: optionMatch[1].toUpperCase(),
+        label: compactText(optionMatch[2]),
+      }))
+      .filter((option) => option.label);
+    const correct = normalizeChoiceValue(answers.get(sourceNumber));
+    questions.push({
+      questionType: "multiple_choice",
+      prompt: trimForDb(prompt || raw),
+      options,
+      correctAnswer: correct ? { value: correct } : {},
+      explanation: null,
+      position: sourceNumber,
+      transcript,
+      audio,
+      scoring: { points: 1.25 },
+      metadata: {
+        sourceQuestionNumber: sourceNumber,
+        eclPart: partNumber,
+        seriesNumber,
+        listeningQuestionKind: "qcm",
+      },
+      sectionType: "listen",
+    });
+  }
+  return questions;
+};
+
+const extractEclListeningShortAnswerQuestions = ({ taskArea, answers, transcript, audio, seriesNumber, partNumber }) => {
+  const questions = [];
+  const body = compactText(taskArea);
+  const blocks = splitByMatches(body, /(?:^|\n)\s*(\d{1,2})\.\s+/g);
+  for (const block of blocks) {
+    const sourceNumber = Number(block.match[1]);
+    const raw = block.text.slice(block.match[0].length).trim();
+    const prompt = compactText(raw.replace(/\n?\s*Antwort\s*:\s*_+\s*/gi, "\n").replace(/_+/g, " "));
+    const answer = compactText(answers.get(sourceNumber) || "");
+    questions.push({
+      questionType: "short_answer",
+      prompt: trimForDb(prompt || raw),
+      options: [],
+      correctAnswer: answer ? { value: answer, acceptedAnswers: [answer] } : {},
+      explanation: answer || null,
+      position: 10 + sourceNumber,
+      transcript,
+      audio,
+      scoring: { points: 1.25 },
+      metadata: {
+        sourceQuestionNumber: sourceNumber,
+        eclPart: partNumber,
+        seriesNumber,
+        listeningQuestionKind: "short_answer",
+      },
+      sectionType: "listen",
+    });
+  }
+  return questions;
+};
+
+const inferListeningScene = ({ documentType = "", situation = "", sfx = "" }) => {
+  const text = foldForSearch(`${documentType} ${situation} ${sfx}`);
+  if (/u-bahn|metro|train|bahnhof|reise|zug/.test(text)) return "Public transport";
+  if (/telefon|phone/.test(text)) return "Telephone call";
+  if (/radio|magazin|interview|jingle/.test(text)) return "Radio studio";
+  if (/arzt|gesund/.test(text)) return "Doctor or health setting";
+  if (/restaurant|cafe|kaffee/.test(text)) return "Restaurant or cafe";
+  if (/schule|universitat|bildung/.test(text)) return "School or university";
+  if (/shop|einkauf|mode|kleidung/.test(text)) return "Shop";
+  return "Listening scene";
+};
+
+const parseEclVoiceLine = (line) => {
+  const match = String(line ?? "").match(/^Voix\s*:\s*([^|]+)\|\s*([^~,\n]+)\s*~?\s*(\d+)?\s*,?\s*([^(]*)(?:\(([^)]+)\))?/i);
+  if (!match) return null;
+  const genderRaw = compactText(match[2]).toLowerCase();
+  const gender = /weib|female|frau/.test(genderRaw) ? "female" : /männ|mann|male/.test(genderRaw) ? "male" : "";
+  const age = match[3] ? Number(match[3]) : null;
+  const role = compactText(match[5] || match[1]);
+  const style = compactText(match[4] || "");
+  return {
+    voiceName: compactText(match[1]),
+    speaker: role,
+    suggestedGender: gender,
+    suggestedAge: age,
+    style,
+    emotion: style,
+    speed: null,
+    accent: "Standard German",
+  };
+};
+
+const extractEclAudioMetadata = ({ partText, transcript, header }) => {
+  const fiche = getBetweenMarkers(partText, /FICHE\s+AUDIO\s+ELEVENLABS/i, [
+    /(?:^|\n)SUJET\s+N[°º]?\s*0?\d{1,2}\s*[-–—]\s*TEIL\s+[12]\s*:/i,
+  ]);
+  const lines = fiche.split("\n").map((line) => line.trim()).filter(Boolean);
+  const voices = lines.map(parseEclVoiceLine).filter(Boolean);
+  const voiceTable = new Map();
+  lines.forEach((line) => {
+    const match = line.match(/^([A-Za-zÀ-ÿ][\wÀ-ÿ-]*)\s+([0-9.]+x)\s+(\d+%)\s+(\d+%)\s+(\d+%)/);
+    if (!match) return;
+    voiceTable.set(match[1].toLowerCase(), {
+      speed: match[2],
+      stability: match[3],
+      similarity: match[4],
+      styleStrength: match[5],
+    });
+  });
+  const speakerNames = [...new Set([...transcript.matchAll(/(?:^|\n)\s*([^:\n]{2,40})\s*:/g)].map((match) => compactText(match[1])))];
+  const speakers = voices.length
+    ? voices.map((voice, index) => ({
+        id: `speaker-${index + 1}`,
+        ...voice,
+        ...(voiceTable.get(String(voice.voiceName).toLowerCase()) || {}),
+      }))
+    : speakerNames.map((name, index) => ({
+        id: `speaker-${index + 1}`,
+        speaker: name,
+        voiceName: index % 2 === 0 ? "Thomas" : "Klara",
+        suggestedGender: "",
+        suggestedAge: null,
+        style: "natural",
+        emotion: "neutral",
+        speed: "1.0x",
+        accent: "Standard German",
+      }));
+  const prompt = compactText(fiche.match(/Prompt\s*\([^)]*\)\s*:\s*([^\n]+)/i)?.[1] || "");
+  const sfx = compactText(fiche.match(/SFX\s*:\s*([^\n]+)/i)?.[1] || "");
+  const timing = compactText(fiche.match(/TIMING\s+SFX\s*:\s*([^\n]+)/i)?.[1] || "");
+  const speakerTurns = [...transcript.matchAll(/(?:^|\n)\s*([^:\n]{2,40})\s*:/g)].length;
+  return {
+    provider: "elevenlabs",
+    documentType: header.documentType,
+    listeningType: header.documentType,
+    situation: header.situation,
+    scene: inferListeningScene({ documentType: header.documentType, situation: header.situation, sfx }),
+    ambience: sfx ? [{ name: sfx, volume: 0.35, timing }] : [],
+    sfx,
+    timing,
+    prompt,
+    speakers,
+    speakerCount: speakers.length || speakerNames.length,
+    speakerNames,
+    conversation: {
+      speakerTurns,
+      questionMarks: (transcript.match(/\?/g) || []).length,
+      hasInterruptions: /!|\.{3}|–/.test(transcript),
+      pace: /radio|vortrag|magazin/i.test(header.documentType) ? "structured" : "natural",
+      emotionalChanges: speakers.map((speaker) => speaker.emotion).filter(Boolean),
+    },
+  };
+};
+
+const parseEclListeningSeries = (text, metadata) => {
+  const clean = stripPdfPageMarkers(text);
+  const correctionStart = findEclListeningCorrectionStart(clean);
+  const taskText = correctionStart >= 0 ? clean.slice(0, correctionStart) : clean;
+  const solutionText = correctionStart >= 0 ? clean.slice(correctionStart) : "";
+  const answerKeys = parseEclListeningAnswerKeys(solutionText);
+  const partBlocks = getEclListeningPartBlocks(taskText);
+  const seriesMap = new Map();
+
+  partBlocks.forEach((block) => {
+    const seriesNumber = Number(block.match[1]);
+    const partNumber = Number(block.match[2]);
+    const title = compactText(block.match[3]) || `Sujet ${String(seriesNumber).padStart(2, "0")}`;
+    const header = extractEclListeningHeader(block.text);
+    const transcript = extractEclTranscript(block.text);
+    const audio = extractEclAudioMetadata({ partText: block.text, transcript, header });
+    const taskArea = extractEclTaskArea(block.text);
+    const answers = answerKeys.get(seriesNumber)?.get(partNumber) || new Map();
+    const questions = partNumber === 1
+      ? extractEclListeningQcmQuestions({ taskArea, answers, transcript, audio, seriesNumber, partNumber })
+      : extractEclListeningShortAnswerQuestions({ taskArea, answers, transcript, audio, seriesNumber, partNumber });
+    const section = {
+      sectionType: "listen",
+      partNumber,
+      title: `Teil ${partNumber}: ${title}`,
+      instructions: trimForDb([
+        header.documentType ? `Type de document : ${header.documentType}` : "",
+        header.situation ? `Situation : ${header.situation}` : "",
+        partNumber === 1
+          ? "Sie hören das Gespräch zweimal. Kreuzen Sie die richtige Antwort (A, B oder C) an."
+          : "Sie hören den Text zweimal. Beantworten Sie die Fragen in kurzen Stichwörtern.",
+      ].filter(Boolean).join("\n"), 4000),
+      durationMinutes: 15,
+      points: 12.5,
+      scoring: { points: 12.5, totalPoints: 25, listeningPasses: 2, readingTimeSeconds: 90 },
+      metadata: {
+        sourceHeader: title,
+        eclFormat: true,
+        documentType: header.documentType,
+        situation: header.situation,
+        transcript,
+        audio,
+        answerKeyDetected: answers.size > 0,
+      },
+      questions,
+    };
+
+    const existing = seriesMap.get(seriesNumber) || {
+      seriesNumber,
+      title,
+      sourceLabel: `Sujet ${String(seriesNumber).padStart(2, "0")}`,
+      instructions: "ECL B1 Hörverstehen: zwei Hörteile, 20 Aufgaben, 25 Punkte.",
+      scoring: { totalPoints: 25, parts: { 1: 12.5, 2: 12.5 } },
+      metadata: { ...metadata, eclFormat: true, answerKeyDetected: answerKeys.has(seriesNumber), listening: true },
+      sections: [],
+    };
+    existing.sections.push(section);
+    if (!existing.title || existing.title === existing.sourceLabel) existing.title = title;
+    seriesMap.set(seriesNumber, existing);
+  });
+
+  return Array.from(seriesMap.values())
+    .map((series) => ({
+      ...series,
+      sections: series.sections.sort((a, b) => a.partNumber - b.partNumber),
+    }))
+    .sort((a, b) => a.seriesNumber - b.seriesNumber);
+};
+
 const parseEclWritingSolutionBody = (body) => {
   const clean = compactText(body);
   const criteriaIndex = clean.search(/(?:^|\n)\s*3\s+/);
@@ -1665,6 +1966,10 @@ const parseStructuredContent = (text, metadata) => {
     const series = parseEclWritingSeries(text, metadata);
     if (series.length) return series;
   }
+  if ((provider === "ecl" || hasEclSujets) && metadata.sectionType === "listen") {
+    const series = parseEclListeningSeries(text, metadata);
+    if (series.length) return series;
+  }
   if ((provider === "ecl" || hasEclCombinations) && metadata.sectionType === "speak") {
     const series = parseEclSpeakingSeries(text, metadata);
     if (series.length) return series;
@@ -1784,6 +2089,101 @@ const validateParsedDocument = (parsed) => {
   };
 };
 
+const getParsedCounts = (parsed) => ({
+  seriesCount: (Array.isArray(parsed?.series) ? parsed.series : []).length,
+  sectionCount: (Array.isArray(parsed?.series) ? parsed.series : []).reduce((sum, series) => sum + (series.sections || []).length, 0),
+  questionCount: (Array.isArray(parsed?.series) ? parsed.series : []).reduce(
+    (sum, series) => sum + (series.sections || []).reduce((sectionSum, section) => sectionSum + (section.questions || []).length, 0),
+    0
+  ),
+  transcriptCount: (Array.isArray(parsed?.series) ? parsed.series : []).reduce(
+    (sum, series) =>
+      sum + (series.sections || []).reduce(
+        (sectionSum, section) =>
+          sectionSum + ((section.metadata?.transcript || (section.questions || []).some((question) => question.transcript)) ? 1 : 0),
+        0
+      ),
+    0
+  ),
+});
+
+const buildImportConfidence = (parsed) => {
+  const counts = getParsedCounts(parsed);
+  const provider = parsed.metadata.provider && parsed.metadata.provider !== "custom" ? 0.95 : 0.35;
+  const level = parsed.metadata.level ? 0.95 : 0.35;
+  const series = counts.seriesCount > 1 ? 0.94 : counts.seriesCount === 1 ? 0.55 : 0.1;
+  const sections = counts.sectionCount >= counts.seriesCount ? 0.9 : 0.45;
+  const questions = counts.questionCount >= counts.seriesCount * 5 ? 0.92 : counts.questionCount > 0 ? 0.55 : 0.1;
+  const transcripts = parsed.metadata.sectionType === "listen"
+    ? counts.transcriptCount >= counts.seriesCount ? 0.9 : counts.transcriptCount > 0 ? 0.55 : 0.1
+    : 1;
+  const answersDetected = parsed.series.reduce(
+    (sum, series) =>
+      sum + series.sections.reduce(
+        (sectionSum, section) =>
+          sectionSum + section.questions.filter((question) => Object.keys(question.correctAnswer || {}).length > 0).length,
+        0
+      ),
+    0
+  );
+  const answers = counts.questionCount ? Math.min(0.95, Math.max(0.2, answersDetected / counts.questionCount)) : 0.1;
+  const values = { provider, level, series, sections, questions, transcripts, answers };
+  const overall = Object.values(values).reduce((sum, value) => sum + value, 0) / Object.values(values).length;
+  return {
+    overall: Math.round(overall * 100),
+    provider: Math.round(provider * 100),
+    level: Math.round(level * 100),
+    series: Math.round(series * 100),
+    sections: Math.round(sections * 100),
+    questions: Math.round(questions * 100),
+    transcripts: Math.round(transcripts * 100),
+    answers: Math.round(answers * 100),
+  };
+};
+
+const validateImportDraftContent = (parsed) => {
+  const warnings = [...(parsed.validation?.warnings || [])];
+  const errors = [];
+  const seenCodes = new Set();
+  const seenPrompts = new Set();
+
+  if (!parsed.series?.length) errors.push("No series were detected.");
+  parsed.series?.forEach((series) => {
+    const seriesKey = Number(series.seriesNumber);
+    if (seenCodes.has(seriesKey)) errors.push(`Series ${series.seriesNumber} is duplicated.`);
+    seenCodes.add(seriesKey);
+    if (!series.sections?.length) errors.push(`${series.sourceLabel || `Series ${series.seriesNumber}`} has no sections.`);
+    series.sections?.forEach((section) => {
+      if (!section.questions?.length) errors.push(`${series.sourceLabel || "Series"} ${section.title || "section"} has no questions.`);
+      if (section.sectionType === "listen") {
+        const hasTranscript = Boolean(section.metadata?.transcript) || section.questions.some((question) => question.transcript);
+        if (!hasTranscript) errors.push(`${series.sourceLabel || "Series"} ${section.title || "listening section"} has no transcript.`);
+      }
+      section.questions?.forEach((question) => {
+        const promptKey = compactText(question.prompt).toLowerCase();
+        if (!promptKey) errors.push(`${series.sourceLabel || "Series"} ${section.title || "section"} has an empty question prompt.`);
+        if (promptKey && seenPrompts.has(`${series.seriesNumber}:${promptKey}`)) {
+          warnings.push(`${series.sourceLabel || "Series"} has a duplicated question prompt.`);
+        }
+        seenPrompts.add(`${series.seriesNumber}:${promptKey}`);
+        if (["multiple_choice", "true_false", "yes_no", "matching"].includes(question.questionType) && !question.options?.length) {
+          errors.push(`${series.sourceLabel || "Series"} question ${question.position} has no answer options.`);
+        }
+        if (!Object.keys(question.correctAnswer || {}).length) {
+          warnings.push(`${series.sourceLabel || "Series"} question ${question.position} has no detected correct answer.`);
+        }
+      });
+    });
+  });
+
+  return {
+    ok: errors.length === 0,
+    errors,
+    warnings: [...new Set(warnings)],
+    counts: getParsedCounts(parsed),
+  };
+};
+
 const analyzeExamDocument = async ({ buffer, filename, mimetype }) => {
   if (!buffer?.length) throw new Error("Document buffer is empty");
   const { text, extraction } = await extractDocumentText({ buffer, filename, mimetype });
@@ -1823,6 +2223,8 @@ const analyzeExamDocument = async ({ buffer, filename, mimetype }) => {
   return {
     ...parsed,
     validation,
+    confidence: buildImportConfidence({ ...parsed, validation }),
+    analyzerVersion: IMPORT_ANALYZER_VERSION,
   };
 };
 
@@ -1845,16 +2247,48 @@ const ensureDocumentImportSchema = async (pool) => {
       parse_status TEXT NOT NULL DEFAULT 'imported',
       validation_warnings JSONB NOT NULL DEFAULT '[]'::jsonb,
       raw_outline JSONB NOT NULL DEFAULT '{}'::jsonb,
+      draft_content JSONB NOT NULL DEFAULT '{}'::jsonb,
+      confidence JSONB NOT NULL DEFAULT '{}'::jsonb,
       imported_exam_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+      error_message TEXT,
       created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      published_at TIMESTAMPTZ
     );
   `);
+  await pool.query(`ALTER TABLE exam_document_imports ADD COLUMN IF NOT EXISTS draft_content JSONB NOT NULL DEFAULT '{}'::jsonb;`);
+  await pool.query(`ALTER TABLE exam_document_imports ADD COLUMN IF NOT EXISTS confidence JSONB NOT NULL DEFAULT '{}'::jsonb;`);
+  await pool.query(`ALTER TABLE exam_document_imports ADD COLUMN IF NOT EXISTS error_message TEXT;`);
+  await pool.query(`ALTER TABLE exam_document_imports ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();`);
+  await pool.query(`ALTER TABLE exam_document_imports ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ;`);
   await pool.query(`
     CREATE INDEX IF NOT EXISTS exam_document_imports_created_idx
       ON exam_document_imports(created_at DESC);
   `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS exam_document_imports_status_idx
+      ON exam_document_imports(parse_status, updated_at DESC);
+  `);
   await pool.query(`ALTER TABLE exam_document_imports ENABLE ROW LEVEL SECURITY;`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS exam_import_preferences (
+      id SERIAL PRIMARY KEY,
+      provider TEXT,
+      section_type TEXT,
+      preference_type TEXT NOT NULL,
+      source_key TEXT,
+      value JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS exam_import_preferences_lookup_idx
+      ON exam_import_preferences(provider, section_type, preference_type, updated_at DESC);
+  `);
+  await pool.query(`ALTER TABLE exam_import_preferences ENABLE ROW LEVEL SECURITY;`);
   await pool.query(`ALTER TABLE exams ADD COLUMN IF NOT EXISTS provider TEXT;`);
   await pool.query(`ALTER TABLE exams ADD COLUMN IF NOT EXISTS section_type TEXT;`);
   await pool.query(`ALTER TABLE exams ADD COLUMN IF NOT EXISTS series_number INTEGER;`);
@@ -1894,74 +2328,29 @@ const ensureDocumentImportSchema = async (pool) => {
   await pool.query(`ALTER TABLE exam_questions ADD COLUMN IF NOT EXISTS source_metadata JSONB NOT NULL DEFAULT '{}'::jsonb;`);
 };
 
-const summarizeOutline = (parsed) => ({
-  title: parsed.metadata.title,
-  rawTextPreview: parsed.rawTextPreview,
-  series: parsed.series.map((series) => ({
+const summarizeOutline = (parsed = {}) => ({
+  title: parsed.metadata?.title || parsed.filename || "Imported document",
+  rawTextPreview: parsed.rawTextPreview || "",
+  series: (Array.isArray(parsed.series) ? parsed.series : []).map((series) => ({
     seriesNumber: series.seriesNumber,
     title: series.title,
     sourceLabel: series.sourceLabel,
-    sectionCount: series.sections.length,
-    questionCount: series.sections.reduce((sum, section) => sum + section.questions.length, 0),
-    sections: series.sections.map((section) => ({
+    sectionCount: (series.sections || []).length,
+    questionCount: (series.sections || []).reduce((sum, section) => sum + (section.questions || []).length, 0),
+    sections: (series.sections || []).map((section) => ({
       partNumber: section.partNumber,
       title: section.title,
       sectionType: section.sectionType,
-      questionCount: section.questions.length,
+      questionCount: (section.questions || []).length,
       durationMinutes: section.durationMinutes,
       points: section.points,
     })),
   })),
 });
 
-const importParsedExamDocument = async ({ pool, parsed, adminId = null }) => {
-  await ensureDocumentImportSchema(pool);
-  const existing = await pool.query(
-    `SELECT * FROM exam_document_imports WHERE document_hash = $1 LIMIT 1`,
-    [parsed.documentHash]
-  );
-  if (existing.rows[0]) {
-    return {
-      duplicate: true,
-      import: existing.rows[0],
-      exams: [],
-      parsed,
-    };
-  }
-
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    const insertedImport = await client.query(
-      `INSERT INTO exam_document_imports (
-         document_hash, filename, mime_type, size_bytes, provider, exam_type, level, section_type,
-         total_series, total_sections, total_questions, extraction_method, validation_warnings,
-         raw_outline, created_by
-       )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14::jsonb, $15)
-       RETURNING *`,
-      [
-        parsed.documentHash,
-        parsed.filename,
-        parsed.mimetype || null,
-        parsed.sizeBytes,
-        parsed.metadata.provider,
-        parsed.metadata.examType,
-        parsed.metadata.level,
-        parsed.metadata.sectionType,
-        parsed.series.length,
-        parsed.validation.sectionCount,
-        parsed.validation.questionCount,
-        parsed.extraction.method,
-        JSON.stringify(parsed.validation.warnings),
-        JSON.stringify(summarizeOutline(parsed)),
-        adminId,
-      ]
-    );
-    const importRow = insertedImport.rows[0];
-    const importedExams = [];
-
-    for (const series of parsed.series) {
+const insertParsedExamsForImport = async ({ client, parsed, importRow, adminId = null, isActive = true }) => {
+  const importedExams = [];
+  for (const series of parsed.series) {
       const codeParts = [
         parsed.metadata.provider,
         parsed.metadata.level || "level",
@@ -1994,7 +2383,7 @@ const importParsedExamDocument = async ({ pool, parsed, adminId = null }) => {
             instructions: series.instructions,
             scoring: series.scoring,
             documentHash: parsed.documentHash,
-            parser: "documentImport.v1",
+            parser: parsed.analyzerVersion || IMPORT_ANALYZER_VERSION,
           }),
         ]
       );
@@ -2054,36 +2443,242 @@ const importParsedExamDocument = async ({ pool, parsed, adminId = null }) => {
         }
       }
     }
+  return importedExams;
+};
 
-    await client.query(
+const saveExamImportDraft = async ({ pool, parsed, adminId = null }) => {
+  await ensureDocumentImportSchema(pool);
+  const validation = validateImportDraftContent(parsed);
+  const outline = summarizeOutline(parsed);
+  const confidence = parsed.confidence || buildImportConfidence(parsed);
+  const existing = await pool.query(`SELECT * FROM exam_document_imports WHERE document_hash = $1 LIMIT 1`, [parsed.documentHash]);
+  const existingRow = existing.rows[0];
+  if (existingRow && Array.isArray(existingRow.imported_exam_ids) && existingRow.imported_exam_ids.length) {
+    return {
+      duplicate: true,
+      import: existingRow,
+      parsed: existingRow.draft_content && Object.keys(existingRow.draft_content).length ? existingRow.draft_content : parsed,
+      validation,
+    };
+  }
+
+  const params = [
+    parsed.documentHash,
+    parsed.filename,
+    parsed.mimetype || null,
+    parsed.sizeBytes,
+    parsed.metadata.provider,
+    parsed.metadata.examType,
+    parsed.metadata.level,
+    parsed.metadata.sectionType,
+    parsed.series.length,
+    validation.counts.sectionCount,
+    validation.counts.questionCount,
+    parsed.extraction?.method || null,
+    JSON.stringify(validation.warnings),
+    JSON.stringify(outline),
+    JSON.stringify(parsed),
+    JSON.stringify(confidence),
+    adminId,
+  ];
+
+  const result = existingRow
+    ? await pool.query(
+        `UPDATE exam_document_imports
+         SET filename = $2,
+             mime_type = $3,
+             size_bytes = $4,
+             provider = $5,
+             exam_type = $6,
+             level = $7,
+             section_type = $8,
+             total_series = $9,
+             total_sections = $10,
+             total_questions = $11,
+             extraction_method = $12,
+             parse_status = 'draft',
+             validation_warnings = $13::jsonb,
+             raw_outline = $14::jsonb,
+             draft_content = $15::jsonb,
+             confidence = $16::jsonb,
+             error_message = NULL,
+             updated_at = NOW()
+         WHERE document_hash = $1
+         RETURNING *`,
+        params.slice(0, 16)
+      )
+    : await pool.query(
+        `INSERT INTO exam_document_imports (
+           document_hash, filename, mime_type, size_bytes, provider, exam_type, level, section_type,
+           total_series, total_sections, total_questions, extraction_method, parse_status,
+           validation_warnings, raw_outline, draft_content, confidence, created_by, updated_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'draft', $13::jsonb, $14::jsonb, $15::jsonb, $16::jsonb, $17, NOW())
+         RETURNING *`,
+        params
+      );
+
+  return {
+    duplicate: false,
+    import: result.rows[0],
+    parsed,
+    validation,
+  };
+};
+
+const getExamImportDraft = async ({ pool, importId }) => {
+  await ensureDocumentImportSchema(pool);
+  const result = await pool.query(`SELECT * FROM exam_document_imports WHERE id = $1`, [importId]);
+  return result.rows[0] || null;
+};
+
+const updateExamImportDraft = async ({ pool, importId, draftContent }) => {
+  await ensureDocumentImportSchema(pool);
+  const parsed = {
+    ...draftContent,
+    validation: draftContent.validation || validateParsedDocument(draftContent),
+  };
+  const validation = validateImportDraftContent(parsed);
+  parsed.validation = {
+    ...(parsed.validation || {}),
+    warnings: validation.warnings,
+    questionCount: validation.counts.questionCount,
+    sectionCount: validation.counts.sectionCount,
+  };
+  parsed.confidence = parsed.confidence || buildImportConfidence(parsed);
+  const result = await pool.query(
+    `UPDATE exam_document_imports
+     SET provider = $2,
+         exam_type = $3,
+         level = $4,
+         section_type = $5,
+         total_series = $6,
+         total_sections = $7,
+         total_questions = $8,
+         validation_warnings = $9::jsonb,
+         raw_outline = $10::jsonb,
+         draft_content = $11::jsonb,
+         confidence = $12::jsonb,
+         parse_status = CASE WHEN parse_status = 'published' THEN parse_status ELSE 'draft' END,
+         updated_at = NOW()
+     WHERE id = $1
+     RETURNING *`,
+    [
+      importId,
+      parsed.metadata?.provider || null,
+      parsed.metadata?.examType || null,
+      parsed.metadata?.level || null,
+      parsed.metadata?.sectionType || null,
+      parsed.series?.length || 0,
+      validation.counts.sectionCount,
+      validation.counts.questionCount,
+      JSON.stringify(validation.warnings),
+      JSON.stringify(summarizeOutline(parsed)),
+      JSON.stringify(parsed),
+      JSON.stringify(parsed.confidence || {}),
+    ]
+  );
+  return {
+    import: result.rows[0] || null,
+    parsed,
+    validation,
+  };
+};
+
+const publishExamImportDraft = async ({ pool, importId, adminId = null }) => {
+  await ensureDocumentImportSchema(pool);
+  const rowResult = await pool.query(`SELECT * FROM exam_document_imports WHERE id = $1`, [importId]);
+  const importRow = rowResult.rows[0];
+  if (!importRow) throw new Error("Import draft not found");
+  if (Array.isArray(importRow.imported_exam_ids) && importRow.imported_exam_ids.length) {
+    return {
+      duplicate: true,
+      import: importRow,
+      exams: [],
+      parsed: importRow.draft_content,
+      validation: validateImportDraftContent(importRow.draft_content),
+    };
+  }
+  const parsed = importRow.draft_content && Object.keys(importRow.draft_content).length ? importRow.draft_content : importRow.raw_outline;
+  const validation = validateImportDraftContent(parsed);
+  if (!validation.ok) {
+    await pool.query(
+      `UPDATE exam_document_imports SET parse_status = 'validation_failed', error_message = $2, updated_at = NOW() WHERE id = $1`,
+      [importId, validation.errors.join("\n")]
+    );
+    const err = new Error("Import draft has validation errors. Fix them before publishing.");
+    err.validation = validation;
+    throw err;
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const importedExams = await insertParsedExamsForImport({ client, parsed, importRow, adminId, isActive: true });
+    const updated = await client.query(
       `UPDATE exam_document_imports
-       SET imported_exam_ids = $1::jsonb
-       WHERE id = $2
+       SET imported_exam_ids = $2::jsonb,
+           parse_status = 'published',
+           published_at = NOW(),
+           updated_at = NOW(),
+           error_message = NULL
+       WHERE id = $1
        RETURNING *`,
-      [JSON.stringify(importedExams.map((exam) => exam.id)), importRow.id]
+      [importId, JSON.stringify(importedExams.map((exam) => exam.id))]
+    );
+    await client.query(
+      `INSERT INTO exam_import_preferences (provider, section_type, preference_type, source_key, value, created_by)
+       VALUES ($1, $2, 'last_published_import', $3, $4::jsonb, $5)`,
+      [
+        parsed.metadata?.provider || null,
+        parsed.metadata?.sectionType || null,
+        parsed.documentHash,
+        JSON.stringify({
+          analyzerVersion: parsed.analyzerVersion || IMPORT_ANALYZER_VERSION,
+          confidence: parsed.confidence || {},
+          seriesCount: parsed.series?.length || 0,
+          questionCount: validation.counts.questionCount,
+        }),
+        adminId,
+      ]
     );
     await client.query("COMMIT");
-
     return {
       duplicate: false,
-      import: {
-        ...importRow,
-        imported_exam_ids: importedExams.map((exam) => exam.id),
-      },
+      import: updated.rows[0],
       exams: importedExams,
       parsed,
+      validation,
     };
   } catch (err) {
-    await client.query("ROLLBACK");
+    await client.query("ROLLBACK").catch(() => {});
     throw err;
   } finally {
     client.release();
   }
 };
 
+const importParsedExamDocument = async ({ pool, parsed, adminId = null }) => {
+  const draft = await saveExamImportDraft({ pool, parsed, adminId });
+  if (draft.duplicate) {
+    return {
+      duplicate: true,
+      import: draft.import,
+      exams: [],
+      parsed: draft.parsed,
+    };
+  }
+  return publishExamImportDraft({ pool, importId: draft.import.id, adminId });
+};
+
 module.exports = {
   analyzeExamDocument,
   ensureDocumentImportSchema,
+  getExamImportDraft,
   importParsedExamDocument,
+  publishExamImportDraft,
+  saveExamImportDraft,
   summarizeOutline,
+  updateExamImportDraft,
+  validateImportDraftContent,
 };
