@@ -45,6 +45,7 @@ import { clearDashboardCache } from "../services/dashboard";
 import { clearAuthSession } from "../utils/access";
 import { examSimulations } from "../data/siteContent";
 import { clearImportedExamCache, fetchImportedSeries } from "../services/importedExams";
+import SmoothedAudioPlayer from "../components/SmoothedAudioPlayer";
 import { hasRichTextMarkup, richTextToPlainText, sanitizeRichTextHtml } from "../utils/richText";
 import { stripQuestionMaterial } from "../utils/examText";
 import {
@@ -902,6 +903,8 @@ function AdminExams() {
   const [examDraft, setExamDraft] = useState(null);
   const [sectionDraft, setSectionDraft] = useState(null);
   const [questionDraft, setQuestionDraft] = useState(null);
+  const [examAudio, setExamAudio] = useState(null);
+  const [examAudioLoading, setExamAudioLoading] = useState(false);
   const [stylePanel, setStylePanel] = useState(null);
   const [stylePreview, setStylePreview] = useState(null);
   const [styleBusy, setStyleBusy] = useState("");
@@ -1010,6 +1013,7 @@ function AdminExams() {
     () => exams.find((exam) => String(exam.id) === String(selectedExamId)) ?? visibleExams[0] ?? null,
     [exams, selectedExamId, visibleExams]
   );
+  const selectedExamIsListening = String(selectedExam?.section_type ?? "").toLowerCase() === "listen";
 
   const selectedSections = useMemo(
     () => (selectedExam ? sectionsByExam.get(selectedExam.id) ?? [] : []),
@@ -1022,6 +1026,28 @@ function AdminExams() {
     setSectionDraft(null);
     setQuestionDraft(null);
   }, [selectedExam]);
+
+  const loadSelectedExamAudio = useCallback(async () => {
+    if (!selectedExam || !selectedExamIsListening) {
+      setExamAudio(null);
+      return;
+    }
+    setExamAudioLoading(true);
+    try {
+      const res = await API.get(`/api/admin/exams/${selectedExam.id}/audio`);
+      setExamAudio(res.data);
+    } catch (err) {
+      setExamAudio({
+        error: err.response?.data?.error ?? "Production audio status could not be loaded.",
+      });
+    } finally {
+      setExamAudioLoading(false);
+    }
+  }, [selectedExam?.id, selectedExamIsListening]);
+
+  useEffect(() => {
+    loadSelectedExamAudio();
+  }, [loadSelectedExamAudio]);
 
   const runAction = async (label, action, successMessage) => {
     setBusyAction(label);
@@ -1075,6 +1101,28 @@ function AdminExams() {
       const res = await API.post(`/api/admin/exams/${selectedExam.id}/duplicate`);
       setSelectedExamId(String(res.data.exam.id));
     }, "Exam duplicated as draft.");
+  };
+
+  const generateSelectedExamAudio = async () => {
+    if (!selectedExam || !selectedExamIsListening) return;
+    setBusyAction("generate-audio");
+    setStatus("");
+    setDocumentError("");
+    try {
+      const res = await API.post(`/api/admin/exams/${selectedExam.id}/audio/generate`, { force: true }, {
+        timeout: 300000,
+      });
+      setExamAudio(res.data);
+      clearImportedExamCache();
+      setStatus("Production listening audio generated. Preview it before publishing.");
+      await reload();
+      await loadSelectedExamAudio();
+    } catch (err) {
+      setDocumentError(err.response?.data?.error ?? "Production listening audio could not be generated.");
+      await loadSelectedExamAudio();
+    } finally {
+      setBusyAction("");
+    }
   };
 
   const saveSection = async (event) => {
@@ -1542,6 +1590,13 @@ function AdminExams() {
     }
   };
 
+  const productionAudio = examAudio?.audio ?? {};
+  const audioProviderStatus = examAudio?.providerStatus ?? {};
+  const selectedTtsProvider = examAudio?.provider ?? audioProviderStatus.selected ?? "openai";
+  const selectedTtsProviderConfigured = Boolean(audioProviderStatus.providers?.[selectedTtsProvider]);
+  const providerStatusLoaded = Boolean(examAudio?.providerStatus);
+  const anyTtsProviderConfigured = Boolean(audioProviderStatus.anyConfigured || selectedTtsProviderConfigured);
+  const productionAudioReady = Boolean(productionAudio.audioUrl);
   const initialLoading = loading && !data;
 
   return (
@@ -1751,6 +1806,62 @@ function AdminExams() {
                   </button>
                 </div>
               </form>
+
+              {selectedExamIsListening ? (
+                <section className={styles.editorPanel}>
+                  <div className={styles.panelHeader}>
+                    <div>
+                      <h3>Production listening audio</h3>
+                      <p className={styles.panelHint}>Generate cached AI audio for learners, then preview exactly what they will hear before publishing.</p>
+                    </div>
+                    <span className={`${styles.badge} ${productionAudioReady ? "" : styles.warn}`}>
+                      <Headphones size={14} />
+                      {productionAudio.productionStatus ?? (productionAudioReady ? "ready" : "missing")}
+                    </span>
+                  </div>
+                  <div className={styles.audioProductionGrid}>
+                    <div className={styles.audioProductionMeta}>
+                      <span><strong>Provider</strong> {String(selectedTtsProvider).toUpperCase()}</span>
+                      <span><strong>Configured</strong> {anyTtsProviderConfigured ? "Yes" : "No"}</span>
+                      <span><strong>Cached file</strong> {productionAudioReady ? "Available" : "Not generated"}</span>
+                      {productionAudio.byteSize ? <span><strong>Size</strong> {Math.round(Number(productionAudio.byteSize) / 1024)} KB</span> : null}
+                    </div>
+                    <div className={styles.contentActions}>
+                      <button
+                        className={styles.button}
+                        type="button"
+                        onClick={generateSelectedExamAudio}
+                        disabled={busyAction === "generate-audio" || examAudioLoading}
+                      >
+                        <Volume2 size={16} />
+                        {busyAction === "generate-audio" ? "Generating..." : productionAudioReady ? "Regenerate audio" : "Generate audio"}
+                      </button>
+                      <button
+                        className={styles.secondaryButton}
+                        type="button"
+                        onClick={loadSelectedExamAudio}
+                        disabled={examAudioLoading || busyAction === "generate-audio"}
+                      >
+                        <Eye size={16} />
+                        Refresh status
+                      </button>
+                    </div>
+                  </div>
+                  {examAudioLoading ? <p className={styles.emptyState}>Checking production audio...</p> : null}
+                  {examAudio?.error ? <p className={styles.error}>{examAudio.error}</p> : null}
+                  {providerStatusLoaded && !anyTtsProviderConfigured ? (
+                    <p className={styles.warningList}>No TTS provider key is configured on the backend yet. Add ELEVENLABS_API_KEY or another provider key before generating production audio.</p>
+                  ) : null}
+                  {productionAudioReady ? (
+                    <div className={styles.audioPreviewPanel}>
+                      <p className={styles.panelHint}>Admin preview</p>
+                      <SmoothedAudioPlayer src={productionAudio.audioUrl} label="Production Hoeren preview" />
+                    </div>
+                  ) : (
+                    <p className={styles.emptyState}>No cached production audio is attached to this Hören exam yet.</p>
+                  )}
+                </section>
+              ) : null}
 
               <section className={styles.editorPanel}>
                 <div className={styles.panelHeader}>

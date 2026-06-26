@@ -34,6 +34,17 @@ const {
   ensureContentStyleSchema,
   registerContentStyleRoutes,
 } = require("./services/contentStyleTemplates");
+const {
+  buildAudioContentHash,
+  ensureAudioAssetSchema,
+  generateAndStoreExamAudio,
+  getAudioAssetById,
+  getAudioAssetForExam,
+  getConfiguredProvider,
+  getProviderStatus,
+  normalizeProvider,
+  TtsConfigurationError,
+} = require("./services/ttsService");
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -669,6 +680,7 @@ async function ensureSchema() {
   await ensureDocumentImportSchema(pool);
   await ensureWritingCorrectionSchema(pool);
   await ensureContentStyleSchema(pool);
+  await ensureAudioAssetSchema(pool);
 }
 
 const getFeature = (req) => {
@@ -1282,6 +1294,43 @@ const buildImportedListeningAudio = ({ title, sourceLabel, sections, questions }
   };
 };
 
+const attachGeneratedListeningAudio = async ({ examId, audio, provider }) => {
+  if (!audio) return audio;
+  const selectedProvider = normalizeProvider(provider || getConfiguredProvider());
+  const { contentHash, asset } = await getAudioAssetForExam({
+    pool,
+    examId,
+    audio,
+    provider: selectedProvider,
+  });
+  const latest = await pool.query(
+    `SELECT id, status, error_message, provider, provider_model, byte_size, duration_seconds, updated_at
+       FROM exam_audio_assets
+      WHERE source_exam_id = $1
+      ORDER BY updated_at DESC
+      LIMIT 1`,
+    [examId]
+  );
+  const fallback = latest.rows[0] || null;
+  const readyAsset = asset?.status === "ready" ? asset : null;
+  return {
+    ...audio,
+    contentHash,
+    provider: selectedProvider,
+    productionStatus: readyAsset ? "ready" : fallback?.status === "failed" ? "failed" : "missing",
+    productionUpdatedAt: readyAsset?.updated_at || fallback?.updated_at || null,
+    productionMessage: readyAsset
+      ? "Production audio ready."
+      : fallback?.status === "failed"
+        ? "Production audio generation failed. An administrator must regenerate it."
+        : "Production audio has not been generated yet.",
+    audioUrl: readyAsset ? `/api/audio/generated/${readyAsset.id}` : "",
+    providerModel: readyAsset?.provider_model || fallback?.provider_model || null,
+    byteSize: readyAsset?.byte_size || 0,
+    durationSeconds: readyAsset?.duration_seconds || null,
+  };
+};
+
 const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {} }) => {
   const moduleId = exam.section_type;
   const moduleMeta = PUBLIC_MODULE_META[moduleId] ?? PUBLIC_MODULE_META.read;
@@ -1433,6 +1482,12 @@ app.get("/api/exams/:provider/series/:seriesId/:moduleId", async (req, res) => {
       questions: questions.rows,
       routeMeta,
     });
+    if (moduleId === "listen") {
+      content.audio = await attachGeneratedListeningAudio({
+        examId: exam.id,
+        audio: content.audio,
+      });
+    }
     return res.json({ ok: true, source: "database", series, content });
   } catch (err) {
     console.error("Imported module lookup failed", err);
@@ -2601,6 +2656,137 @@ const touchExam = (examId, client = pool) =>
   client.query(`UPDATE exams SET updated_at = NOW() WHERE id = $1`, [examId]);
 
 registerContentStyleRoutes({ app, pool, requireAdmin, auditAdminAction });
+
+const loadListeningExamAudioContext = async (examId) => {
+  const examResult = await pool.query(`SELECT * FROM exams WHERE id = $1`, [examId]);
+  const exam = examResult.rows[0];
+  if (!exam) return { error: "Exam not found", status: 404 };
+  if (exam.section_type !== "listen") return { error: "Audio generation is only available for Hoeren exams.", status: 400 };
+  const sections = await pool.query(
+    `SELECT *
+       FROM exam_sections
+      WHERE exam_id = $1
+      ORDER BY position, id`,
+    [examId]
+  );
+  const questions = await pool.query(
+    `SELECT q.*, e.level, s.title AS section_title, s.part_number,
+            s.instructions AS section_instructions,
+            s.duration_minutes AS section_duration_minutes,
+            s.points AS section_points,
+            s.scoring AS section_scoring,
+            s.metadata AS section_metadata,
+            s.position AS section_position
+       FROM exam_questions q
+       JOIN exams e ON e.id = q.exam_id
+       LEFT JOIN exam_sections s ON s.id = q.section_id
+      WHERE q.exam_id = $1
+      ORDER BY COALESCE(s.position, 0), q.position, q.id`,
+    [examId]
+  );
+  const metadata = asJsonObject(exam.metadata);
+  const sourceLabel = metadata.sourceLabel || `Series ${String(exam.series_number || "").padStart(2, "0")}`;
+  return {
+    exam,
+    sections: sections.rows,
+    questions: questions.rows,
+    audio: buildImportedListeningAudio({
+      title: metadata.title || sourceLabel || exam.name,
+      sourceLabel,
+      sections: sections.rows,
+      questions: questions.rows,
+    }),
+  };
+};
+
+app.get("/api/audio/generated/:assetId", async (req, res) => {
+  try {
+    const assetId = Number(req.params.assetId);
+    if (!Number.isInteger(assetId)) return res.status(404).json({ ok: false, error: "Audio not found" });
+    const asset = await getAudioAssetById({ pool, assetId });
+    if (!asset) return res.status(404).json({ ok: false, error: "Audio not found" });
+    res.setHeader("Content-Type", asset.mime_type || "audio/mpeg");
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    res.setHeader("ETag", `"${asset.content_hash}"`);
+    res.setHeader("Content-Length", String(asset.byte_size || asset.audio_data.length));
+    return res.send(asset.audio_data);
+  } catch (err) {
+    console.error("Generated audio stream failed", err);
+    return res.status(500).json({ ok: false, error: "Audio unavailable" });
+  }
+});
+
+app.get("/api/admin/tts/status", requireAdmin, async (req, res) => {
+  try {
+    return res.json({ ok: true, ...getProviderStatus() });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.get("/api/admin/exams/:examId/audio", requireAdmin, async (req, res) => {
+  try {
+    const examId = Number(req.params.examId);
+    const context = await loadListeningExamAudioContext(examId);
+    if (context.error) return res.status(context.status).json({ ok: false, error: context.error });
+    const provider = normalizeProvider(req.query.provider || getConfiguredProvider());
+    const { contentHash, asset } = await getAudioAssetForExam({
+      pool,
+      examId,
+      audio: context.audio,
+      provider,
+    });
+    return res.json({
+      ok: true,
+      provider,
+      providerStatus: getProviderStatus(),
+      contentHash,
+      audio: await attachGeneratedListeningAudio({ examId, audio: context.audio, provider }),
+      asset,
+    });
+  } catch (err) {
+    console.error("Audio status failed", err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.post("/api/admin/exams/:examId/audio/generate", requireAdmin, async (req, res) => {
+  try {
+    const examId = Number(req.params.examId);
+    const context = await loadListeningExamAudioContext(examId);
+    if (context.error) return res.status(context.status).json({ ok: false, error: context.error });
+    const provider = normalizeProvider(req.body?.provider || getConfiguredProvider());
+    const result = await generateAndStoreExamAudio({
+      pool,
+      examId,
+      audio: context.audio,
+      adminId: req.user.id,
+      provider,
+      force: Boolean(req.body?.force),
+    });
+    await auditAdminAction(req, "exam.audio_generate", "exam", examId, {
+      provider,
+      cached: result.cached,
+      assetId: result.asset?.id,
+    });
+    return res.status(result.cached ? 200 : 201).json({
+      ok: true,
+      cached: result.cached,
+      provider,
+      asset: result.asset,
+      audio: await attachGeneratedListeningAudio({ examId, audio: context.audio, provider }),
+    });
+  } catch (err) {
+    const status = err instanceof TtsConfigurationError ? 400 : 502;
+    console.error("Audio generation failed", err.message);
+    return res.status(status).json({
+      ok: false,
+      setupRequired: err instanceof TtsConfigurationError,
+      error: err.publicMessage || "Audio generation failed. Keep the previous audio and try again later.",
+    });
+  }
+});
 
 app.get("/api/admin/exams", requireAdmin, async (req, res) => {
   try {
