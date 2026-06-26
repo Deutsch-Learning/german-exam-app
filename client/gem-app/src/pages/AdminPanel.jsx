@@ -125,6 +125,7 @@ const RICH_FONT_SIZES = [
   { label: "Title", value: "5" },
 ];
 const RICH_COLORS = ["#111827", "#c10016", "#2563eb", "#047857", "#92400e", "#7c3aed"];
+const STYLE_TEMPLATE_REQUEST_TIMEOUT_MS = 120000;
 
 const getModuleLabel = (value) => MODULE_LABELS[String(value ?? "").toLowerCase()] ?? value ?? "-";
 
@@ -249,6 +250,13 @@ const getQuestionOptionText = (question) =>
     .map((option, index) => `${option?.value ?? String.fromCharCode(97 + index)}) ${option?.label ?? option?.text ?? option?.title ?? ""}`.trim())
     .filter(Boolean)
     .join("\n");
+
+const getAdminRequestError = (err, fallback) => {
+  if (err.code === "ECONNABORTED" || /timeout/i.test(String(err.message ?? ""))) {
+    return "The operation took too long. Try a smaller scope first, or use manual selection for fewer blocks.";
+  }
+  return err.response?.data?.error ?? err.message ?? fallback;
+};
 
 const handleLocalScrollableWheel = (event) => {
   const target = event.currentTarget;
@@ -1254,10 +1262,12 @@ function AdminExams() {
         allowCrossType: stylePanel.allowCrossType,
         styleJson: stylePanel.styleJson,
         styleOptions: stylePanel.styleOptions,
+      }, {
+        timeout: STYLE_TEMPLATE_REQUEST_TIMEOUT_MS,
       });
       setStylePreview(res.data);
     } catch (err) {
-      setDocumentError(err.response?.data?.error ?? "Style preview failed.");
+      setDocumentError(getAdminRequestError(err, "Style preview failed."));
     } finally {
       setStyleBusy("");
     }
@@ -1276,6 +1286,8 @@ function AdminExams() {
         styleJson: stylePanel.styleJson,
         styleOptions: stylePanel.styleOptions,
         confirmed: true,
+      }, {
+        timeout: STYLE_TEMPLATE_REQUEST_TIMEOUT_MS,
       });
       clearImportedExamCache();
       setStatus(`Style applied to ${res.data.count ?? 0} block(s).`);
@@ -1283,7 +1295,7 @@ function AdminExams() {
       setStylePreview(null);
       await reload();
     } catch (err) {
-      setDocumentError(err.response?.data?.error ?? "Style apply failed.");
+      setDocumentError(getAdminRequestError(err, "Style apply failed."));
     } finally {
       setStyleBusy("");
     }

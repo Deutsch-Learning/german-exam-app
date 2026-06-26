@@ -377,6 +377,15 @@ const buildPreviewBlocks = (blocks, styleJson, styleOptions) =>
     nextValue: applyStyleToText(block.currentValue, styleJson, styleOptions),
   }));
 
+const compactBlock = (block) => ({
+  blockId: block.blockId,
+  blockType: block.blockType,
+  examId: block.examId,
+  sectionId: block.sectionId,
+  questionId: block.questionId,
+  label: block.label,
+});
+
 const updateBlock = async (client, block, nextValue, styleJson) => {
   if (block.blockType === "exam_intro") {
     const metadata = {
@@ -574,9 +583,9 @@ const registerContentStyleRoutes = ({ app, pool, requireAdmin, auditAdminAction 
       const previews = buildPreviewBlocks(blocks, styleJson, styleOptions);
       return res.json({
         ok: true,
-        source,
+        source: compactBlock(source),
         count: previews.length,
-        blocks: previews,
+        blocks: previews.slice(0, 50),
         styleJson,
         styleOptions,
       });
@@ -598,22 +607,17 @@ const registerContentStyleRoutes = ({ app, pool, requireAdmin, auditAdminAction 
       if (!blocks.length) return res.status(400).json({ ok: false, error: "No compatible blocks found" });
       if (blocks.length > 500) return res.status(400).json({ ok: false, error: "Too many blocks selected. Narrow the scope first." });
 
+      const undoBlocks = [];
       const affectedBlocks = [];
       await client.query("BEGIN");
       for (const block of blocks) {
         const nextValue = applyStyleToText(block.currentValue, styleJson, styleOptions);
         const update = await updateBlock(client, block, nextValue, styleJson);
-        affectedBlocks.push({
-          blockId: block.blockId,
-          blockType: block.blockType,
-          examId: block.examId,
-          sectionId: block.sectionId,
-          questionId: block.questionId,
-          label: block.label,
-          previousValue: block.currentValue,
-          nextValue,
+        const compact = compactBlock(block);
+        affectedBlocks.push(compact);
+        undoBlocks.push({
+          ...compact,
           previousStorageValue: update.previousStorageValue,
-          nextStorageValue: update.nextStorageValue,
         });
       }
 
@@ -624,11 +628,12 @@ const registerContentStyleRoutes = ({ app, pool, requireAdmin, auditAdminAction 
       await client.query("COMMIT");
 
       const audit = await auditAdminAction(req, "style.apply", "content_style", source.blockId, {
-        sourceBlock: source,
+        sourceBlock: compactBlock(source),
         scope: req.body?.scope || "block",
         styleOptions,
         styleJson,
-        affectedBlocks,
+        affectedBlocks: undoBlocks,
+        affectedBlockSummary: affectedBlocks,
       });
       return res.json({ ok: true, count: affectedBlocks.length, auditId: audit?.id ?? null, affectedBlocks });
     } catch (err) {
@@ -694,4 +699,3 @@ module.exports = {
   ensureContentStyleSchema,
   registerContentStyleRoutes,
 };
-
