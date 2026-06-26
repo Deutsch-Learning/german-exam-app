@@ -696,6 +696,70 @@
   font: 0.82rem/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
+.wizardAudioEditor {
+  display: grid;
+  gap: 14px;
+}
+
+.audioTargetBar {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr);
+  gap: 12px;
+}
+
+.audioEditorGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+}
+
+.audioFieldGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.audioListHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.audioListHeader h3 {
+  margin: 0;
+}
+
+.audioList {
+  display: grid;
+  gap: 10px;
+}
+
+.audioRow,
+.audioRowCompact {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.audioRow {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.audioRowCompact {
+  grid-template-columns: minmax(180px, 1fr) minmax(100px, 0.35fr) minmax(180px, 1fr) auto;
+  align-items: end;
+}
+
+.audioRow .dangerButton,
+.audioRowCompact .dangerButton {
+  align-self: end;
+}
+
 .warningList {
   margin: 0;
   padding: 12px 12px 12px 30px;
@@ -1732,7 +1796,9 @@
   }
 
   .documentImportGrid,
-  .outlineList article {
+  .outlineList article,
+  .audioTargetBar,
+  .audioRowCompact {
     grid-template-columns: 1fr;
     align-items: stretch;
   }

@@ -2307,7 +2307,7 @@ const ensureDocumentImportSchema = async (pool) => {
       title TEXT NOT NULL,
       instructions TEXT,
       duration_minutes INTEGER,
-      points INTEGER,
+      points NUMERIC(8,2),
       scoring JSONB NOT NULL DEFAULT '{}'::jsonb,
       metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
       position INTEGER NOT NULL DEFAULT 0,
@@ -2319,6 +2319,8 @@ const ensureDocumentImportSchema = async (pool) => {
     CREATE INDEX IF NOT EXISTS exam_sections_exam_position_idx
       ON exam_sections(exam_id, position, id);
   `);
+  await pool.query(`ALTER TABLE exam_sections ADD COLUMN IF NOT EXISTS points NUMERIC(8,2);`);
+  await pool.query(`ALTER TABLE exam_sections ALTER COLUMN points TYPE NUMERIC(8,2) USING points::numeric;`);
   await pool.query(`ALTER TABLE exam_sections ENABLE ROW LEVEL SECURITY;`);
   await pool.query(`ALTER TABLE exam_questions ADD COLUMN IF NOT EXISTS section_id INTEGER REFERENCES exam_sections(id) ON DELETE SET NULL;`);
   await pool.query(`ALTER TABLE exam_questions ADD COLUMN IF NOT EXISTS question_type TEXT;`);
@@ -2412,33 +2414,42 @@ const insertParsedExamsForImport = async ({ client, parsed, importRow, adminId =
           ]
         );
         const sectionRow = insertedSection.rows[0];
-        for (const [questionIndex, question] of section.questions.entries()) {
+        const questionValues = [];
+        const questionPlaceholders = [];
+        for (const [questionIndex, question] of (section.questions || []).entries()) {
+          const base = questionValues.length;
+          questionPlaceholders.push(
+            `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}::jsonb, $${base + 6}::jsonb, $${base + 7}, $${base + 8}, $${base + 9}, $${base + 10}, $${base + 11}::jsonb, $${base + 12}::jsonb, $${base + 13}::jsonb)`
+          );
+          questionValues.push(
+            examRow.id,
+            sectionRow.id,
+            question.sectionType || section.sectionType || parsed.metadata.sectionType,
+            trimForDb(question.prompt || section.instructions || series.instructions || series.title),
+            JSON.stringify(Array.isArray(question.options) ? question.options : []),
+            JSON.stringify(question.correctAnswer || {}),
+            question.explanation ? trimForDb(question.explanation, MAX_EXPLANATION_CHARS) : null,
+            Number.isInteger(question.position) ? question.position : questionIndex + 1,
+            question.questionType || "compound",
+            question.transcript || null,
+            JSON.stringify(question.audio || {}),
+            JSON.stringify(question.scoring || {}),
+            JSON.stringify({
+              ...(question.metadata || {}),
+              sourceLabel: series.sourceLabel,
+              partNumber: section.partNumber,
+              documentImportId: importRow.id,
+            })
+          );
+        }
+        if (questionPlaceholders.length) {
           await client.query(
             `INSERT INTO exam_questions (
                exam_id, section_id, module_id, prompt, options, correct_answer, explanation,
                position, question_type, transcript, audio, scoring, source_metadata
              )
-             VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb)`,
-            [
-              examRow.id,
-              sectionRow.id,
-              question.sectionType || section.sectionType || parsed.metadata.sectionType,
-              trimForDb(question.prompt || section.instructions || series.instructions || series.title),
-              JSON.stringify(Array.isArray(question.options) ? question.options : []),
-              JSON.stringify(question.correctAnswer || {}),
-              question.explanation ? trimForDb(question.explanation, MAX_EXPLANATION_CHARS) : null,
-              Number.isInteger(question.position) ? question.position : questionIndex + 1,
-              question.questionType || "compound",
-              question.transcript || null,
-              JSON.stringify(question.audio || {}),
-              JSON.stringify(question.scoring || {}),
-              JSON.stringify({
-                ...(question.metadata || {}),
-                sourceLabel: series.sourceLabel,
-                partNumber: section.partNumber,
-                documentImportId: importRow.id,
-              }),
-            ]
+             VALUES ${questionPlaceholders.join(", ")}`,
+            questionValues
           );
         }
       }
