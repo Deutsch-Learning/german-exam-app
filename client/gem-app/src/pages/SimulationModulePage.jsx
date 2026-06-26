@@ -48,11 +48,12 @@ import { useSimulationLanguage } from "../utils/simulationLanguage";
 import SmoothedAudioPlayer from "../components/SmoothedAudioPlayer";
 import {
   SPEECH_START_DELAY_MS,
-  createListeningUtterance,
+  createListeningUtterances,
   createRecordingBlob,
   getMicrophoneConstraints,
   getPreferredRecorderOptions,
   gracefulStopSpeech,
+  startListeningAmbience,
   startSpeechWatchdog,
 } from "../utils/audio";
 import NotFoundPage from "./NotFoundPage";
@@ -2011,6 +2012,9 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const speechStartTimerRef = useRef(null);
   const speechStopTimerRef = useRef(null);
   const speechWatchdogRef = useRef(null);
+  const speechQueueRef = useRef([]);
+  const speechQueueIndexRef = useRef(0);
+  const ambienceControllerRef = useRef(null);
   const recordingIntervalRef = useRef(null);
   const recordingSecondsRef = useRef(0);
   const recordingTaskIndexRef = useRef(0);
@@ -2401,6 +2405,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
         if ("speechSynthesis" in window) {
           speechStopTimerRef.current = gracefulStopSpeech();
         }
+        ambienceControllerRef.current?.stop();
+        ambienceControllerRef.current = null;
       }
     }, 250);
 
@@ -2430,6 +2436,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       if (speechStartTimerRef.current) window.clearTimeout(speechStartTimerRef.current);
       if (speechStopTimerRef.current) window.clearTimeout(speechStopTimerRef.current);
       if (speechWatchdogRef.current) window.clearInterval(speechWatchdogRef.current);
+      ambienceControllerRef.current?.stop();
+      ambienceControllerRef.current = null;
       if ("speechSynthesis" in window) {
         window.speechSynthesis.cancel();
       }
@@ -2543,8 +2551,15 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     }
   }, []);
 
+  const stopListeningAmbience = useCallback(() => {
+    ambienceControllerRef.current?.stop();
+    ambienceControllerRef.current = null;
+  }, []);
+
   const stopListeningSpeech = useCallback((soft = true) => {
     clearSpeechTimers();
+    speechQueueRef.current = [];
+    speechQueueIndexRef.current = 0;
     if (!("speechSynthesis" in window)) return;
     if (soft) {
       speechStopTimerRef.current = gracefulStopSpeech();
@@ -2574,15 +2589,18 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       setAudioError("");
 
       if ("speechSynthesis" in window) {
+        stopListeningAmbience();
         stopListeningSpeech(false);
-        const utterance = createListeningUtterance(module.audio);
-        if (!utterance) {
+        const utterances = createListeningUtterances(module.audio);
+        if (!utterances.length) {
           setAudioPlaying(false);
           audioSessionRef.current = false;
           setAudioSessionActive(false);
-          setAudioError("La synthese vocale n'est pas disponible sur ce navigateur.");
+          setAudioError("Aucun transkript audio n'a ete trouve pour ce module.");
           return;
         }
+        const utterance = utterances[0];
+        ambienceControllerRef.current = startListeningAmbience(module.audio);
         utterance.onstart = () => {
           setAudioError("");
           if (speechWatchdogRef.current) window.clearInterval(speechWatchdogRef.current);
@@ -2590,6 +2608,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
         };
         utterance.onend = () => {
           clearSpeechTimers();
+          stopListeningAmbience();
           setAudioTimestamp(currentAudioDuration);
           audioTimestampRef.current = currentAudioDuration;
           setAudioPlaying(false);
@@ -2598,6 +2617,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
         };
         utterance.onerror = () => {
           clearSpeechTimers();
+          stopListeningAmbience();
           setAudioPlaying(false);
           audioSessionRef.current = false;
           setAudioSessionActive(false);
@@ -2619,13 +2639,14 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     } else if ("speechSynthesis" in window) {
       clearSpeechTimers();
       window.speechSynthesis.resume();
+      ambienceControllerRef.current?.resume?.();
       speechWatchdogRef.current = startSpeechWatchdog();
     }
 
     audioStartOffsetRef.current = startingFresh ? 0 : audioTimestampRef.current;
     audioStartedAtRef.current = Date.now();
     setAudioPlaying(true);
-  }, [audioSessionActive, audioTimestamp, clearSpeechTimers, currentAudioDuration, module, replaysUsed, stopListeningSpeech]);
+  }, [audioSessionActive, audioTimestamp, clearSpeechTimers, currentAudioDuration, module, replaysUsed, stopListeningAmbience, stopListeningSpeech]);
 
   const pauseListeningAudio = useCallback(() => {
     setAudioPlaying(false);
@@ -2637,6 +2658,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     if ("speechSynthesis" in window) {
       window.speechSynthesis.pause();
     }
+    ambienceControllerRef.current?.pause?.();
   }, []);
 
   const resetListeningAudio = useCallback(() => {
@@ -2647,7 +2669,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     audioSessionRef.current = false;
     setAudioSessionActive(false);
     stopListeningSpeech(true);
-  }, [stopListeningSpeech]);
+    stopListeningAmbience();
+  }, [stopListeningAmbience, stopListeningSpeech]);
 
   const saveWritingVersion = useCallback(() => {
     if (module.id !== "write") return;
