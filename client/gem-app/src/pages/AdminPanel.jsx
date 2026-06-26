@@ -250,6 +250,22 @@ const getQuestionOptionText = (question) =>
     .filter(Boolean)
     .join("\n");
 
+const handleLocalScrollableWheel = (event) => {
+  const target = event.currentTarget;
+  const maxScrollTop = target.scrollHeight - target.clientHeight;
+  if (maxScrollTop <= 0 || event.deltaY === 0) return;
+
+  const scrollingDown = event.deltaY > 0;
+  const canScrollDown = target.scrollTop < maxScrollTop - 1;
+  const canScrollUp = target.scrollTop > 1;
+
+  if ((scrollingDown && canScrollDown) || (!scrollingDown && canScrollUp)) {
+    event.preventDefault();
+    event.stopPropagation();
+    target.scrollTop = Math.max(0, Math.min(maxScrollTop, target.scrollTop + event.deltaY));
+  }
+};
+
 const buildAdminStyleBlocks = (exams = [], sections = [], questions = []) => {
   const examMap = new Map(exams.map((exam) => [exam.id, exam]));
   const sectionMap = new Map(sections.map((section) => [section.id, section]));
@@ -1420,7 +1436,7 @@ function AdminExams() {
             <h2>Content library</h2>
             <span>{visibleExams.length} shown</span>
           </div>
-          <div className={styles.examList}>
+          <div className={styles.examList} onWheel={handleLocalScrollableWheel}>
             {visibleExams.map((exam) => {
               const module = MODULE_OPTIONS.find((item) => item.id === exam.section_type);
               const Icon = module?.icon ?? FileJson;
@@ -1935,7 +1951,7 @@ function StyleTemplatePanel({
 
   return (
     <div className={styles.modalOverlay} role="presentation">
-      <section className={styles.styleModal} role="dialog" aria-modal="true" aria-labelledby="style-template-title">
+      <section className={styles.styleModal} role="dialog" aria-modal="true" aria-labelledby="style-template-title" onWheel={handleLocalScrollableWheel}>
         <div className={styles.styleModalHeader}>
           <div>
             <p className={styles.modalEyebrow}>Reusable style</p>
@@ -2010,10 +2026,28 @@ function StyleTemplatePanel({
               Manual override across block types
             </label>
             {state.scope === "manual" ? (
-              <div className={styles.manualBlockList}>
+              <div className={styles.manualBlockList} onWheel={handleLocalScrollableWheel}>
                 <div className={styles.panelHeader}>
                   <h3>Selected blocks</h3>
-                  <span>{selectedCount}/{manualBlocks.length}</span>
+                  <div className={styles.actions}>
+                    <span>{selectedCount}/{manualBlocks.length}</span>
+                    <button
+                      className={styles.secondaryButton}
+                      type="button"
+                      onClick={() => onUpdate({ manualBlockIds: manualBlocks.map((block) => block.blockId) })}
+                      disabled={!manualBlocks.length || selectedCount === manualBlocks.length}
+                    >
+                      Select all
+                    </button>
+                    <button
+                      className={styles.secondaryButton}
+                      type="button"
+                      onClick={() => onUpdate({ manualBlockIds: [] })}
+                      disabled={!selectedCount}
+                    >
+                      Clear
+                    </button>
+                  </div>
                 </div>
                 {manualBlocks.slice(0, 160).map((block) => (
                   <label key={block.blockId} className={styles.manualBlockItem}>
@@ -2081,7 +2115,7 @@ function StyleTemplatePanel({
             </div>
           </div>
           {preview?.blocks?.length ? (
-            <div className={styles.stylePreviewList}>
+            <div className={styles.stylePreviewList} onWheel={handleLocalScrollableWheel}>
               {preview.blocks.slice(0, 12).map((block) => (
                 <article key={block.blockId} className={styles.stylePreviewItem}>
                   <strong>{block.label}</strong>
