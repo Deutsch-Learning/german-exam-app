@@ -23,7 +23,9 @@ export const STYLE_SCOPE_OPTIONS = [
 export const STYLE_PROPERTY_OPTIONS = [
   { id: "fontSize", label: "Font size" },
   { id: "fontFamily", label: "Font family" },
-  { id: "emphasis", label: "Bold / italic / underline" },
+  { id: "bold", label: "Bold" },
+  { id: "italic", label: "Italic" },
+  { id: "underline", label: "Underline" },
   { id: "textColor", label: "Text color" },
   { id: "backgroundColor", label: "Background color" },
   { id: "spacing", label: "Spacing" },
@@ -144,4 +146,3 @@ export const describeStyleTemplate = (styleJson) => {
   if (style.layout?.listKind) parts.push(`${style.layout.listKind} list`);
   return parts.length ? parts.join(" · ") : "Plain style pattern";
 };
-
