@@ -127,6 +127,7 @@ const RICH_FONT_SIZES = [
 const RICH_COLORS = ["#111827", "#c10016", "#2563eb", "#047857", "#92400e", "#7c3aed"];
 const STYLE_TEMPLATE_REQUEST_TIMEOUT_MS = 120000;
 const STYLE_TEMPLATE_BATCH_SIZE = 100;
+const STYLE_TEMPLATE_MAX_BLOCKS = 7000;
 
 const getModuleLabel = (value) => MODULE_LABELS[String(value ?? "").toLowerCase()] ?? value ?? "-";
 
@@ -1293,6 +1294,11 @@ function AdminExams() {
         ? stylePanel.manualBlockIds
         : [];
     const total = Number(stylePreview.count) || blockIds.length;
+    if (total > STYLE_TEMPLATE_MAX_BLOCKS) {
+      setStyleBusy("");
+      setDocumentError(`Too many blocks selected. The maximum is ${STYLE_TEMPLATE_MAX_BLOCKS}. Narrow the scope first.`);
+      return;
+    }
     const chunks = blockIds.length
       ? Array.from({ length: Math.ceil(blockIds.length / STYLE_TEMPLATE_BATCH_SIZE) }, (_, index) =>
           blockIds.slice(index * STYLE_TEMPLATE_BATCH_SIZE, (index + 1) * STYLE_TEMPLATE_BATCH_SIZE)

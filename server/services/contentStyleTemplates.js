@@ -24,6 +24,8 @@ const STYLE_OPTION_KEYS = [
 ];
 
 const DEFAULT_STYLE_OPTIONS = STYLE_OPTION_KEYS.reduce((acc, key) => ({ ...acc, [key]: true }), {});
+const MAX_STYLE_APPLY_BLOCKS = 7000;
+const MAX_STYLE_BATCH_BLOCKS = 150;
 const SAFE_COLOR_PATTERN = /^(#[0-9a-f]{3,8}|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\))$/i;
 const SAFE_FONT_SIZE_PATTERN = /^(\d+(?:\.\d+)?(?:px|rem|em|%)|small|medium|large|x-large|xx-large)$/i;
 const SAFE_LENGTH_PATTERN = /^(\d+(?:\.\d+)?(?:px|rem|em|%)|0)$/i;
@@ -587,6 +589,12 @@ const registerContentStyleRoutes = ({ app, pool, requireAdmin, auditAdminAction 
       const styleJson = normalizeStyleJson(req.body?.styleJson ?? req.body?.style_json, req.body?.sourceBlock?.blockType);
       const styleOptions = normalizeStyleOptions(req.body?.styleOptions ?? req.body?.style_options);
       const { source, blocks } = await resolveBlocks(pool, req.body ?? {});
+      if (blocks.length > MAX_STYLE_APPLY_BLOCKS) {
+        return res.status(400).json({
+          ok: false,
+          error: `Too many blocks selected. The maximum is ${MAX_STYLE_APPLY_BLOCKS}. Narrow the scope first.`,
+        });
+      }
       const previewBlocks = blocks.slice(0, 50);
       const previews = buildPreviewBlocks(previewBlocks, styleJson, styleOptions);
       return res.json({
@@ -614,7 +622,7 @@ const registerContentStyleRoutes = ({ app, pool, requireAdmin, auditAdminAction 
       const styleOptions = normalizeStyleOptions(req.body?.styleOptions ?? req.body?.style_options);
       const { source, blocks } = await resolveBlocks(pool, req.body ?? {});
       if (!blocks.length) return res.status(400).json({ ok: false, error: "No compatible blocks found" });
-      if (blocks.length > 150) return res.status(400).json({ ok: false, error: "Too many blocks in one batch. Apply in smaller batches." });
+      if (blocks.length > MAX_STYLE_BATCH_BLOCKS) return res.status(400).json({ ok: false, error: "Too many blocks in one batch. Apply in smaller batches." });
 
       const undoBlocks = [];
       const affectedBlocks = [];
