@@ -27,7 +27,7 @@ const moduleNames = {
   },
   de: {
     read: "Lesen",
-    listen: "Hörverstehen",
+    listen: "Hören",
     write: "Schreiben",
     speak: "Sprechen",
     grammar: "Grammatik",
