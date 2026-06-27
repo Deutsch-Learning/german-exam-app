@@ -3244,6 +3244,10 @@ app.post("/api/admin/exams/import-document", requireAdmin, documentUpload.single
       parsed,
       adminId: req.user.id,
     });
+    const audioGeneration = await generateListeningAudioForPublishedExams({
+      exams: result.exams,
+      adminId: req.user.id,
+    });
     await auditAdminAction(
       req,
       result.duplicate ? "exam.document_duplicate" : "exam.document_import",
@@ -3258,6 +3262,7 @@ app.post("/api/admin/exams/import-document", requireAdmin, documentUpload.single
         sectionType: parsed.metadata.sectionType,
         series: parsed.series.length,
         questions: parsed.validation.questionCount,
+        audioGeneration,
       }
     );
     return res.status(result.duplicate ? 200 : 201).json({
@@ -3265,6 +3270,7 @@ app.post("/api/admin/exams/import-document", requireAdmin, documentUpload.single
       duplicate: result.duplicate,
       import: result.import,
       exams: result.exams,
+      audioGeneration,
       analysis: {
         documentHash: parsed.documentHash,
         filename: parsed.filename,
