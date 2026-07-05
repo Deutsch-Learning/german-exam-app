@@ -28,6 +28,7 @@ const moduleAssets = {
   listen: { iconPath: iconListen },
   write: { iconPath: iconWrite },
   speak: { iconPath: iconSpeak },
+  sprach: { iconNode: <OpenBookIcon /> },
 };
 
 export default function SeriesSimulationPage() {
@@ -120,7 +121,7 @@ export default function SeriesSimulationPage() {
     );
   }
 
-  const orderedModules = ["read", "listen", "write", "speak"]
+  const orderedModules = ["read", "listen", "write", "speak", "sprach"]
     .map((moduleId) => simulationModules.find((module) => module.id === moduleId))
     .filter((module) => module && series.modules?.[module.id]);
   const visitorState = isVisitorSeriesAttempt(series) || Boolean(location.state?.visitorFreeAccess)

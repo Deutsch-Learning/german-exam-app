@@ -832,9 +832,16 @@ const PUBLIC_MODULE_META = {
     description: "Imported speaking prompts from the original exam document.",
     defaultMinutes: 15,
   },
+  sprach: {
+    id: "sprach",
+    label: "Sprachbausteine",
+    shortLabel: "Language elements",
+    description: "Imported TELC grammar and vocabulary cloze tasks.",
+    defaultMinutes: 30,
+  },
 };
 
-const MODULE_ORDER = ["read", "listen", "write", "speak"];
+const MODULE_ORDER = ["read", "listen", "write", "speak", "sprach"];
 
 const buildUnavailableModuleMeta = (moduleId) => {
   const moduleMeta = PUBLIC_MODULE_META[moduleId];
@@ -1060,6 +1067,7 @@ const queryImportedExamRows = async (provider, seriesNumber = null, level = null
                  WHEN 'listen' THEN 2
                  WHEN 'write' THEN 3
                  WHEN 'speak' THEN 4
+                 WHEN 'sprach' THEN 5
                  ELSE 9
                END,
                e.id
@@ -1382,7 +1390,7 @@ const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {} 
     ],
     parts: sectionSummaries,
     passage:
-      moduleId === "read"
+      moduleId === "read" || moduleId === "sprach"
         ? {
             title: `${sourceLabel}: ${title}`,
             intro: applyExamAlias(metadata.instructions || "Lisez les textes et répondez aux questions.", routeMeta),

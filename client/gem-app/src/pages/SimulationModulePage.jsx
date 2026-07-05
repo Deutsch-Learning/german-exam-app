@@ -4572,7 +4572,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
     if (partIntroVisible && currentPart) return renderPartIntro();
 
-    if (module.id === "read") return renderReading();
+    if (module.id === "read" || module.id === "sprach") return renderReading();
     if (module.id === "listen") return renderListening();
     if (module.id === "write") return renderWriting();
     return renderSpeaking();

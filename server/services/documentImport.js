@@ -16,6 +16,7 @@ const SECTION_LABELS = {
   listen: "Compréhension orale",
   write: "Expression écrite",
   speak: "Expression orale",
+  sprach: "Sprachbausteine",
 };
 
 const normalizeText = (value) =>
@@ -116,6 +117,7 @@ const detectSectionType = (text) => {
     listen: 0,
     write: 0,
     speak: 0,
+    sprach: 0,
   };
 
   [
@@ -123,6 +125,7 @@ const detectSectionType = (text) => {
     ["listen", ["horverstehen", "hörverstehen", "hoeren", "hören", "audio", "transkript"]],
     ["write", ["schreiben", "schriftlicher ausdruck", "schriftliche kommunikation", "expression écrite", "expression ecrite", "private e-mail", "diskussionsbeitrag", "musterloesung teil", "musterlösung teil"]],
     ["speak", ["sprechen", "mündlicher ausdruck", "muendlicher ausdruck", "mündliche kommunikation", "mundliche kommunikation", "mündliche prüfung", "mundliche pruefung", "gelenktes gespräch", "gelenktes gesprach", "selbständige äußerung", "selbstandige ausserung", "kandidat a", "gemeinsam planen"]],
+    ["sprach", ["sprachbausteine", "sprachbaustein", "luecken", "lücken", "lueckentext", "lückentext", "aufgaben 1-10", "aufgaben 11-20"]],
   ].forEach(([section, tokens]) => {
     tokens.forEach((token) => {
       if (haystack.includes(foldForSearch(token))) scores[section] += 1;
@@ -136,6 +139,30 @@ const detectSectionType = (text) => {
   return Object.entries(scores).sort((a, b) => b[1] - a[1])[0][1] > 0
     ? Object.entries(scores).sort((a, b) => b[1] - a[1])[0][0]
     : "read";
+};
+
+const detectProviderFromFilename = (filename = "") => {
+  const normalized = slugify(filename);
+  if (normalized.includes("goethe")) return "goethe";
+  if (normalized.includes("osd") || normalized.includes("oesd")) return "osd";
+  if (normalized.includes("telc")) return "telc";
+  if (normalized.includes("ecl")) return "ecl";
+  return null;
+};
+
+const detectLevelFromFilename = (filename = "") => {
+  const match = String(filename || "").match(/\b(A1|A2|B1|B2|C1|C2)\b/i);
+  return match ? match[1].toUpperCase() : null;
+};
+
+const detectSectionTypeFromFilename = (filename = "") => {
+  const normalized = slugify(filename);
+  if (normalized.includes("sprachbausteine") || normalized.includes("sprachbaustein")) return "sprach";
+  if (normalized.includes("lese") || normalized.includes("lesen")) return "read";
+  if (normalized.includes("schreiben") || normalized.includes("schriftlich")) return "write";
+  if (normalized.includes("sprechen") || normalized.includes("mundlich") || normalized.includes("muendlich")) return "speak";
+  if (normalized.includes("horen") || normalized.includes("hoeren") || normalized.includes("horverstehen")) return "listen";
+  return null;
 };
 
 const detectExamType = (text, provider, level) => {
@@ -2395,6 +2422,193 @@ const parseTelcReadingPartQuestions = (partNumber, partText, answerMap) => {
   return [];
 };
 
+const findTelcSprachSolutionStart = (text) => {
+  const index = String(text ?? "").search(/(?:^|\n)\s*L(?:O|\u00d6|OE|.)SUNGEN\b/i);
+  return index >= 0 ? index : -1;
+};
+
+const splitTelcSprachTaskAndSolution = (text) => {
+  const clean = stripTelcPageDecorations(text);
+  const solutionStart = findTelcSprachSolutionStart(clean);
+  return {
+    taskText: solutionStart >= 0 ? clean.slice(0, solutionStart) : clean,
+    solutionText: solutionStart >= 0 ? clean.slice(solutionStart) : "",
+  };
+};
+
+const splitTelcSprachBlocks = (text) =>
+  splitByMatches(
+    text,
+    /(?:^|\n)\s*(?:(?:\u00dcBUNGSSATZ|UEBUNGSSATZ|UBUNGSSATZ)\s+|AUFGABE\s+)0?(\d{1,2})\b[^\n]*/gi
+  ).filter((block) => {
+    const number = Number(block.match[1]);
+    return number >= 1 && number <= 20;
+  });
+
+const extractTelcSprachTitle = (block) => {
+  const header = compactText(block.match?.[0] || "");
+  const inline = header
+    .replace(/^(?:\u00dcBUNGSSATZ|UEBUNGSSATZ|UBUNGSSATZ|AUFGABE)\s+0?\d{1,2}\b/i, "")
+    .replace(/^[\s|.\-:]+/, "")
+    .trim();
+  if (inline && !/^SPRACHBAUSTEINE$/i.test(inline)) return inline;
+  return `Sprachbausteine ${String(Number(block.match?.[1]) || 1).padStart(2, "0")}`;
+};
+
+const parseTelcSprachAnswerMap = (solutionText) => {
+  const seriesMap = new Map();
+  const blocks = splitTelcSprachBlocks(solutionText);
+  blocks.forEach((block) => {
+    const answers = new Map();
+    const lines = stripTelcPageDecorations(block.text)
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    lines.forEach((line, index) => {
+      for (const match of line.matchAll(/\b(1[0-9]|20|[1-9])\s*[\.)]?\s*([a-o])\b/gi)) {
+        answers.set(Number(match[1]), match[2].toLowerCase());
+      }
+
+      const numbers = [...line.matchAll(/\b(1[0-9]|20|[1-9])\b/g)].map((match) => Number(match[1]));
+      const nextLetters = [...(lines[index + 1] || "").matchAll(/\b([a-o])\b/gi)].map((match) => match[1].toLowerCase());
+      if (numbers.length >= 2 && numbers.length === nextLetters.length) {
+        numbers.forEach((number, offset) => answers.set(number, nextLetters[offset]));
+      }
+    });
+
+    if (answers.size) seriesMap.set(Number(block.match[1]), answers);
+  });
+  return seriesMap;
+};
+
+const extractTelcSprachInlineOptions = (partText, partNumber, answerMap) => {
+  const questions = [];
+  const clean = stripTelcPageDecorations(partText);
+  const optionPattern = /\b(1[0-9]|20|[1-9])\.\s*a\)\s*([\s\S]*?)\s+b\)\s*([\s\S]*?)\s+c\)\s*([\s\S]*?)(?=\s+\d{1,2}\.\s*a\)|(?:^|\n)\s*Teil\s+2\b|(?:^|\n)\s*Wortliste\b|$)/gim;
+  for (const match of clean.matchAll(optionPattern)) {
+    const number = Number(match[1]);
+    const options = ["a", "b", "c"].map((value, index) => ({
+      value,
+      label: trimForDb(match[index + 2], 180),
+    })).filter((option) => option.label);
+    if (options.length < 2) continue;
+    const correct = answerMap.get(number);
+    questions.push({
+      questionType: "multiple_choice",
+      prompt: `Luecke ${number}: Waehlen Sie die passende Loesung.`,
+      options,
+      correctAnswer: correct ? { value: correct } : {},
+      explanation: null,
+      position: number,
+      scoring: { points: 1 },
+      metadata: { telcPart: partNumber, sourceQuestionNumber: number, sprachbausteine: true },
+      sectionType: "sprach",
+    });
+  }
+  return questions;
+};
+
+const extractTelcSprachWordListOptions = (partText) => {
+  const wordListStart = String(partText ?? "").search(/(?:^|\n)\s*(?:Wortliste|Wortkasten|Auswahl)\s*:?\s*(?:\n|$)/i);
+  const source = wordListStart >= 0 ? partText.slice(wordListStart) : partText;
+  const options = [];
+  const seen = new Set();
+  for (const match of source.matchAll(/\b([a-o])\)\s*([\s\S]*?)(?=\s+[a-o]\)|(?:^|\n)\s*(?:Teil\s+\d|AUFGABE|\u00dcBUNGSSATZ|UEBUNGSSATZ|L(?:O|\u00d6|OE|.)SUNGEN)\b|$)/gim)) {
+    const value = match[1].toLowerCase();
+    const previousChar = source[Math.max(0, match.index - 1)] || "";
+    if (/[-\u2010-\u2015]/.test(previousChar)) continue;
+    if (seen.has(value)) continue;
+    const label = trimForDb(match[2], 180);
+    if (!label || /^\d{1,2}\./.test(label)) continue;
+    seen.add(value);
+    options.push({ value, label });
+  }
+  return options;
+};
+
+const parseTelcSprachPartQuestions = (partNumber, partText, answerMap) => {
+  const inlineQuestions = extractTelcSprachInlineOptions(partText, partNumber, answerMap);
+  const expectedNumbers = partNumber === 1
+    ? Array.from({ length: 10 }, (_, index) => index + 1)
+    : Array.from({ length: 10 }, (_, index) => index + 11);
+  const inlineNumbers = new Set(inlineQuestions.map((question) => question.position));
+  const missingNumbers = expectedNumbers.filter((number) => !inlineNumbers.has(number));
+  if (partNumber !== 2 || !missingNumbers.length) return inlineQuestions;
+
+  const wordListOptions = extractTelcSprachWordListOptions(partText);
+  if (wordListOptions.length < 2) return inlineQuestions;
+  const wordListQuestions = missingNumbers.map((number) => {
+    const correct = answerMap.get(number);
+    return {
+      questionType: "multiple_choice",
+      prompt: `Luecke ${number}: Waehlen Sie den passenden Sprachbaustein.`,
+      options: wordListOptions,
+      correctAnswer: correct ? { value: correct } : {},
+      explanation: null,
+      position: number,
+      scoring: { points: 1 },
+      metadata: { telcPart: partNumber, sourceQuestionNumber: number, sprachbausteine: true, wordList: true },
+      sectionType: "sprach",
+    };
+  });
+  return [...inlineQuestions, ...wordListQuestions].sort((a, b) => a.position - b.position);
+};
+
+const parseTelcSprachbausteineSeries = (text, metadata) => {
+  const { taskText, solutionText } = splitTelcSprachTaskAndSolution(text);
+  const answerMap = parseTelcSprachAnswerMap(solutionText);
+  const blocks = splitTelcSprachBlocks(taskText);
+  return blocks.map((block) => {
+    const seriesNumber = Number(block.match[1]);
+    const title = extractTelcSprachTitle(block);
+    const answers = answerMap.get(seriesNumber) || new Map();
+    const partMatches = [...block.text.matchAll(/(?:^|\n)\s*Teil\s+([12])\s*[:.\-\u2010-\u2015]?\s*([^\n]*)/gi)];
+    const sections = partMatches.map((match, index) => {
+      const next = partMatches[index + 1];
+      const partNumber = Number(match[1]);
+      const header = compactText(match[2]) || "Sprachbausteine";
+      const body = block.text.slice(match.index + match[0].length, next ? next.index : block.text.length);
+      const questions = parseTelcSprachPartQuestions(partNumber, body, answers);
+      return {
+        sectionType: "sprach",
+        partNumber,
+        title: `Teil ${partNumber}: ${header}`,
+        instructions: trimForDb([compactText(match[0]), body].join("\n"), 8000),
+        durationMinutes: partNumber === 1 ? 15 : 15,
+        points: 10,
+        scoring: { points: 10 },
+        metadata: { sourceHeader: header, telcFormat: true, sprachbausteine: true },
+        questions,
+      };
+    });
+
+    const fallbackSections = sections.length ? sections : [
+      {
+        sectionType: "sprach",
+        partNumber: 1,
+        title: "Sprachbausteine",
+        instructions: trimForDb(block.text, 8000),
+        durationMinutes: 30,
+        points: 20,
+        scoring: { points: 20 },
+        metadata: { telcFormat: true, sprachbausteine: true, fallback: true },
+        questions: [buildFallbackQuestion({ sectionType: "sprach", prompt: block.text, position: 1, questionType: "compound" })],
+      },
+    ];
+
+    return {
+      seriesNumber,
+      title,
+      sourceLabel: `Sprachbausteine ${String(seriesNumber).padStart(2, "0")}`,
+      instructions: "telc Deutsch Sprachbausteine: zwei Teile mit insgesamt 20 Luecken.",
+      scoring: { totalPoints: 20, parts: { 1: 10, 2: 10 } },
+      metadata: { ...metadata, telcFormat: true, sprachbausteine: true, answerKeyDetected: answers.size > 0 },
+      sections: fallbackSections,
+    };
+  });
+};
+
 const parseTelcReadingSeries = (text, metadata) => {
   const clean = stripTelcPageDecorations(text);
   const blocks = splitTelcSujetBlocks(clean);
@@ -2546,6 +2760,186 @@ const parseTelcSpeakingSeries = (text, metadata) => {
   });
 };
 
+const getB2SeriesPatterns = (metadata) => {
+  const provider = normalizeDetectedProvider(metadata.provider);
+  const sectionType = metadata.sectionType;
+  const patterns = [];
+
+  if (provider === "telc" && sectionType === "read") {
+    patterns.push(/(?:^|\n)\s*(?:\u00dcBUNGSHEFT|UEBUNGSHEFT|UBUNGSHEFT)\s+0?(\d{1,2})\b(?:[^\n]*\n\s*Thema:\s*([^\n]+))?/gi);
+  }
+  if (provider === "ecl" && sectionType === "speak") {
+    patterns.push(/(?:^|\n)\s*SUJET\s+0?(\d{1,2})\s*[-\u2010-\u2015]\s*([^\n]+)/gi);
+  }
+  if (provider === "ecl" && sectionType === "read") {
+    patterns.push(/(?:^|\n)\s*Sujet\s+0?(\d{1,2})\s*(?=\n)/gi);
+  }
+  if (provider === "goethe" && sectionType === "speak") {
+    patterns.push(/(?:^|\n)\s*0?(\d{1,2})\s+([^\n]+?)\s+15\s+Min\b[^\n]*/gi);
+    patterns.push(/(?:^|\n)\s*0?(\d{1,2})\s+([^\n]+?)\s+CORRIG/gi);
+  }
+  if (provider === "goethe" && sectionType === "write") {
+    patterns.push(/(?:^|\n)\s*(\d{1,2})\s+([^\n]+?\s+[-\u2010-\u2015]\s+[^\n]+)/gi);
+  }
+  if (provider === "osd" && sectionType === "write") {
+    patterns.push(/(?:^|\n)\s*OSD\s+B2\s+SCHREIBEN\s*[-\u2010-\u2015]\s*PR(?:\u00dc|UE)FUNG\s+0?(\d{1,2})\s*\/\s*20[^\n]*/gi);
+  }
+
+  patterns.push(/(?:^|\n)\s*(?:Pr(?:\u00fc|ue)fung|PR(?:\u00dc|UE)FUNG)\s+0?(\d{1,2})(?:\s*\/\s*20)?(?:\s*(?:\||[-\u2010-\u2015]|Thema:)\s*([^\n]+))?/gi);
+  patterns.push(/(?:^|\n)\s*0?(\d{1,2})\s+([A-Z\u00c4\u00d6\u00dc][^\n]{12,})/gi);
+
+  return patterns;
+};
+
+const splitB2NumberedBlocks = (text, metadata) => {
+  const clean = stripPdfPageMarkers(text);
+  const candidates = getB2SeriesPatterns(metadata)
+    .map((pattern, priority) => ({
+      priority,
+      blocks: splitByMatches(clean, pattern)
+        .map((block) => {
+          let seriesNumber = Number(block.match[1]);
+          let title = compactText(block.match[2] || "");
+          const splitNumberTitle = title.match(/^(\d)\s+(.+)/);
+          if (splitNumberTitle && (seriesNumber === 1 || seriesNumber === 2)) {
+            const combinedNumber = Number(`${seriesNumber}${splitNumberTitle[1]}`);
+            if (combinedNumber >= 10 && combinedNumber <= 20) {
+              seriesNumber = combinedNumber;
+              title = splitNumberTitle[2];
+            }
+          }
+          return {
+            ...block,
+            seriesNumber,
+            title,
+            bodyLength: compactText(block.text).length,
+          };
+        })
+        .filter((block) => block.seriesNumber >= 1 && block.seriesNumber <= 20 && block.bodyLength >= 450),
+    }))
+    .filter((candidate) => candidate.blocks.length >= 10);
+
+  if (!candidates.length) return [];
+  candidates.sort((a, b) => {
+    const aUnique = new Set(a.blocks.map((block) => block.seriesNumber)).size;
+    const bUnique = new Set(b.blocks.map((block) => block.seriesNumber)).size;
+    if (bUnique !== aUnique) return bUnique - aUnique;
+    if (a.priority !== b.priority) return a.priority - b.priority;
+    return b.blocks.length - a.blocks.length;
+  });
+  return candidates[0].blocks;
+};
+
+const getB2QuestionType = (sectionType, partNumber) => {
+  if (sectionType === "write") return partNumber === 2 ? "writing_forum_post" : "writing_email";
+  if (sectionType === "speak") return partNumber === 1 ? "speaking_prompt" : "speaking_discussion";
+  return "compound";
+};
+
+const buildB2FallbackSections = ({ block, metadata, occurrenceIndex = 0 }) => {
+  const sectionType = metadata.sectionType;
+  const partMatches = [...block.text.matchAll(/(?:^|\n)\s*(?:(?:LESEVERSTEHEN|SCHREIBEN|SPRECHEN)\s*[-\u2010-\u2015]\s*)?(?:TEIL|Teil|AUFGABE|Aufgabe)\s+([1-5])\s*[-\u2010-\u2015:|.]?\s*([^\n]*)/gi)]
+    .filter((match) => {
+      const partNumber = Number(match[1]);
+      const header = compactText(match[0]);
+      const answerKeyCount = (header.match(/\b\d{1,2}\s*:\s*[A-ZRFN]\b/gi) || []).length;
+      if (partNumber < 1 || partNumber > 5) return false;
+      if (/L(?:o|\u00f6|oe)sungen|L(?:o|\u00f6|oe)sungsschl(?:u|\u00fc|ue)ssel|Musterl(?:o|\u00f6|oe)sung|Kriterien|Bewertungsraster/i.test(header)) return false;
+      if (answerKeyCount >= 2) return false;
+      if (/Gesamtpunktzahl|Pkt\.\s*Niveau|Meinung\s*\/\s*15/i.test(header)) return false;
+      return true;
+    });
+
+  const makeSection = ({ partNumber, title, body, header }) => {
+    const prompt = trimForDb([header, body].filter(Boolean).join("\n"), 9000);
+    const points = sectionType === "write" ? (partNumber === 2 ? 40 : 60) : sectionType === "speak" ? null : null;
+    const durationMinutes = sectionType === "write" ? (partNumber === 2 ? 25 : 50) : sectionType === "speak" ? 5 : null;
+    return {
+      sectionType,
+      partNumber,
+      title: title || `${SECTION_LABELS[sectionType] || "Teil"} ${partNumber}`,
+      instructions: trimForDb(body, 9000),
+      durationMinutes,
+      points,
+      scoring: { points, durationMinutes },
+      metadata: { b2Fallback: true, sourceHeader: header || title || "" },
+      questions: [
+        {
+          questionType: getB2QuestionType(sectionType, partNumber),
+          prompt,
+          options: [],
+          correctAnswer: {},
+          explanation: null,
+          position: partNumber,
+          scoring: { points, durationMinutes },
+          metadata: { b2Fallback: true, sourceSeriesNumber: block.seriesNumber },
+          sectionType,
+        },
+      ],
+    };
+  };
+
+  if (partMatches.length) {
+    return partMatches.map((match, index) => {
+      const next = partMatches[index + 1];
+      const partNumber = Number(match[1]);
+      const header = compactText(match[0]);
+      const title = `${/aufgabe/i.test(match[0]) ? "Aufgabe" : "Teil"} ${partNumber}: ${compactText(match[2]) || SECTION_LABELS[sectionType] || "Aufgabe"}`;
+      const body = block.text.slice(match.index + match[0].length, next ? next.index : block.text.length);
+      return makeSection({ partNumber, title, body, header });
+    });
+  }
+
+  const partNumber = occurrenceIndex + 1;
+  return [
+    makeSection({
+      partNumber,
+      title: block.title || `${SECTION_LABELS[sectionType] || "Aufgabe"} ${partNumber}`,
+      body: block.text.slice(block.match[0].length || 0),
+      header: compactText(block.match[0]),
+    }),
+  ];
+};
+
+const parseB2NumberedSeries = (text, metadata) => {
+  const blocks = splitB2NumberedBlocks(text, metadata);
+  if (!blocks.length) return [];
+
+  const groups = new Map();
+  blocks.forEach((block) => {
+    if (!groups.has(block.seriesNumber)) groups.set(block.seriesNumber, []);
+    groups.get(block.seriesNumber).push(block);
+  });
+
+  return Array.from(groups.entries())
+    .sort(([a], [b]) => a - b)
+    .slice(0, 20)
+    .map(([seriesNumber, seriesBlocks]) => {
+      const title = seriesBlocks.find((block) => block.title)?.title || `${metadata.examType || "B2"} ${seriesNumber}`;
+      let sections = seriesBlocks.flatMap((block, occurrenceIndex) =>
+        buildB2FallbackSections({ block, metadata, occurrenceIndex })
+      );
+      if (metadata.sectionType === "write") {
+        const seenParts = new Set();
+        sections = sections.filter((section) => {
+          const partKey = Number(section.partNumber) || section.title;
+          if (seenParts.has(partKey)) return false;
+          seenParts.add(partKey);
+          return true;
+        });
+      }
+      return {
+        seriesNumber,
+        title,
+        sourceLabel: `${metadata.examType || "B2"} ${String(seriesNumber).padStart(2, "0")}`,
+        instructions: `${metadata.examType || "B2"} ${SECTION_LABELS[metadata.sectionType] || metadata.sectionType}: importierter Pruefungssatz.`,
+        scoring: metadata.sectionType === "write" ? { totalPoints: 100 } : {},
+        metadata: { ...metadata, b2Fallback: true },
+        sections,
+      };
+    });
+};
+
 const parseGenericSeries = (text, metadata) => [
   {
     seriesNumber: 1,
@@ -2576,6 +2970,14 @@ const parseStructuredContent = (text, metadata) => {
   const hasTelcSujets = /(?:^|\n)(?:SUJET|Sujet)\s+0?\d{1,2}\s*\/\s*20\b/i.test(text);
   const hasEclSujets = /(?:^|\n)Sujet\s+0?\d{1,2}\s+[-–—]/i.test(text);
   const hasEclCombinations = /(?:^|\n)Kombination\s+0?\d{1,2}\s+[-–—]/i.test(text);
+  if ((provider === "telc" || /Sprachbausteine/i.test(text)) && metadata.sectionType === "sprach") {
+    const series = parseTelcSprachbausteineSeries(text, metadata);
+    if (series.length) return series;
+  }
+  if (provider === "telc" && metadata.level === "B2" && metadata.sectionType === "read") {
+    const series = parseB2NumberedSeries(text, metadata);
+    if (series.length > 1) return series;
+  }
   if ((provider === "telc" || hasTelcSujets) && metadata.sectionType === "read") {
     const series = parseTelcReadingSeries(text, metadata);
     if (series.length) return series;
@@ -2636,6 +3038,10 @@ const parseStructuredContent = (text, metadata) => {
   }
   if (metadata.sectionType === "read" && /PR.FUNGSHEFT\s+\d+\s*\|/i.test(text)) {
     return parseReadingSeries(text, metadata);
+  }
+  if (metadata.level === "B2") {
+    const series = parseB2NumberedSeries(text, metadata);
+    if (series.length > 1) return series;
   }
   return parseGenericSeries(text, metadata);
 };
@@ -2829,13 +3235,16 @@ const validateImportDraftContent = (parsed) => {
 const analyzeExamDocument = async ({ buffer, filename, mimetype }) => {
   if (!buffer?.length) throw new Error("Document buffer is empty");
   const { text, extraction } = await extractDocumentText({ buffer, filename, mimetype });
-  let provider = detectProvider(text);
+  const filenameProvider = detectProviderFromFilename(filename);
+  const filenameLevel = detectLevelFromFilename(filename);
+  const filenameSectionType = detectSectionTypeFromFilename(filename);
+  let provider = filenameProvider || detectProvider(text);
   if (provider === "custom" && /(?:^|\n)(?:SUJET|Sujet)\s+0?\d{1,2}\s*\/\s*20\b/i.test(text) && /\btelc\b/i.test(text)) {
     provider = "telc";
   }
   if (provider === "custom" && /(?:^|\n)SUJET\s+0?\d{1,2}\b/i.test(text)) provider = "osd";
-  const level = detectLevel(text);
-  const sectionType = detectSectionType(text);
+  const level = filenameLevel || detectLevel(text);
+  const sectionType = filenameSectionType || detectSectionType(text);
   const examType = detectExamType(text, provider, level);
   const title = compactText(text).split("\n").slice(0, 3).join(" - ").slice(0, 180);
   const metadata = {
