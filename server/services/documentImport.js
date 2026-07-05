@@ -110,7 +110,7 @@ const detectLevel = (text) => {
 };
 
 const detectSectionType = (text) => {
-  const haystack = text.toLowerCase();
+  const haystack = foldForSearch(text);
   const scores = {
     read: 0,
     listen: 0,
@@ -125,9 +125,13 @@ const detectSectionType = (text) => {
     ["speak", ["sprechen", "mündlicher ausdruck", "muendlicher ausdruck", "mündliche kommunikation", "mundliche kommunikation", "mündliche prüfung", "mundliche pruefung", "gelenktes gespräch", "gelenktes gesprach", "selbständige äußerung", "selbstandige ausserung", "kandidat a", "gemeinsam planen"]],
   ].forEach(([section, tokens]) => {
     tokens.forEach((token) => {
-      if (haystack.includes(token)) scores[section] += 1;
+      if (haystack.includes(foldForSearch(token))) scores[section] += 1;
     });
   });
+
+  if (/(hören|hörverstehen|hoeren|hoerverstehen|audio script|scripts audio|transkription)/i.test(String(text ?? ""))) {
+    scores.listen += 3;
+  }
 
   return Object.entries(scores).sort((a, b) => b[1] - a[1])[0][1] > 0
     ? Object.entries(scores).sort((a, b) => b[1] - a[1])[0][0]
@@ -899,7 +903,9 @@ const parseOsdSpeakingSeries = (text, metadata) => {
 
 const findEclCorrectionStart = (text) => {
   const index = String(text ?? "").search(/CORRIG\S*\s+(?:OFFICIEL|COMPLET)/i);
-  return index >= 0 ? index : -1;
+  if (index >= 0) return index;
+  const fallback = String(text ?? "").search(/(?:^|\n)\s*n?\s*CORRECTIONS\s+[-\u2010-\u2015]\s+(?:ALLE|TOUS\s+LES)\s+20\s+SUJETS/i);
+  return fallback >= 0 ? fallback : -1;
 };
 
 const normalizeEclSeriesTitle = (block, initialTitle) => {
@@ -981,7 +987,7 @@ const extractEclMultipleChoiceQuestions = (partText, answerMap, offset, eclPart)
   const blocks = splitByMatches(body, /(?:^|\n)\s*(\d{1,2})\.\s+/g);
   for (const block of blocks) {
     const sourceNumber = Number(block.match[1]);
-    const raw = block.text.slice(block.match[0].length).trim();
+    const raw = block.text.replace(/^\s*\d{1,2}\.\s+/, "").trim();
     const optionStart = raw.search(/(?:^|\n)\s*n?\s*a\)/i);
     if (optionStart < 0) continue;
     const prompt = raw.slice(0, optionStart).trim();
@@ -1066,8 +1072,11 @@ const parseEclListeningAnswerKeys = (solutionText) => {
     const seriesNumber = Number(block.match[1]);
     const parts = new Map();
     const partMatches = [...block.text.matchAll(/(?:^|\n)\s*TEIL\s+([12])\s*[-–—]\s*([^\n:]+)\s*:/gi)];
-    partMatches.forEach((match, index) => {
-      const next = partMatches[index + 1];
+    const parsedPartMatches = partMatches.length
+      ? partMatches
+      : [...block.text.matchAll(/(?:^|\n)\s*TEIL\s+([12])\s*[-\u2010-\u2015]\s*([^\n:]+)\s*:/gi)];
+    parsedPartMatches.forEach((match, index) => {
+      const next = parsedPartMatches[index + 1];
       const body = block.text.slice(match.index + match[0].length, next ? next.index : block.text.length);
       const answers = new Map();
       compactText(body).split("\n").forEach((line) => {
@@ -1075,6 +1084,12 @@ const parseEclListeningAnswerKeys = (solutionText) => {
         if (!answerMatch) return;
         answers.set(Number(answerMatch[1]), compactText(answerMatch[3]));
       });
+      if (!answers.size) {
+        compactText(body).split("\n").forEach((line) => {
+          const answerMatch = line.match(/^\s*(\d{1,2})\.\s+(.+?)\s*→\s*(.+?)\s*$/);
+          if (answerMatch) answers.set(Number(answerMatch[1]), compactText(answerMatch[3]));
+        });
+      }
       parts.set(Number(match[1]), answers);
     });
     answerKeys.set(seriesNumber, parts);
@@ -1126,7 +1141,7 @@ const extractEclListeningQcmQuestions = ({ taskArea, answers, transcript, audio,
   const blocks = splitByMatches(compactText(taskArea), /(?:^|\n)\s*(\d{1,2})\.\s+/g);
   for (const block of blocks) {
     const sourceNumber = Number(block.match[1]);
-    const raw = block.text.slice(block.match[0].length).trim();
+    const raw = block.text.replace(/^\s*\d{1,2}\.\s+/, "").trim();
     const optionStart = raw.search(/(?:^|\n)\s*A\//i);
     if (optionStart < 0) continue;
     const prompt = compactText(raw.slice(0, optionStart));
@@ -1166,7 +1181,7 @@ const extractEclListeningShortAnswerQuestions = ({ taskArea, answers, transcript
   const blocks = splitByMatches(body, /(?:^|\n)\s*(\d{1,2})\.\s+/g);
   for (const block of blocks) {
     const sourceNumber = Number(block.match[1]);
-    const raw = block.text.slice(block.match[0].length).trim();
+    const raw = block.text.replace(/^\s*\d{1,2}\.\s+/, "").trim();
     const prompt = compactText(raw.replace(/\n?\s*Antwort\s*:\s*_+\s*/gi, "\n").replace(/_+/g, " "));
     const answer = compactText(answers.get(sourceNumber) || "");
     questions.push({
@@ -1223,12 +1238,36 @@ const parseEclVoiceLine = (line) => {
   };
 };
 
+const parseEclCastingRoleLine = (line) => {
+  const match = String(line ?? "").match(/R[ôo]le\s*:\s*([^—-]+)[—-]\s*Genre\s*:\s*([^·\n]+)(?:·\s*[ÂA]ge\s+approximatif\s*:\s*([^·\n]+))?(?:·\s*Caract[èe]re\s+vocal\s*:\s*([^·\n]+))?(?:·\s*d[ée]bit\s*([^\n]+))?/i);
+  if (!match) return null;
+  const style = compactText([match[4], match[5] ? `débit ${match[5]}` : ""].filter(Boolean).join(", "));
+  return {
+    voiceName: compactText(match[1]),
+    speaker: compactText(match[1]),
+    suggestedGender: inferSpeakerGender(match[2]),
+    suggestedAge: Number(String(match[3] || "").match(/\d{2}/)?.[0]) || null,
+    style: style || "natural",
+    emotion: style || "neutral",
+    speed: /lent|posé/i.test(style) ? "0.94x" : /rapide/i.test(style) ? "1.05x" : "0.98x",
+    accent: "Standard German",
+  };
+};
+
 const extractEclAudioMetadata = ({ partText, transcript, header }) => {
-  const fiche = getBetweenMarkers(partText, /FICHE\s+AUDIO\s+ELEVENLABS/i, [
+  let fiche = getBetweenMarkers(partText, /FICHE\s+AUDIO\s+ELEVENLABS/i, [
     /(?:^|\n)SUJET\s+N[°º]?\s*0?\d{1,2}\s*[-–—]\s*TEIL\s+[12]\s*:/i,
   ]);
+  if (!fiche) {
+    fiche = getBetweenMarkers(partText, /FICHE\s+DE\s+CASTING/i, [
+      /(?:^|\n)SUJET\s+N[°Â°Âº]?\s*0?\d{1,2}\s*[-\u2010-\u2015â€“â€”]\s*TEIL\s+[12]\s*:/i,
+    ]);
+  }
   const lines = fiche.split("\n").map((line) => line.trim()).filter(Boolean);
-  const voices = lines.map(parseEclVoiceLine).filter(Boolean);
+  const voices = [
+    ...lines.map(parseEclVoiceLine).filter(Boolean),
+    ...lines.map(parseEclCastingRoleLine).filter(Boolean),
+  ];
   const voiceTable = new Map();
   lines.forEach((line) => {
     const match = line.match(/^([A-Za-zÀ-ÿ][\wÀ-ÿ-]*)\s+([0-9.]+x)\s+(\d+%)\s+(\d+%)\s+(\d+%)/);
@@ -1259,8 +1298,16 @@ const extractEclAudioMetadata = ({ partText, transcript, header }) => {
         accent: "Standard German",
       }));
   const prompt = compactText(fiche.match(/Prompt\s*\([^)]*\)\s*:\s*([^\n]+)/i)?.[1] || "");
-  const sfx = compactText(fiche.match(/SFX\s*:\s*([^\n]+)/i)?.[1] || "");
-  const timing = compactText(fiche.match(/TIMING\s+SFX\s*:\s*([^\n]+)/i)?.[1] || "");
+  const sfx = compactText(
+    fiche.match(/SFX\s*:\s*([^\n]+)/i)?.[1] ||
+    fiche.match(/Bruitage\s+de\s+fond[^:]*:\s*([^\n]+)/i)?.[1] ||
+    ""
+  );
+  const timing = compactText(
+    fiche.match(/TIMING\s+SFX\s*:\s*([^\n]+)/i)?.[1] ||
+    fiche.match(/Placement\s+et\s+dur[ée]e\s+du\s+bruitage\s*:\s*([^\n]+)/i)?.[1] ||
+    ""
+  );
   const speakerTurns = [...transcript.matchAll(/(?:^|\n)\s*([^:\n]{2,40})\s*:/g)].length;
   return {
     provider: "elevenlabs",
@@ -1286,8 +1333,13 @@ const extractEclAudioMetadata = ({ partText, transcript, header }) => {
 };
 
 const parseEclListeningSeries = (text, metadata) => {
-  const clean = stripPdfPageMarkers(text);
-  const correctionStart = findEclListeningCorrectionStart(clean);
+  const clean = stripPdfPageMarkers(text)
+    .replace(/ECL\s+B1\s+Hörverstehen\s+[-–—]\s+20\s+Sujets[^\n]*Page\s+\d+/gi, "\n")
+    .replace(/ECL\s+B1\s+HÃ¶rverstehen\s+[-â€“â€”]\s+20\s+Sujets[^\n]*Page\s+\d+/gi, "\n");
+  let correctionStart = findEclListeningCorrectionStart(clean);
+  if (correctionStart < 0) {
+    correctionStart = clean.search(/(?:^|\n)\s*n?\s*CORRECTIONS\s+[-\u2010-\u2015]\s+(?:ALLE|TOUS\s+LES)\s+20\s+SUJETS/i);
+  }
   const taskText = correctionStart >= 0 ? clean.slice(0, correctionStart) : clean;
   const solutionText = correctionStart >= 0 ? clean.slice(correctionStart) : "";
   const answerKeys = parseEclListeningAnswerKeys(solutionText);
@@ -1352,6 +1404,584 @@ const parseEclListeningSeries = (text, metadata) => {
       sections: series.sections.sort((a, b) => a.partNumber - b.partNumber),
     }))
     .sort((a, b) => a.seriesNumber - b.seriesNumber);
+};
+
+const normalizeBooleanAnswer = (value) => /^(richtig|true|vrai|ja|yes|\+)$/i.test(compactText(value)) ? "true" : "false";
+
+const buildTrueFalseListeningQuestion = ({ prompt, answer, position, transcript, audio, metadata = {}, points = 1 }) => ({
+  questionType: "true_false",
+  prompt: trimForDb(prompt),
+  options: [
+    { value: "true", label: "Richtig" },
+    { value: "false", label: "Falsch" },
+  ],
+  correctAnswer: answer ? { value: normalizeBooleanAnswer(answer), label: compactText(answer) } : {},
+  explanation: null,
+  position,
+  transcript,
+  audio,
+  scoring: { points },
+  metadata,
+  sectionType: "listen",
+});
+
+const buildMultipleChoiceListeningQuestion = ({ prompt, options, answer, position, transcript, audio, metadata = {}, points = 1 }) => ({
+  questionType: "multiple_choice",
+  prompt: trimForDb(prompt),
+  options: (options || []).filter((option) => option.value && option.label),
+  correctAnswer: answer ? { value: String(answer).trim().slice(0, 1).toUpperCase() } : {},
+  explanation: null,
+  position,
+  transcript,
+  audio,
+  scoring: { points },
+  metadata,
+  sectionType: "listen",
+});
+
+const buildMatchingListeningQuestion = ({ prompt, options, answer, position, transcript, audio, metadata = {}, points = 1 }) => ({
+  questionType: "matching",
+  prompt: trimForDb(prompt),
+  options: (options || []).filter((option) => option.value && option.label),
+  correctAnswer: answer ? { value: String(answer).trim() } : {},
+  explanation: null,
+  position,
+  transcript,
+  audio,
+  scoring: { points },
+  metadata,
+  sectionType: "listen",
+});
+
+const stripAudioDirections = (value) =>
+  compactText(value)
+    .replace(/\[[^\]]*(?:Pause|SFX|AUDIO SCRIPT|Zweite Wiedergabe)[^\]]*\]/gi, " ")
+    .replace(/\[Pause\s*\d+s?\]/gi, " ")
+    .replace(/(?:^|\n)\s*Sie hören nun Text \d+\.\s*/gi, "\n")
+    .replace(/(?:^|\n)\s*Sie hören.*?(?:zweimal|einmal)\.?\s*/gi, "\n")
+    .replace(/\s*[-—]\s*Zweite Wiedergabe\s*[-—]\s*/gi, "\n")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const extractSpeakerNamesFromTranscript = (transcript) =>
+  [...new Set([...String(transcript || "").matchAll(/(?:^|\n)\s*([^:\n]{2,48})\s*:/g)].map((match) => compactText(match[1])))]
+    .filter((name) => !/^(text|teil|aufgabe)$/i.test(name));
+
+const inferSpeakerGender = (text = "") => {
+  const folded = foldForSearch(text);
+  if (/(femme|frau|weib|female|moderatorin|sprecherin|mutter|tochter|sara|anna|lena|miriam|petra)/i.test(folded)) return "female";
+  if (/(homme|herr|mann|maenn|male|moderator|sprecher|vater|sohn|thomas|klaus|holmar|herr)/i.test(folded)) return "male";
+  return "";
+};
+
+const parseListeningProductionSpeakers = (value, transcript = "") => {
+  const lines = String(value || "").split("\n").map((line) => line.trim()).filter(Boolean);
+  const speakers = [];
+  lines.forEach((line) => {
+    const voiceLine = line.match(/(?:VOIX|Sprecher|Rôle|Rolle)\s*(\d+|[A-Z])?(?:\s*\(([^)]+)\))?\s*:?\s*([^.\n]+)/i);
+    if (!voiceLine) return;
+    const role = compactText(voiceLine[2] || voiceLine[1] || `Sprecher ${speakers.length + 1}`);
+    const details = compactText(voiceLine[3] || line);
+    speakers.push({
+      id: `speaker-${speakers.length + 1}`,
+      speaker: role,
+      voiceName: role,
+      suggestedGender: inferSpeakerGender(details || role),
+      suggestedAge: Number((details.match(/(?:~|environ|ca\.?)\s*(\d{2})/) || [])[1]) || null,
+      style: details,
+      emotion: details,
+      speed: /lent|langsam|slow/i.test(details) ? "0.92x" : /rapide|schnell|fast/i.test(details) ? "1.05x" : "0.98x",
+      accent: /suisse|schweiz|ch\b/i.test(details) ? "Swiss German light" : /autrich|österreich|austrian/i.test(details) ? "Austrian German light" : "Standard German",
+    });
+  });
+
+  if (speakers.length) return speakers;
+  const names = extractSpeakerNamesFromTranscript(transcript);
+  if (names.length) {
+    return names.map((name, index) => ({
+      id: `speaker-${index + 1}`,
+      speaker: name,
+      voiceName: name,
+      suggestedGender: inferSpeakerGender(name) || (index % 2 ? "female" : "male"),
+      suggestedAge: null,
+      style: "natural German exam voice",
+      emotion: "neutral",
+      speed: "0.98x",
+      accent: "Standard German",
+    }));
+  }
+  return [{
+    id: "speaker-1",
+    speaker: "Narrator",
+    voiceName: "Narrator",
+    suggestedGender: "",
+    suggestedAge: null,
+    style: "clear German exam voice",
+    emotion: "neutral",
+    speed: "0.98x",
+    accent: "Standard German",
+  }];
+};
+
+const extractSfxFromProduction = (value) => {
+  const sfx = compactText(
+    String(value || "").match(/(?:BRUITAGE|SFX)\s*:\s*([^\n]+)/i)?.[1] ||
+    String(value || "").match(/SFX\s+contextuels?\s*:\s*([^\n]+)/i)?.[1] ||
+    ""
+  );
+  return sfx;
+};
+
+const buildListeningAudioMetadata = ({ provider, documentType, situation, transcript, production = "", partNumber, title = "" }) => {
+  const sfx = extractSfxFromProduction(production);
+  const speakers = parseListeningProductionSpeakers(production, transcript);
+  return {
+    provider: "elevenlabs",
+    documentType: documentType || title || "Hörverstehen",
+    listeningType: documentType || title || "Hörverstehen",
+    situation,
+    scene: inferListeningScene({ documentType: documentType || title, situation, sfx }),
+    ambience: sfx ? [{ name: sfx, volume: 0.25, timing: "intro or low background where appropriate" }] : [],
+    sfx,
+    timing: sfx ? "Follow the document production plan." : "",
+    prompt: compactText(production).slice(0, 800),
+    speakers,
+    speakerCount: speakers.length,
+    speakerNames: speakers.map((speaker) => speaker.speaker).filter(Boolean),
+    conversation: {
+      speakerTurns: [...String(transcript || "").matchAll(/(?:^|\n)\s*([^:\n]{2,48})\s*:/g)].length,
+      questionMarks: (String(transcript || "").match(/\?/g) || []).length,
+      hasInterruptions: /!|\.{3}|—/.test(transcript),
+      pace: /radio|bericht|monolog|ansage/i.test(`${documentType} ${title}`) ? "structured" : "natural",
+      partNumber,
+      sourceProvider: provider,
+    },
+  };
+};
+
+const parseInlineTrueFalseAnswer = (line) => {
+  const match = compactText(line).match(/^(\d{1,2})\.\s*(.+?)(?:\s*(?::|6)\s*(RICHTIG|FALSCH))\s*$/i);
+  if (!match) return null;
+  return {
+    number: Number(match[1]),
+    prompt: compactText(match[2]),
+    answer: match[3],
+  };
+};
+
+const parseTelcListeningSeries = (text, metadata) => {
+  const clean = stripPdfPageMarkers(text);
+  const blocks = splitByMatches(clean, /(?:^|\n)SIMULATION\s+0?(\d{1,2})\s*[-—]\s*([^\n]+)/gi);
+  return blocks.map((block) => {
+    const seriesNumber = Number(block.match[1]);
+    const title = compactText(block.match[2]);
+    const partMatches = [...block.text.matchAll(/(?:^|\n)TEIL\s+([123])\s*[-—]\s*([^\n]+)/gi)];
+    const sections = partMatches.map((match, index) => {
+      const partNumber = Number(match[1]);
+      const next = partMatches[index + 1];
+      const body = block.text.slice(match.index + match[0].length, next ? next.index : block.text.length);
+      const header = compactText(match[2]);
+      let transcript = "";
+      let production = "";
+      let questions = [];
+
+      if (partNumber === 1) {
+        const textBlocks = splitByMatches(body, /(?:^|\n)\s*n?\s*Text\s+(\d+)\s*[-—]\s*Transkription\s*:/gi);
+        const textTranscripts = [];
+        textBlocks.forEach((textBlock) => {
+          const textNumber = Number(textBlock.match[1]);
+          const audioIndex = textBlock.text.search(/(?:^|\n)\s*n?\s*AUDIO\s*:/i);
+          const taskIndex = textBlock.text.search(/(?:^|\n)\s*Aufgaben\s+1\s*[–-]\s*5/i);
+          const rawTranscript = textBlock.text.slice(textBlock.match[0].length, audioIndex >= 0 ? audioIndex : textBlock.text.length);
+          const audioLine = audioIndex >= 0 ? textBlock.text.slice(audioIndex, taskIndex >= 0 ? taskIndex : textBlock.text.length) : "";
+          textTranscripts.push(`Text ${textNumber}: ${stripAudioDirections(rawTranscript)}`);
+          production += `\nText ${textNumber}: ${audioLine}`;
+        });
+        transcript = textTranscripts.join("\n");
+      } else {
+        transcript = stripAudioDirections(getBetweenMarkers(body, /Transkription\s*:/i, [/(?:^|\n)\s*n?\s*AUDIO\s*:/i, /(?:^|\n)\s*Aufgaben\s+\d+\s*[–-]\s*\d+/i]));
+        production = getBetweenMarkers(body, /(?:^|\n)\s*n?\s*AUDIO\s*:/i, [/(?:^|\n)\s*Aufgaben\s+\d+\s*[–-]\s*\d+/i]);
+      }
+
+      const audio = buildListeningAudioMetadata({
+        provider: "telc",
+        documentType: header,
+        situation: title,
+        transcript,
+        production,
+        partNumber,
+        title: header,
+      });
+      const taskArea = getBetweenMarkers(body, /(?:^|\n)\s*Aufgaben\s+\d+\s*[–-]\s*\d+/i, [/(?:^|\n)TEIL\s+[123]\s*[-—]/i]) || body;
+      questions = compactText(taskArea)
+        .split("\n")
+        .map(parseInlineTrueFalseAnswer)
+        .filter(Boolean)
+        .map((item) => buildTrueFalseListeningQuestion({
+          prompt: item.prompt,
+          answer: item.answer,
+          position: item.number,
+          transcript,
+          audio,
+          points: 1,
+          metadata: { telcPart: partNumber, seriesNumber, sourceQuestionNumber: item.number },
+        }));
+
+      return {
+        sectionType: "listen",
+        partNumber,
+        title: `Teil ${partNumber}: ${header}`,
+        instructions: trimForDb([match[0], body.split(/(?:^|\n)\s*n?\s*Text\s+1|Transkription\s*:/i)[0]].join("\n"), 4000),
+        durationMinutes: partNumber === 1 ? 8 : partNumber === 2 ? 14 : 8,
+        points: partNumber === 2 ? 10 : 5,
+        scoring: { points: partNumber === 2 ? 10 : 5, listeningPasses: partNumber === 1 ? 1 : 2 },
+        metadata: { telcFormat: true, sourceHeader: header, transcript, audio, answerKeyDetected: questions.length > 0 },
+        questions,
+      };
+    });
+    return {
+      seriesNumber,
+      title,
+      sourceLabel: `Simulation ${String(seriesNumber).padStart(2, "0")}`,
+      instructions: "telc Deutsch B1 Hörverstehen: drei Teile, 20 Aufgaben, 20 Punkte.",
+      scoring: { totalPoints: 20, parts: { 1: 5, 2: 10, 3: 5 } },
+      metadata: { ...metadata, telcFormat: true, listening: true },
+      sections,
+    };
+  });
+};
+
+const parseSolutionAnswerMap = (solutionText) => {
+  const answers = new Map();
+  compactText(solutionText).split("\n").forEach((line) => {
+    const match = line.match(/^\s*(\d{1,2})\s+(Richtig|Falsch|[A-D]|M|A|K|E|B|L)(?:\s|$)/i);
+    if (match && !answers.has(Number(match[1]))) answers.set(Number(match[1]), match[2]);
+  });
+  return answers;
+};
+
+const parseOsdListeningQuestions = ({ body, answers, transcript, audio, seriesNumber, partNumber }) => {
+  const questionBlocks = splitByMatches(body, /(?:^|\n)\s*Aufgabe\s+(\d{1,2})(?:\s*\(([^)]+)\))?\s*:\s*/gi);
+  if (!questionBlocks.length) {
+    return compactText(body)
+      .split("\n")
+      .map((line) => {
+        const match = line.match(/^\s*(\d{1,2})\s+(.+?)\s+n\s+([A-Z])(?:\s+n\s+([A-Z]))+/i);
+        if (!match) return null;
+        const sourceNumber = Number(match[1]);
+        const choices = [...line.matchAll(/\bn\s+([A-Z])\b/g)].map((choice) => choice[1]);
+        const options = choices.map((value) => ({ value, label: value }));
+        return buildMatchingListeningQuestion({
+          prompt: compactText(match[2]),
+          options,
+          answer: answers.get(sourceNumber) || "",
+          position: sourceNumber,
+          transcript,
+          audio,
+          points: 1,
+          metadata: { osdPart: partNumber, seriesNumber, sourceQuestionNumber: sourceNumber },
+        });
+      })
+      .filter(Boolean);
+  }
+  return questionBlocks.map((block) => {
+    const sourceNumber = Number(block.match[1]);
+    const kind = compactText(block.match[2] || "");
+    const raw = block.text.slice(block.match[0].length);
+    const nextMarker = raw.search(/(?:^|\n)\s*(?:Aufgabe\s+\d{1,2}\s*\(|Text\s+\d+:|TEIL\s+\d+)/i);
+    const questionText = nextMarker >= 0 ? raw.slice(0, nextMarker) : raw;
+    const answer = answers.get(sourceNumber) || "";
+    if (/multiple/i.test(kind) || /(?:^|\n)\s*n?\s*A\)/i.test(questionText)) {
+      const options = [...questionText.matchAll(/(?:^|\n)\s*n?\s*([A-D])\)\s*([^\n]+)/gi)].map((match) => ({
+        value: match[1].toUpperCase(),
+        label: compactText(match[2]),
+      }));
+      const prompt = compactText(questionText.replace(/(?:^|\n)\s*n?\s*[A-D]\)\s*[^\n]+/gi, ""));
+      return buildMultipleChoiceListeningQuestion({
+        prompt,
+        options,
+        answer,
+        position: sourceNumber,
+        transcript,
+        audio,
+        points: 1,
+        metadata: { osdPart: partNumber, seriesNumber, sourceQuestionNumber: sourceNumber },
+      });
+    }
+    if (/zuordnen|aussagen/i.test(kind) || /\bn\s+M\s+n\s+A\s+n\s+K/i.test(questionText)) {
+      const options = [
+        { value: "M", label: "Moderator/in" },
+        { value: "A", label: "Andreas / Person A" },
+        { value: "K", label: "Katrin / Person K" },
+        { value: "E", label: "Experte / Person E" },
+        { value: "B", label: "Beide" },
+      ];
+      const prompt = compactText(questionText.replace(/\bn\s+[MAKEB]\b/gi, ""));
+      return buildMatchingListeningQuestion({
+        prompt,
+        options,
+        answer,
+        position: sourceNumber,
+        transcript,
+        audio,
+        points: 1,
+        metadata: { osdPart: partNumber, seriesNumber, sourceQuestionNumber: sourceNumber },
+      });
+    }
+    return buildTrueFalseListeningQuestion({
+      prompt: compactText(questionText.replace(/\bn\s+Richtig\s+n\s+Falsch/gi, "")),
+      answer,
+      position: sourceNumber,
+      transcript,
+      audio,
+      points: 1,
+      metadata: { osdPart: partNumber, seriesNumber, sourceQuestionNumber: sourceNumber },
+    });
+  }).filter((question) => question.prompt);
+};
+
+const parseOsdListeningSeries = (text, metadata) => {
+  const clean = stripPdfPageMarkers(text);
+  const blocks = splitByMatches(clean, /(?:^|\n)(?:ÖSD|OeSD|Ã–SD)\s+Zertifikat\s+B1\s*[–-]\s*Hören\s+Prüfung\s+0?(\d{1,2})\s+Thema:\s*([^\n]+)/gi);
+  return blocks.map((block) => {
+    const seriesNumber = Number(block.match[1]);
+    const title = compactText(block.match[2]);
+    const solutionIndex = block.text.search(/(?:^|\n)\s*LÖSUNGSBLATT/i);
+    const taskText = solutionIndex >= 0 ? block.text.slice(0, solutionIndex) : block.text;
+    const solutionText = solutionIndex >= 0 ? block.text.slice(solutionIndex) : "";
+    const answers = parseSolutionAnswerMap(solutionText);
+    const partMatches = [...taskText.matchAll(/(?:^|\n)TEIL\s+([1-4])\s*[–-]\s*([^\n]+)/gi)];
+    const sections = partMatches.map((match, index) => {
+      const partNumber = Number(match[1]);
+      const next = partMatches[index + 1];
+      const body = taskText.slice(match.index + match[0].length, next ? next.index : taskText.length);
+      const header = compactText(match[2]);
+      const scriptText = compactText(body.replace(/\[[^\]]*SFX[^\]]*\]/gi, "").split(/(?:^|\n)\s*Aufgabe\s+\d+/i)[0] || "");
+      const transcript = stripAudioDirections(scriptText.replace(/Text\s+\d+:\s*[^\n]+/gi, ""));
+      const production = [...body.matchAll(/\[SFX:\s*([^\]]+)\]/gi)].map((m) => `SFX: ${m[1]}`).join("\n");
+      const audio = buildListeningAudioMetadata({
+        provider: "osd",
+        documentType: header,
+        situation: title,
+        transcript,
+        production,
+        partNumber,
+        title: header,
+      });
+      const questions = parseOsdListeningQuestions({ body, answers, transcript, audio, seriesNumber, partNumber });
+      return {
+        sectionType: "listen",
+        partNumber,
+        title: `Teil ${partNumber}: ${header}`,
+        instructions: trimForDb([match[0], body.split(/\[AUDIO SCRIPT/i)[0]].join("\n"), 4000),
+        durationMinutes: partNumber === 1 ? 12 : partNumber === 4 ? 12 : 8,
+        points: questions.length || null,
+        scoring: { points: questions.length || null, totalPoints: 30, listeningPasses: partNumber === 1 || partNumber === 4 ? 2 : 1 },
+        metadata: { osdFormat: true, sourceHeader: header, transcript, audio, answerKeyDetected: answers.size > 0 },
+        questions,
+      };
+    });
+    return {
+      seriesNumber,
+      title,
+      sourceLabel: `Prüfung ${String(seriesNumber).padStart(2, "0")}`,
+      instructions: "ÖSD Zertifikat B1 Hören: vier Teile, 30 Aufgaben, 30 Punkte.",
+      scoring: { totalPoints: 30, parts: { 1: 10, 2: 5, 3: 7, 4: 8 } },
+      metadata: { ...metadata, osdFormat: true, listening: true },
+      sections,
+    };
+  });
+};
+
+const parseGoetheCorrections = (solutionText) => {
+  const partBlocks = splitByMatches(solutionText, /(?:^|\n)Teil\s+([1-4])\s*(?=\n)/gi);
+  const answers = new Map();
+  partBlocks.forEach((block) => {
+    const part = Number(block.match[1]);
+    const partAnswers = new Map();
+    if (part === 1) {
+      [...block.text.matchAll(/(?:^|\n)\s*(\d)\s+(Richtig|Falsch)[\s\S]{0,120}?MC:\s*([ABC])/gi)].forEach((match) => {
+        const n = Number(match[1]);
+        partAnswers.set(n, match[2]);
+        partAnswers.set(n + 5, match[3]);
+      });
+    } else {
+      compactText(block.text).split("\n").forEach((line) => {
+        const match = line.match(/^\s*(\d{1,2})\s+(Richtig|Falsch|[ABC]|Herr\s+[^\s]+|Frau\s+[^\s]+|Dr\.\s+[^\s]+|Moderatorin?|Niemand)/i);
+        if (match) partAnswers.set(Number(match[1]), compactText(match[2]));
+      });
+    }
+    answers.set(part, partAnswers);
+  });
+  return answers;
+};
+
+const parseGoetheTaskQuestions = ({ taskBody, partNumber, answers, transcript, audio, seriesNumber }) => {
+  if (partNumber === 1) {
+    const blocks = splitByMatches(taskBody, /(?:^|\n)Text\s+(\d+)\s*(?=\n)/gi);
+    const questions = [];
+    blocks.forEach((block) => {
+      const textNumber = Number(block.match[1]);
+      const raw = block.text.slice(block.match[0].length);
+      const rf = raw.match(/Richtig\/Falsch\s*:\s*([^\n]+)/i);
+      const mc = raw.match(/Multiple Choice\s*:\s*([^\n]+)([\s\S]*)/i);
+      if (rf) {
+        questions.push(buildTrueFalseListeningQuestion({
+          prompt: compactText(rf[1]),
+          answer: answers.get(textNumber),
+          position: textNumber,
+          transcript,
+          audio,
+          metadata: { goethePart: partNumber, seriesNumber, sourceQuestionNumber: textNumber, textNumber },
+        }));
+      }
+      if (mc) {
+        const options = [...mc[2].matchAll(/(?:^|\n)\s*([ABC])\)\s*([^\n]+)/gi)].map((match) => ({
+          value: match[1].toUpperCase(),
+          label: compactText(match[2]),
+        }));
+        questions.push(buildMultipleChoiceListeningQuestion({
+          prompt: compactText(mc[1]),
+          options,
+          answer: answers.get(textNumber + 5),
+          position: textNumber + 5,
+          transcript,
+          audio,
+          metadata: { goethePart: partNumber, seriesNumber, sourceQuestionNumber: textNumber + 5, textNumber },
+        }));
+      }
+    });
+    return questions;
+  }
+
+  const blocks = splitByMatches(taskBody, /(?:^|\n)\s*(\d{1,2})\.\s+/g);
+  return blocks.map((block) => {
+    const number = Number(block.match[1]);
+    const raw = block.text.slice(block.match[0].length);
+    if (partNumber === 2) {
+      const optionStart = raw.search(/(?:^|\n)\s*A\)/i);
+      const prompt = compactText(raw.slice(0, optionStart >= 0 ? optionStart : raw.length));
+      const options = [...raw.matchAll(/(?:^|\n)\s*([ABC])\)\s*([^\n]+)/gi)].map((match) => ({
+        value: match[1].toUpperCase(),
+        label: compactText(match[2]),
+      }));
+      return buildMultipleChoiceListeningQuestion({
+        prompt,
+        options,
+        answer: answers.get(number),
+        position: number,
+        transcript,
+        audio,
+        metadata: { goethePart: partNumber, seriesNumber, sourceQuestionNumber: number },
+      });
+    }
+    if (partNumber === 3) {
+      return buildTrueFalseListeningQuestion({
+        prompt: compactText(raw),
+        answer: answers.get(number),
+        position: number,
+        transcript,
+        audio,
+        metadata: { goethePart: partNumber, seriesNumber, sourceQuestionNumber: number },
+      });
+    }
+    const options = [
+      { value: "Moderator", label: "Moderator/in" },
+      { value: "Herr Brandt", label: "Herr Brandt / Sprecher 1" },
+      { value: "Frau Ngo", label: "Frau Ngo / Sprecherin" },
+      { value: "Niemand", label: "Niemand" },
+    ];
+    return buildMatchingListeningQuestion({
+      prompt: compactText(raw),
+      options,
+      answer: answers.get(number),
+      position: number,
+      transcript,
+      audio,
+      metadata: { goethePart: partNumber, seriesNumber, sourceQuestionNumber: number },
+    });
+  }).filter((question) => question.prompt);
+};
+
+const extractGoetheScriptPart = (scriptText, partNumber) => {
+  const markers = {
+    1: /Teil\s+1\s*[—-]\s*Scripts/i,
+    2: /Teil\s+2\s*[—-]\s*Script/i,
+    3: /Teil\s+3\s*[—-]\s*Script/i,
+    4: /Teil\s+4\s*[—-]\s*Script/i,
+  };
+  const nextMarkers = Object.entries(markers)
+    .filter(([number]) => Number(number) > partNumber)
+    .map(([, regex]) => regex);
+  return getBetweenMarkers(scriptText, markers[partNumber], [...nextMarkers, /B\.\s*Plan\s+de\s+Production/i]).replace(markers[partNumber], "").trim();
+};
+
+const parseGoetheProductionPart = (productionText, partNumber) =>
+  getBetweenMarkers(productionText, new RegExp(`Teil\\s+${partNumber}\\b`, "i"), [
+    new RegExp(`Teil\\s+${partNumber + 1}\\b`, "i"),
+    /Tableau\s+Param/i,
+  ]);
+
+const parseGoetheListeningSeries = (text, metadata) => {
+  const clean = stripPdfPageMarkers(text);
+  const blocks = splitByMatches(clean, /(?:^|\n)SUJET\s+0?(\d{1,2})\s*[—-]\s*[„"“]([^\n"”]+)/gi);
+  return blocks.map((block) => {
+    const seriesNumber = Number(block.match[1]);
+    const title = compactText(block.match[2]).replace(/[„"“]+/g, "");
+    const scriptStart = block.text.search(/Scripts\s+Audio\s*&\s*Plan\s+de\s+Production/i);
+    const correctionStart = block.text.search(/Corrections\s*&\s*Justifications/i);
+    const taskText = scriptStart >= 0 ? block.text.slice(0, scriptStart) : block.text;
+    const scriptText = scriptStart >= 0 ? block.text.slice(scriptStart, correctionStart >= 0 ? correctionStart : block.text.length) : "";
+    const productionText = getBetweenMarkers(scriptText, /B\.\s*Plan\s+de\s+Production\s+Audio/i, [/Tableau\s+Param/i]);
+    const corrections = correctionStart >= 0 ? block.text.slice(correctionStart) : "";
+    const answerMap = parseGoetheCorrections(corrections);
+    const partMatches = [...taskText.matchAll(/(?:^|\n)Teil\s+([1-4])\s*[—-]\s*([^\n]+)/gi)];
+    const sections = partMatches.map((match, index) => {
+      const partNumber = Number(match[1]);
+      const next = partMatches[index + 1];
+      const body = taskText.slice(match.index + match[0].length, next ? next.index : taskText.length);
+      const header = compactText(match[2]);
+      const transcript = stripAudioDirections(extractGoetheScriptPart(scriptText, partNumber));
+      const production = parseGoetheProductionPart(productionText, partNumber);
+      const audio = buildListeningAudioMetadata({
+        provider: "goethe",
+        documentType: header,
+        situation: title,
+        transcript,
+        production,
+        partNumber,
+        title: header,
+      });
+      const questions = parseGoetheTaskQuestions({
+        taskBody: body,
+        partNumber,
+        answers: answerMap.get(partNumber) || new Map(),
+        transcript,
+        audio,
+        seriesNumber,
+      });
+      return {
+        sectionType: "listen",
+        partNumber,
+        title: `Teil ${partNumber}: ${header}`,
+        instructions: trimForDb([match[0], body.split(/(?:^|\n)Text\s+1|(?:^|\n)\s*1\.\s+/i)[0]].join("\n"), 4000),
+        durationMinutes: partNumber === 1 ? 10 : partNumber === 4 ? 12 : 8,
+        points: questions.length || null,
+        scoring: { points: questions.length || null, totalPoints: 30, listeningPasses: partNumber === 1 || partNumber === 4 ? 2 : 1 },
+        metadata: { goetheFormat: true, sourceHeader: header, transcript, audio, answerKeyDetected: questions.some((q) => Object.keys(q.correctAnswer || {}).length) },
+        questions,
+      };
+    }).filter((section) => section.questions.length || section.metadata.transcript);
+    return {
+      seriesNumber,
+      title,
+      sourceLabel: `Sujet ${String(seriesNumber).padStart(2, "0")}`,
+      instructions: "Goethe-Zertifikat B1 Hören: vier Teile, 30 Aufgaben, ca. 40 Minuten.",
+      scoring: { totalPoints: 30, parts: { 1: 10, 2: 5, 3: 7, 4: 8 } },
+      metadata: { ...metadata, goetheFormat: true, listening: true },
+      sections,
+    };
+  });
 };
 
 const parseEclWritingSolutionBody = (body) => {
@@ -1958,6 +2588,10 @@ const parseStructuredContent = (text, metadata) => {
     const series = parseTelcSpeakingSeries(text, metadata);
     if (series.length) return series;
   }
+  if ((provider === "telc" || /(?:^|\n)SIMULATION\s+0?\d{1,2}\s*[—-]/i.test(text)) && metadata.sectionType === "listen") {
+    const series = parseTelcListeningSeries(text, metadata);
+    if (series.length) return series;
+  }
   if ((provider === "ecl" || hasEclSujets) && metadata.sectionType === "read") {
     const series = parseEclReadingSeries(text, metadata);
     if (series.length) return series;
@@ -1984,6 +2618,14 @@ const parseStructuredContent = (text, metadata) => {
   }
   if ((provider === "osd" || hasOsdSujets) && metadata.sectionType === "speak") {
     const series = parseOsdSpeakingSeries(text, metadata);
+    if (series.length) return series;
+  }
+  if ((provider === "osd" || /Zertifikat\s+B1\s*[–-]\s*Hören\s+Prüfung/i.test(text)) && metadata.sectionType === "listen") {
+    const series = parseOsdListeningSeries(text, metadata);
+    if (series.length) return series;
+  }
+  if ((provider === "goethe" || /Zertifikat\s+B1\s+Hören/i.test(text)) && metadata.sectionType === "listen") {
+    const series = parseGoetheListeningSeries(text, metadata);
     if (series.length) return series;
   }
   if (metadata.sectionType === "speak" && /Thema\s+\d+\s*:/i.test(text)) {

@@ -397,17 +397,11 @@ const synthesizeWithRetry = async ({ adapter, provider, payload }) => {
   throw new TtsProviderError(`${provider} TTS request failed.`, provider);
 };
 
-let elevenLabsVoiceCache = "";
+let elevenLabsVoiceListCache = null;
+const elevenLabsVoiceSelectionCache = new Map();
 
-const findElevenLabsVoice = async (apiKey, speaker = {}) => {
-  const configuredVoice =
-    speaker.voiceId ||
-    speaker.voice_id ||
-    speaker.elevenLabsVoiceId ||
-    process.env.ELEVENLABS_DEFAULT_VOICE_ID;
-  if (configuredVoice) return configuredVoice;
-  if (elevenLabsVoiceCache) return elevenLabsVoiceCache;
-
+const getElevenLabsVoices = async (apiKey) => {
+  if (Array.isArray(elevenLabsVoiceListCache)) return elevenLabsVoiceListCache;
   const response = await fetch("https://api.elevenlabs.io/v1/voices", {
     headers: {
       "xi-api-key": apiKey,
@@ -416,8 +410,27 @@ const findElevenLabsVoice = async (apiKey, speaker = {}) => {
   });
   await assertResponseOk(response, "elevenlabs");
   const payload = await response.json();
-  const voices = Array.isArray(payload.voices) ? payload.voices : [];
+  elevenLabsVoiceListCache = Array.isArray(payload.voices) ? payload.voices : [];
+  return elevenLabsVoiceListCache;
+};
+
+const includesAny = (value, tokens = []) => tokens.some((token) => token && value.includes(token));
+
+const findElevenLabsVoice = async (apiKey, speaker = {}) => {
+  const configuredVoice =
+    speaker.voiceId ||
+    speaker.voice_id ||
+    speaker.elevenLabsVoiceId;
+  if (configuredVoice) return configuredVoice;
+
+  const voiceName = String(speaker.voiceName || speaker.voice || "").trim().toLowerCase();
   const preferredGender = String(speaker.suggestedGender || speaker.gender || "").toLowerCase();
+  const role = String(speaker.speaker || speaker.role || "").trim().toLowerCase();
+  const style = String(speaker.style || speaker.emotion || "").trim().toLowerCase();
+  const cacheKey = [voiceName, preferredGender, role, style].join("|");
+  if (elevenLabsVoiceSelectionCache.has(cacheKey)) return elevenLabsVoiceSelectionCache.get(cacheKey);
+
+  const voices = await getElevenLabsVoices(apiKey);
   const scoreVoice = (voice) => {
     const text = [
       voice.name,
@@ -426,20 +439,28 @@ const findElevenLabsVoice = async (apiKey, speaker = {}) => {
       ...Object.values(asObject(voice.labels)),
     ].join(" ").toLowerCase();
     let score = 0;
+    const name = String(voice.name || "").toLowerCase();
+    const labels = asObject(voice.labels);
+    const voiceGender = String(labels.gender || "").toLowerCase();
+    if (voiceName && (name.includes(voiceName) || voiceName.includes(name.split(/\s+-\s+/)[0]))) score += 40;
     if (/german|deutsch|de[-_ ]?de/.test(text)) score += 12;
     if (/multilingual|european|accent/.test(text)) score += 4;
-    if (preferredGender && text.includes(preferredGender)) score += 3;
+    if (preferredGender && (voiceGender === preferredGender || text.includes(preferredGender))) score += 10;
+    if (!preferredGender && /frau|mutter|moderatorin|sprecherin|sara|anna|lena|miriam|frau/i.test(role) && voiceGender === "female") score += 7;
+    if (!preferredGender && /herr|mann|vater|moderator|sprecher|holmar|thomas|klaus|dr\./i.test(role) && voiceGender === "male") score += 7;
+    if (includesAny(style, ["radio", "moderator", "reporter"]) && /broadcast|news|informative|professional|educational/.test(text)) score += 5;
+    if (includesAny(style, ["freund", "natural", "natürlich", "conversation", "curieux"]) && /conversation|casual|warm/.test(text)) score += 4;
     if (/premade|professional/.test(text)) score += 1;
     return score;
   };
   const selected = voices
     .map((voice) => ({ voice, score: scoreVoice(voice) }))
     .sort((a, b) => b.score - a.score)[0]?.voice;
-  if (!selected?.voice_id) {
-    throw new TtsConfigurationError("No ElevenLabs voice is available for this account.", "elevenlabs");
-  }
-  elevenLabsVoiceCache = selected.voice_id;
-  return elevenLabsVoiceCache;
+  const fallback = process.env.ELEVENLABS_DEFAULT_VOICE_ID;
+  const voiceId = selected?.voice_id || fallback;
+  if (!voiceId) throw new TtsConfigurationError("No ElevenLabs voice is available for this account.", "elevenlabs");
+  elevenLabsVoiceSelectionCache.set(cacheKey, voiceId);
+  return voiceId;
 };
 
 const ensureAudioAssetSchema = async (pool) => {
