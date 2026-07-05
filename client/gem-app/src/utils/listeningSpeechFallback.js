@@ -1,5 +1,7 @@
 const WORDS_PER_MINUTE = 132;
 const MAX_UTTERANCE_CHARS = 220;
+const VOICE_LOAD_TIMEOUT_MS = 2600;
+const VOICE_LOAD_RETRY_MS = 180;
 
 const NAME_GENDER_HINTS = {
   female: [
@@ -169,6 +171,41 @@ const isStructuralSpeakerLabel = (speakerName) => {
 
 const hasSpeakerSetting = (setting = {}) => Object.keys(setting).length > 0;
 
+const isProbablyMobile = () => {
+  if (typeof navigator === "undefined") return false;
+  return /android|iphone|ipad|ipod|mobile|samsungbrowser|wv\)/i.test(navigator.userAgent || "");
+};
+
+const getUserActivationState = () => {
+  if (typeof navigator === "undefined" || !navigator.userActivation) return "unknown";
+  if (navigator.userActivation.isActive) return "active";
+  if (navigator.userActivation.hasBeenActive) return "previously-active";
+  return "inactive";
+};
+
+export const getBrowserSpeechSupport = () => {
+  if (typeof window === "undefined") {
+    return {
+      supported: false,
+      hasSpeechSynthesis: false,
+      hasUtterance: false,
+      isMobile: false,
+      userAgent: "",
+      reason: "not-in-browser",
+    };
+  }
+  const hasSpeechSynthesis = Boolean(window.speechSynthesis);
+  const hasUtterance = Boolean(window.SpeechSynthesisUtterance);
+  return {
+    supported: hasSpeechSynthesis && hasUtterance,
+    hasSpeechSynthesis,
+    hasUtterance,
+    isMobile: isProbablyMobile(),
+    userAgent: navigator.userAgent || "",
+    reason: hasSpeechSynthesis && hasUtterance ? "" : "speech-api-missing",
+  };
+};
+
 export const buildListeningVoicePlan = ({ audio = {}, voices = [] } = {}) => {
   const segments = parseListeningSpeechSegments(audio);
   const pools = getVoicePools(voices);
@@ -224,28 +261,61 @@ export const buildListeningVoicePlan = ({ audio = {}, voices = [] } = {}) => {
   };
 };
 
-const loadVoices = () =>
+export const loadListeningBrowserVoices = ({ timeoutMs = VOICE_LOAD_TIMEOUT_MS, retryMs = VOICE_LOAD_RETRY_MS, onDebug } = {}) =>
   new Promise((resolve) => {
+    if (typeof window === "undefined" || !window.speechSynthesis) {
+      resolve([]);
+      return;
+    }
     const synth = window.speechSynthesis;
     const current = synth.getVoices();
     if (current.length) {
+      onDebug?.({ type: "voices-ready", count: current.length, source: "initial" });
       resolve(current);
       return;
     }
+
+    const startedAt = Date.now();
     const previousHandler = synth.onvoiceschanged;
-    const timer = window.setTimeout(() => {
-      synth.onvoiceschanged = previousHandler;
-      resolve(synth.getVoices());
-    }, 1800);
-    synth.onvoiceschanged = () => {
+    let interval = null;
+    let settled = false;
+
+    const done = (source) => {
+      if (settled) return;
+      const voices = synth.getVoices();
+      if (!voices.length && source !== "timeout") return;
+      settled = true;
+      if (interval) window.clearInterval(interval);
       window.clearTimeout(timer);
       synth.onvoiceschanged = previousHandler;
-      resolve(synth.getVoices());
+      onDebug?.({
+        type: voices.length ? "voices-ready" : "voices-empty",
+        count: voices.length,
+        elapsedMs: Date.now() - startedAt,
+        source,
+      });
+      resolve(voices);
+    };
+
+    const timer = window.setTimeout(() => {
+      done("timeout");
+    }, timeoutMs);
+
+    interval = window.setInterval(() => done("retry"), retryMs);
+    synth.onvoiceschanged = () => {
+      done("voiceschanged");
     };
   });
 
-export const createListeningSpeechFallback = ({ audio, onTime, onEnd, onError }) => {
-  if (typeof window === "undefined" || !window.speechSynthesis || !window.SpeechSynthesisUtterance) return null;
+const isTransientSpeechError = (error) =>
+  /interrupted|canceled|cancelled|network|synthesis|audio-busy|not-allowed/i.test(String(error || ""));
+
+export const createListeningSpeechFallback = ({ audio, onTime, onEnd, onError, onDebug }) => {
+  const support = getBrowserSpeechSupport();
+  if (!support.supported) {
+    onDebug?.({ type: "unsupported", support });
+    return null;
+  }
 
   const synth = window.speechSynthesis;
   const initialPlan = buildListeningVoicePlan({ audio, voices: [] });
@@ -261,6 +331,25 @@ export const createListeningSpeechFallback = ({ audio, onTime, onEnd, onError })
   let timer = null;
   let keepAliveTimer = null;
   let voicesReady = false;
+  let lastError = "";
+  let fallbackTriggered = false;
+  let userActivationAtPlay = "unknown";
+
+  const emitDebug = (event) => {
+    onDebug?.({
+      support,
+      isMobile: support.isMobile,
+      voiceCount: synth.getVoices().length,
+      voicesReady,
+      active,
+      paused,
+      index,
+      userActivationAtPlay,
+      fallbackTriggered,
+      lastError,
+      ...event,
+    });
+  };
 
   const clearTimer = () => {
     if (timer) window.clearInterval(timer);
@@ -320,20 +409,39 @@ export const createListeningSpeechFallback = ({ audio, onTime, onEnd, onError })
     };
     utterance.onerror = (event) => {
       if (!active) return;
+      const error = event?.error || "speech-failed";
+      item.retries = Number(item.retries || 0);
+      if (item.retries < 2 && isTransientSpeechError(error)) {
+        item.retries += 1;
+        emitDebug({ type: "speech-retry", error, retries: item.retries, textPreview: item.text.slice(0, 60) });
+        window.setTimeout(() => {
+          if (!active || paused) return;
+          synth.resume();
+          speakNext();
+        }, 160);
+        return;
+      }
+      lastError = error;
+      fallbackTriggered = true;
       active = false;
       paused = false;
       clearTimer();
       stopKeepAlive();
-      onError?.(event?.error || "speech-failed");
+      emitDebug({ type: "speech-error", error });
+      onError?.(error);
     };
     try {
+      synth.resume();
       synth.speak(utterance);
     } catch (error) {
       if (!active) return;
+      lastError = error?.message || "speech-failed";
+      fallbackTriggered = true;
       active = false;
       paused = false;
       clearTimer();
       stopKeepAlive();
+      emitDebug({ type: "speech-throw", error: lastError });
       onError?.(error?.message || "speech-failed");
     }
   };
@@ -356,8 +464,8 @@ export const createListeningSpeechFallback = ({ audio, onTime, onEnd, onError })
   const warmVoices = () => {
     if (voicesReady) return;
     voicesReady = true;
-    void loadVoices().then((voices) => {
-      if (!active && !paused) rebuildQueue(voices);
+    void loadListeningBrowserVoices({ onDebug: emitDebug }).then((voices) => {
+      if (voices.length && !active && !paused) rebuildQueue(voices);
     });
   };
 
@@ -365,12 +473,15 @@ export const createListeningSpeechFallback = ({ audio, onTime, onEnd, onError })
 
   return {
     play: () => {
+      userActivationAtPlay = getUserActivationState();
+      emitDebug({ type: "play-requested" });
       if (paused) {
         paused = false;
         startedAt = Date.now();
         synth.resume();
         startTimer();
         startKeepAlive();
+        emitDebug({ type: "resumed" });
         return Promise.resolve();
       }
       if (active) return Promise.resolve();
@@ -378,15 +489,19 @@ export const createListeningSpeechFallback = ({ audio, onTime, onEnd, onError })
       warmVoices();
       if (!queue.length) return Promise.reject(new Error("no-speech-segments"));
       synth.cancel();
+      synth.resume();
       active = true;
       paused = false;
       index = 0;
       elapsedBefore = 0;
       startedAt = Date.now();
+      lastError = "";
+      fallbackTriggered = false;
       onTime?.(0);
       startTimer();
       startKeepAlive();
       speakNext();
+      emitDebug({ type: "started", queueLength: queue.length });
       return Promise.resolve();
     },
     pause: () => {
@@ -397,6 +512,7 @@ export const createListeningSpeechFallback = ({ audio, onTime, onEnd, onError })
       stopKeepAlive();
       synth.pause();
       onTime?.(Math.round(elapsedBefore));
+      emitDebug({ type: "paused" });
     },
     reset: () => {
       active = false;
@@ -407,6 +523,7 @@ export const createListeningSpeechFallback = ({ audio, onTime, onEnd, onError })
       stopKeepAlive();
       synth.cancel();
       onTime?.(0);
+      emitDebug({ type: "reset" });
     },
     dispose: () => {
       active = false;
@@ -414,8 +531,26 @@ export const createListeningSpeechFallback = ({ audio, onTime, onEnd, onError })
       clearTimer();
       stopKeepAlive();
       synth.cancel();
+      emitDebug({ type: "disposed" });
     },
     getVoicePlan: () => plan,
+    getDebugInfo: () => ({
+      support,
+      isMobile: support.isMobile,
+      voiceCount: synth.getVoices().length,
+      voicesReady,
+      active,
+      paused,
+      userActivationAtPlay,
+      fallbackTriggered,
+      lastError,
+      selectedVoices: Object.values(plan.assignments || {}).map((assignment) => ({
+        speaker: assignment.speaker,
+        gender: assignment.gender,
+        voiceName: assignment.voiceName,
+        lang: assignment.lang,
+      })),
+    }),
     duration: plan.duration,
   };
 };

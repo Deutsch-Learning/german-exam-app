@@ -61,6 +61,8 @@ import { stripQuestionMaterial } from "../utils/examText";
 
 const LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"];
 const PASS_SCORE = 70;
+const MOBILE_AUDIO_UNSUPPORTED_MESSAGE =
+  "Audio playback is not supported by this browser on this device. Please try Chrome, update your browser, or use another device. If an audio file is available for this test, it will be played instead.";
 
 const ImportedLoadingDots = ({ label = "Importierte Aufgaben werden geladen" }) => (
   <span className={styles.importedLoadingDots} role="status" aria-label={label}>
@@ -1268,6 +1270,7 @@ const toGermanStatus = (value) => {
   if (text.includes("Production audio has not been generated")) return "Das Produktionsaudio wurde noch nicht generiert. Bitte einen Administrator, die Hoeren-Audio-Datei zu erzeugen.";
   if (text.includes("Production audio cannot be played")) return "Die Produktionsaudio-Datei kann auf diesem Geraet gerade nicht abgespielt werden.";
   if (text.includes("Production audio is not available")) return "Das Produktionsaudio ist im Moment nicht verfuegbar.";
+  if (text.includes("Audio playback is not supported")) return "Die Audiowiedergabe wird von diesem Browser auf diesem Geraet nicht unterstuetzt. Bitte versuchen Sie Chrome, aktualisieren Sie den Browser oder nutzen Sie ein anderes Geraet. Wenn eine Audiodatei fuer diesen Test vorhanden ist, wird sie stattdessen abgespielt.";
   if (text.includes("synth")) return "Die Produktionsaudio-Datei ist in diesem Browser nicht verfuegbar.";
   if (text.includes("lecture audio")) return "Die Audiowiedergabe ist auf diesem Geraet fehlgeschlagen. Pruefen Sie die Lautstaerke.";
   if (text.includes("brouillon est vide")) return "Der Entwurf ist leer.";
@@ -2011,6 +2014,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const listeningSpeechFallbackRef = useRef(null);
   const audioSessionRef = useRef(false);
   const audioTimestampRef = useRef(0);
+  const audioDebugRef = useRef(null);
   const timerDeadlineRef = useRef(null);
   const timerExpiredRef = useRef(false);
   const timerSecondsRef = useRef(totalExamDuration);
@@ -2039,6 +2043,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const currentAudioDuration = module.id === "listen"
     ? Math.round(Number(module.audio?.durationSeconds) || listeningAudioDuration || getEstimatedAudioDuration(module.audio))
     : 0;
+  const listeningAudioUrl = module.audio?.audioUrl || "";
   const answeredCount = module.tasks.filter((task, index) => getTaskAnswered(module, task, answers[index])).length;
   const remainingCount = Math.max(0, totalTasks - answeredCount);
   const completedPartCount = examParts.filter((part) =>
@@ -2088,6 +2093,30 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     listeningAmbienceRef.current?.stop(immediate);
   }, []);
 
+  const playProductionAudioFallback = useCallback(async ({ resetTime = true } = {}) => {
+    const productionAudio = listeningAudioRef.current;
+    if (!productionAudio || !listeningAudioUrl) return false;
+    try {
+      if (resetTime) productionAudio.currentTime = 0;
+      await productionAudio.play();
+      void startListeningAmbience().catch(() => {
+        // Saved audio is the important fallback; ambience should never block it.
+      });
+      setAudioPlaying(true);
+      audioSessionRef.current = true;
+      setAudioSessionActive(true);
+      setAudioError("");
+      return true;
+    } catch (error) {
+      audioDebugRef.current = {
+        ...(audioDebugRef.current || {}),
+        type: "mp3-fallback-error",
+        error: error?.message || "production-audio-failed",
+      };
+      return false;
+    }
+  }, [listeningAudioUrl, startListeningAmbience]);
+
   const getListeningSpeechFallback = useCallback(() => {
     if (!module.audio) return null;
     if (!listeningSpeechFallbackRef.current) {
@@ -2106,28 +2135,25 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           audioSessionRef.current = false;
           setAudioSessionActive(false);
         },
-        onError: () => {
+        onError: (error) => {
           setAudioPlaying(false);
           stopListeningAmbience(true);
           audioSessionRef.current = false;
           setAudioSessionActive(false);
-          const productionAudio = listeningAudioRef.current;
-          if (productionAudio && module.audio?.audioUrl) {
-            productionAudio.currentTime = 0;
-            productionAudio.play()
-              .then(() => {
-                void startListeningAmbience();
-                setAudioPlaying(true);
-                audioSessionRef.current = true;
-                setAudioSessionActive(true);
-                setAudioError("");
-              })
-              .catch(() => {
-                setAudioError("Browser speech and production audio are not available on this device.");
-              });
-            return;
+          audioDebugRef.current = {
+            ...(audioDebugRef.current || {}),
+            type: "speech-error",
+            error,
+          };
+          void playProductionAudioFallback().then((playedFallback) => {
+            if (!playedFallback) setAudioError(MOBILE_AUDIO_UNSUPPORTED_MESSAGE);
+          });
+        },
+        onDebug: (event) => {
+          audioDebugRef.current = event;
+          if (import.meta.env.DEV && event?.type && event.type !== "voices-ready") {
+            console.debug("[listening-audio]", event);
           }
-          setAudioError("Browser speech playback is not available on this device.");
         },
       });
       if (listeningSpeechFallbackRef.current?.duration) {
@@ -2135,7 +2161,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       }
     }
     return listeningSpeechFallbackRef.current;
-  }, [currentAudioDuration, module.audio, startListeningAmbience, stopListeningAmbience]);
+  }, [currentAudioDuration, module.audio, playProductionAudioFallback, stopListeningAmbience]);
 
   const armExamTimer = useCallback((seconds, { running = false } = {}) => {
     const safeSeconds = Math.max(0, Math.round(Number(seconds) || 0));
@@ -2643,13 +2669,14 @@ export default function SimulationModulePage({ moduleIdOverride }) {
         setAudioPlaying(false);
         audioSessionRef.current = false;
         setAudioSessionActive(false);
-        setAudioError("Browser speech playback is not available on this device.");
+        const playedFallback = await playProductionAudioFallback();
+        if (!playedFallback) setAudioError(MOBILE_AUDIO_UNSUPPORTED_MESSAGE);
       }
       return;
     }
 
     if (!module.audio?.audioUrl) {
-      setAudioError("No playable listening audio is available on this device yet.");
+      setAudioError(MOBILE_AUDIO_UNSUPPORTED_MESSAGE);
       return;
     }
 
@@ -2672,7 +2699,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       setAudioSessionActive(false);
       setAudioError("Production audio cannot be played on this device right now.");
     }
-  }, [audioSessionActive, audioTimestamp, currentAudioDuration, getListeningSpeechFallback, module.audio, module.id, replaysUsed, startListeningAmbience, stopListeningAmbience]);
+  }, [audioSessionActive, audioTimestamp, currentAudioDuration, getListeningSpeechFallback, module.audio, module.id, playProductionAudioFallback, replaysUsed, startListeningAmbience, stopListeningAmbience]);
 
   const pauseListeningAudio = useCallback(() => {
     setAudioPlaying(false);

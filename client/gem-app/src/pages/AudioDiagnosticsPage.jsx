@@ -4,40 +4,21 @@ import API from "../services/api";
 import {
   buildListeningVoicePlan,
   createListeningSpeechFallback,
+  getBrowserSpeechSupport,
+  loadListeningBrowserVoices,
 } from "../utils/listeningSpeechFallback";
 import { createListeningAmbienceMixer } from "../utils/listeningAmbience";
 import styles from "./AudioDiagnosticsPage.module.css";
 
 const PROVIDERS = ["goethe", "osd", "telc", "ecl"];
 
-const loadBrowserVoices = () =>
-  new Promise((resolve) => {
-    if (!window.speechSynthesis) {
-      resolve([]);
-      return;
-    }
-    const current = window.speechSynthesis.getVoices();
-    if (current.length) {
-      resolve(current);
-      return;
-    }
-    const previousHandler = window.speechSynthesis.onvoiceschanged;
-    const timer = window.setTimeout(() => {
-      window.speechSynthesis.onvoiceschanged = previousHandler;
-      resolve(window.speechSynthesis.getVoices());
-    }, 1800);
-    window.speechSynthesis.onvoiceschanged = () => {
-      window.clearTimeout(timer);
-      window.speechSynthesis.onvoiceschanged = previousHandler;
-      resolve(window.speechSynthesis.getVoices());
-    };
-  });
-
 export default function AudioDiagnosticsPage() {
   const [provider, setProvider] = useState("goethe");
   const [series, setSeries] = useState(1);
   const [content, setContent] = useState(null);
   const [voices, setVoices] = useState([]);
+  const [support, setSupport] = useState(() => getBrowserSpeechSupport());
+  const [debugInfo, setDebugInfo] = useState(null);
   const [status, setStatus] = useState("Load a listening test to inspect the browser voice plan.");
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -48,6 +29,9 @@ export default function AudioDiagnosticsPage() {
   const audio = content?.content?.audio;
   const voicePlan = useMemo(() => buildListeningVoicePlan({ audio: audio || {}, voices }), [audio, voices]);
   const assignments = Object.values(voicePlan.assignments || {});
+  const selectedMaleVoice = assignments.find((assignment) => assignment.gender === "male")?.voiceName || "Not selected";
+  const selectedFemaleVoice = assignments.find((assignment) => assignment.gender === "female")?.voiceName || "Not selected";
+  const selectedNarratorVoice = (voicePlan.fallback?.voiceName || assignments.find((assignment) => assignment.gender === "neutral")?.voiceName) || "Browser default";
 
   const stopPlayback = useCallback(() => {
     speechRef.current?.reset();
@@ -68,7 +52,10 @@ export default function AudioDiagnosticsPage() {
       const safeSeries = String(Math.max(1, Math.min(20, Number(series) || 1))).padStart(2, "0");
       const response = await API.get(`/api/exams/${provider}/series/imported-${provider}-b1-series-${safeSeries}/listen`);
       setContent(response.data);
-      setVoices(await loadBrowserVoices());
+      setSupport(getBrowserSpeechSupport());
+      setVoices(await loadListeningBrowserVoices({
+        onDebug: (event) => setDebugInfo((current) => ({ ...(current || {}), ...event })),
+      }));
       setStatus("Content loaded. Review the assignments, then play the local browser voice test.");
     } catch {
       setError("Could not load this listening test.");
@@ -97,7 +84,15 @@ export default function AudioDiagnosticsPage() {
         onError: () => {
           setPlaying(false);
           ambienceRef.current?.stop(true);
-          setError("Browser speech failed in this environment.");
+          setDebugInfo((current) => ({
+            ...(current || {}),
+            fallbackTriggered: Boolean(audio?.audioUrl),
+            lastError: "Browser speech failed in this environment.",
+          }));
+          setError("Browser speech failed in this environment. If a saved audio file exists, the main test player will try it as fallback.");
+        },
+        onDebug: (event) => {
+          setDebugInfo(event);
         },
       });
     }
@@ -163,6 +158,15 @@ export default function AudioDiagnosticsPage() {
               <span>Segments: {voicePlan.segments.length}</span>
               <span>Estimated duration: {progress}s / {voicePlan.duration}s</span>
               <span>Browser voices found: {voices.length}</span>
+              <span>Mobile device: {support.isMobile ? "Yes" : "No"}</span>
+              <span>speechSynthesis: {support.hasSpeechSynthesis ? "Yes" : "No"}</span>
+              <span>SpeechSynthesisUtterance: {support.hasUtterance ? "Yes" : "No"}</span>
+              <span>User tap state: {debugInfo?.userActivationAtPlay || "not started"}</span>
+              <span>Fallback triggered: {debugInfo?.fallbackTriggered ? "Yes" : "No"}</span>
+              <span>Last error: {debugInfo?.lastError || "None"}</span>
+              <span>Male voice: {selectedMaleVoice}</span>
+              <span>Female voice: {selectedFemaleVoice}</span>
+              <span>Narrator voice: {selectedNarratorVoice}</span>
             </div>
             <table className={styles.table}>
               <thead>
