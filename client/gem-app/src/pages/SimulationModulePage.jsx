@@ -51,6 +51,8 @@ import {
   getMicrophoneConstraints,
   getPreferredRecorderOptions,
 } from "../utils/audio";
+import { createListeningAmbienceMixer } from "../utils/listeningAmbience";
+import { createListeningSpeechFallback } from "../utils/listeningSpeechFallback";
 import NotFoundPage from "./NotFoundPage";
 import ComingSoonPage from "./ComingSoonPage";
 import { getModuleCountLabel, isTopicModule } from "../utils/moduleLabels";
@@ -2005,6 +2007,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const mediaStreamRef = useRef(null);
   const audioChunksRef = useRef([]);
   const listeningAudioRef = useRef(null);
+  const listeningAmbienceRef = useRef(null);
+  const listeningSpeechFallbackRef = useRef(null);
   const audioSessionRef = useRef(false);
   const audioTimestampRef = useRef(0);
   const recordingIntervalRef = useRef(null);
@@ -2052,6 +2056,64 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   }, [auth?.id, level, module.id, module.unavailable, progressScopeId]);
   const audioAtSessionEnd = module.id === "listen" && audioTimestamp >= currentAudioDuration;
   const audioReplayBlocked = module.id === "listen" && replaysUsed >= AUDIO_REPLAY_LIMIT && (!audioSessionActive || audioAtSessionEnd);
+
+  useEffect(() => {
+    listeningAmbienceRef.current?.dispose();
+    listeningAmbienceRef.current = null;
+    listeningSpeechFallbackRef.current?.dispose();
+    listeningSpeechFallbackRef.current = null;
+    return () => {
+      listeningAmbienceRef.current?.dispose();
+      listeningAmbienceRef.current = null;
+      listeningSpeechFallbackRef.current?.dispose();
+      listeningSpeechFallbackRef.current = null;
+    };
+  }, [module.audio]);
+
+  const startListeningAmbience = useCallback(async () => {
+    if (module.id !== "listen" || !module.audio) return;
+    if (!listeningAmbienceRef.current) {
+      listeningAmbienceRef.current = createListeningAmbienceMixer(module.audio);
+    }
+    await listeningAmbienceRef.current?.start();
+  }, [module.audio, module.id]);
+
+  const stopListeningAmbience = useCallback((immediate = false) => {
+    listeningAmbienceRef.current?.stop(immediate);
+  }, []);
+
+  const getListeningSpeechFallback = useCallback(() => {
+    if (!module.audio) return null;
+    if (!listeningSpeechFallbackRef.current) {
+      listeningSpeechFallbackRef.current = createListeningSpeechFallback({
+        audio: module.audio,
+        onTime: (seconds) => {
+          audioTimestampRef.current = seconds;
+          setAudioTimestamp(seconds);
+        },
+        onEnd: () => {
+          const duration = listeningSpeechFallbackRef.current?.duration || currentAudioDuration || 0;
+          audioTimestampRef.current = duration;
+          setAudioTimestamp(duration);
+          setAudioPlaying(false);
+          stopListeningAmbience();
+          audioSessionRef.current = false;
+          setAudioSessionActive(false);
+        },
+        onError: () => {
+          setAudioPlaying(false);
+          stopListeningAmbience(true);
+          audioSessionRef.current = false;
+          setAudioSessionActive(false);
+          setAudioError("Browser speech playback is not available on this device.");
+        },
+      });
+      if (listeningSpeechFallbackRef.current?.duration) {
+        setListeningAudioDuration(listeningSpeechFallbackRef.current.duration);
+      }
+    }
+    return listeningSpeechFallbackRef.current;
+  }, [currentAudioDuration, module.audio, stopListeningAmbience]);
 
   useEffect(() => {
     if (!shouldPersistProgress) {
@@ -2249,12 +2311,14 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setCompleted(true);
     setPartIntroVisible(false);
     setAudioPlaying(false);
+    stopListeningAmbience(true);
+    listeningSpeechFallbackRef.current?.reset();
     if (listeningAudioRef.current) {
       listeningAudioRef.current.pause();
       listeningAudioRef.current.currentTime = 0;
     }
     void saveResultToBackend(score);
-  }, [saveResultToBackend, score]);
+  }, [saveResultToBackend, score, stopListeningAmbience]);
 
   const buildProgressSnapshot = useCallback(
     () => ({
@@ -2397,6 +2461,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   useEffect(
     () => () => {
       listeningAudioRef.current?.pause();
+      listeningAmbienceRef.current?.dispose();
+      listeningSpeechFallbackRef.current?.dispose();
       if (recordingIntervalRef.current) {
         window.clearInterval(recordingIntervalRef.current);
       }
@@ -2448,11 +2514,13 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     recordingSecondsRef.current = 0;
     setResultStatus("");
     setSaveStatus("Simulation démarrée : navigation verrouillée.");
+    stopListeningAmbience(true);
+    listeningSpeechFallbackRef.current?.reset();
     if (listeningAudioRef.current) {
       listeningAudioRef.current.pause();
       listeningAudioRef.current.currentTime = 0;
     }
-  }, [examParts, module, totalExamDuration]);
+  }, [examParts, module, stopListeningAmbience, totalExamDuration]);
 
   const goToNext = useCallback(() => {
     if (currentIndex >= totalTasks - 1) {
@@ -2495,13 +2563,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
   const playListeningAudio = useCallback(async () => {
     if (module.id !== "listen") return;
-    if (!module.audio?.audioUrl) {
-      setAudioError("Production audio has not been generated yet. Ask an administrator to generate the Hoeren audio.");
-      return;
-    }
-    const audioElement = listeningAudioRef.current;
-    if (!audioElement) return;
-
     const replayLimit = AUDIO_REPLAY_LIMIT;
     const startingFresh = audioTimestamp <= 0 || audioTimestamp >= currentAudioDuration || !audioSessionActive;
 
@@ -2515,26 +2576,58 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       audioTimestampRef.current = 0;
       audioSessionRef.current = true;
       setAudioSessionActive(true);
+    }
+
+    if (!module.audio?.audioUrl) {
+      const fallback = getListeningSpeechFallback();
+      if (!fallback) {
+        setAudioError("No playable listening audio is available on this device yet.");
+        return;
+      }
+      try {
+        setAudioError("");
+        await startListeningAmbience();
+        await fallback.play();
+        setAudioPlaying(true);
+      } catch {
+        stopListeningAmbience(true);
+        fallback.reset();
+        setAudioPlaying(false);
+        audioSessionRef.current = false;
+        setAudioSessionActive(false);
+        setAudioError("Browser speech playback is not available on this device.");
+      }
+      return;
+    }
+
+    const audioElement = listeningAudioRef.current;
+    if (!audioElement) return;
+
+    if (startingFresh) {
       audioElement.currentTime = 0;
     }
 
     try {
       setAudioError("");
       await audioElement.play();
+      await startListeningAmbience();
       setAudioPlaying(true);
     } catch {
+      stopListeningAmbience(true);
       setAudioPlaying(false);
       audioSessionRef.current = false;
       setAudioSessionActive(false);
       setAudioError("Production audio cannot be played on this device right now.");
     }
-  }, [audioSessionActive, audioTimestamp, currentAudioDuration, module.audio, module.id, replaysUsed]);
+  }, [audioSessionActive, audioTimestamp, currentAudioDuration, getListeningSpeechFallback, module.audio, module.id, replaysUsed, startListeningAmbience, stopListeningAmbience]);
 
   const pauseListeningAudio = useCallback(() => {
     setAudioPlaying(false);
+    stopListeningAmbience();
     audioTimestampRef.current = listeningAudioRef.current?.currentTime || audioTimestampRef.current;
     listeningAudioRef.current?.pause();
-  }, []);
+    listeningSpeechFallbackRef.current?.pause();
+  }, [stopListeningAmbience]);
 
   const resetListeningAudio = useCallback(() => {
     const audioElement = listeningAudioRef.current;
@@ -2542,12 +2635,14 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       audioElement.pause();
       audioElement.currentTime = 0;
     }
+    listeningSpeechFallbackRef.current?.reset();
+    stopListeningAmbience(true);
     setAudioPlaying(false);
     setAudioTimestamp(0);
     audioTimestampRef.current = 0;
     audioSessionRef.current = false;
     setAudioSessionActive(false);
-  }, []);
+  }, [stopListeningAmbience]);
 
   const handleListeningAudioLoadedMetadata = useCallback((event) => {
     const duration = Math.round(Number(event.currentTarget.duration) || 0);
@@ -2565,16 +2660,18 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setAudioTimestamp(finalDuration);
     audioTimestampRef.current = finalDuration;
     setAudioPlaying(false);
+    stopListeningAmbience();
     audioSessionRef.current = false;
     setAudioSessionActive(false);
-  }, [currentAudioDuration]);
+  }, [currentAudioDuration, stopListeningAmbience]);
 
   const handleListeningAudioError = useCallback(() => {
     setAudioPlaying(false);
+    stopListeningAmbience(true);
     audioSessionRef.current = false;
     setAudioSessionActive(false);
     setAudioError("Production audio is not available yet.");
-  }, []);
+  }, [stopListeningAmbience]);
 
   const saveWritingVersion = useCallback(() => {
     if (module.id !== "write") return;
@@ -3470,7 +3567,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             </div>
             {productionAudioMissing ? (
               <p className={styles.warningText}>
-                <AlertCircle size={16} /> Produktionsaudio wurde noch nicht generiert. Ein Administrator muss die Hoeren-Audio-Datei erzeugen.
+                <AlertCircle size={16} /> Produktionsaudio wurde noch nicht generiert. Bis dahin nutzt diese Aufgabe eine Browser-Stimme mit Hintergrundatmosphaere.
               </p>
             ) : null}
             {audioError ? (
@@ -3551,7 +3648,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           </div>
           {productionAudioMissing ? (
             <p className={styles.warningText}>
-              <AlertCircle size={16} /> Production audio has not been generated yet. Ask an administrator to generate it.
+              <AlertCircle size={16} /> Production audio has not been generated yet. This exercise will use browser speech with background ambience for now.
             </p>
           ) : null}
           {audioError ? (
