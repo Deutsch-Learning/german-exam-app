@@ -1342,35 +1342,6 @@ function AdminExams() {
     }
   };
 
-  const processDocument = async (mode) => {
-    if (!documentFile) return;
-    setDocumentBusy(mode);
-    setDocumentError("");
-    setStatus("");
-    try {
-      const formData = new FormData();
-      formData.append("document", documentFile);
-      const endpoint = mode === "import" ? "/api/admin/exams/import-document" : "/api/admin/exams/analyze-document";
-      const res = await API.post(endpoint, formData);
-      setDocumentAnalysis(res.data.analysis);
-      if (mode === "import") {
-        clearImportedExamCache();
-        setStatus(
-          res.data.duplicate
-            ? "Document already imported. Existing data was kept."
-            : `${res.data.exams?.length ?? 0} exam series imported from document.`
-        );
-        await reload();
-      } else {
-        setStatus("Document analyzed. Review the detected structure before importing.");
-      }
-    } catch (err) {
-      setDocumentError(err.response?.data?.error ?? "Document processing failed.");
-    } finally {
-      setDocumentBusy("");
-    }
-  };
-
   const generateExams = async (event) => {
     event.preventDefault();
     await runAction("generate-exams", async () => {
@@ -3039,12 +3010,6 @@ const getExamPreviewTextClass = (lineType) =>
 const getExamPreviewWrapperClass = (variant = "material") => {
   const baseClass = variant === "instruction" ? examStyles.instructionText : examStyles.examMaterial;
   return `${baseClass} ${examStyles.readableScrollArea} ${styles.examPreviewSurface}`;
-};
-
-const getSectionDisplayTitle = (section) => {
-  const number = Number(section?.part_number ?? section?.partNumber) || 1;
-  const title = getPlainDisplayText(section?.title, "Anweisungen").replace(/^Teil\s+\d+\s*:?\s*/i, "").trim() || "Anweisungen";
-  return `Teil ${number} - ${title}`;
 };
 
 function SectionTitlePreview({ section }) {

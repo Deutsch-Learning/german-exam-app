@@ -38,6 +38,7 @@ const VerifyEmailPage = lazy(() => import("./pages/VerifyEmailPage"));
 const ForgotPasswordPage = lazy(() => import("./pages/ForgotPasswordPage"));
 const ResetPasswordPage = lazy(() => import("./pages/ResetPasswordPage"));
 const AdminPanel = lazy(() => import("./pages/AdminPanel"));
+const AudioDiagnosticsPage = lazy(() => import("./pages/AudioDiagnosticsPage"));
 
 const RouteFallback = () => (
   <div
@@ -106,6 +107,7 @@ function AppRoutes() {
         <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
         <Route path="/dashboard" element={<ProtectedRoute><DashboardMainPage /></ProtectedRoute>} />
         <Route path="/admin/*" element={<AdminRoute><AdminPanel /></AdminRoute>} />
+        <Route path="/audio-lab" element={<AdminRoute><AudioDiagnosticsPage /></AdminRoute>} />
         <Route path="/simulations" element={<ProtectedRoute><SimulationSelectionPage /></ProtectedRoute>} />
         <Route path="/simulations/:examId/:seriesId" element={<SeriesSimulationPage />} />
         <Route path="/simulations/:examId" element={<SeriesSelectionPage />} />
