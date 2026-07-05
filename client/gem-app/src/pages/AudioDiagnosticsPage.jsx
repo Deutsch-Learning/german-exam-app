@@ -21,9 +21,14 @@ const loadBrowserVoices = () =>
       resolve(current);
       return;
     }
-    const timer = window.setTimeout(() => resolve(window.speechSynthesis.getVoices()), 900);
+    const previousHandler = window.speechSynthesis.onvoiceschanged;
+    const timer = window.setTimeout(() => {
+      window.speechSynthesis.onvoiceschanged = previousHandler;
+      resolve(window.speechSynthesis.getVoices());
+    }, 1800);
     window.speechSynthesis.onvoiceschanged = () => {
       window.clearTimeout(timer);
+      window.speechSynthesis.onvoiceschanged = previousHandler;
       resolve(window.speechSynthesis.getVoices());
     };
   });
@@ -101,9 +106,11 @@ export default function AudioDiagnosticsPage() {
       return;
     }
     if (!ambienceRef.current) ambienceRef.current = createListeningAmbienceMixer(audio);
-    await ambienceRef.current?.start();
     await speechRef.current.play();
     setPlaying(true);
+    void ambienceRef.current?.start().catch(() => {
+      // Keep the diagnostics useful even when mobile browsers block Web Audio ambience.
+    });
   }, [audio, playing]);
 
   return (

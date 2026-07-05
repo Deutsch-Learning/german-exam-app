@@ -236,7 +236,7 @@ const loadVoices = () =>
     const timer = window.setTimeout(() => {
       synth.onvoiceschanged = previousHandler;
       resolve(synth.getVoices());
-    }, 900);
+    }, 1800);
     synth.onvoiceschanged = () => {
       window.clearTimeout(timer);
       synth.onvoiceschanged = previousHandler;
@@ -260,6 +260,7 @@ export const createListeningSpeechFallback = ({ audio, onTime, onEnd, onError })
   let elapsedBefore = 0;
   let timer = null;
   let keepAliveTimer = null;
+  let voicesReady = false;
 
   const clearTimer = () => {
     if (timer) window.clearInterval(timer);
@@ -306,7 +307,7 @@ export const createListeningSpeechFallback = ({ audio, onTime, onEnd, onError })
     }
 
     const item = queue[index];
-    const utterance = new SpeechSynthesisUtterance(item.text);
+    const utterance = new window.SpeechSynthesisUtterance(item.text);
     utterance.lang = item.assignment.lang || "de-DE";
     utterance.rate = item.assignment.rate;
     utterance.pitch = item.assignment.pitch;
@@ -325,7 +326,16 @@ export const createListeningSpeechFallback = ({ audio, onTime, onEnd, onError })
       stopKeepAlive();
       onError?.(event?.error || "speech-failed");
     };
-    synth.speak(utterance);
+    try {
+      synth.speak(utterance);
+    } catch (error) {
+      if (!active) return;
+      active = false;
+      paused = false;
+      clearTimer();
+      stopKeepAlive();
+      onError?.(error?.message || "speech-failed");
+    }
   };
 
   const rebuildQueue = (voices) => {
@@ -341,19 +351,32 @@ export const createListeningSpeechFallback = ({ audio, onTime, onEnd, onError })
     });
   };
 
+  rebuildQueue(synth.getVoices());
+
+  const warmVoices = () => {
+    if (voicesReady) return;
+    voicesReady = true;
+    void loadVoices().then((voices) => {
+      if (!active && !paused) rebuildQueue(voices);
+    });
+  };
+
+  warmVoices();
+
   return {
-    play: async () => {
+    play: () => {
       if (paused) {
         paused = false;
         startedAt = Date.now();
         synth.resume();
         startTimer();
         startKeepAlive();
-        return;
+        return Promise.resolve();
       }
-      if (active) return;
-      const voices = await loadVoices();
-      rebuildQueue(voices);
+      if (active) return Promise.resolve();
+      rebuildQueue(synth.getVoices());
+      warmVoices();
+      if (!queue.length) return Promise.reject(new Error("no-speech-segments"));
       synth.cancel();
       active = true;
       paused = false;
@@ -364,6 +387,7 @@ export const createListeningSpeechFallback = ({ audio, onTime, onEnd, onError })
       startTimer();
       startKeepAlive();
       speakNext();
+      return Promise.resolve();
     },
     pause: () => {
       if (!active || paused) return;

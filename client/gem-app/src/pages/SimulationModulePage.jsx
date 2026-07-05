@@ -2632,9 +2632,11 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     if (localSpeech) {
       try {
         setAudioError("");
-        await startListeningAmbience();
         await localSpeech.play();
         setAudioPlaying(true);
+        void startListeningAmbience().catch(() => {
+          // Ambience is decorative; speech playback should continue if mobile browsers block Web Audio.
+        });
       } catch {
         stopListeningAmbience(true);
         localSpeech.reset();
