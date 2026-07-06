@@ -38,10 +38,10 @@ export default function RegisterPage() {
     if (!formData.username.trim()) {
       newErrors.username = "Le nom d'utilisateur est requis.";
     } else if (!/^[a-zA-Z0-9._-]{3,30}$/.test(formData.username.trim())) {
-      newErrors.username = "3-30 caractÃ¨res (lettres, chiffres, . _ -).";
+      newErrors.username = "3-30 caractères (lettres, chiffres, . _ -).";
     }
     if (!formData.firstName.trim())
-      newErrors.firstName = "Le prÃ©nom est requis.";
+      newErrors.firstName = "Le prénom est requis.";
     if (!formData.lastName.trim()) newErrors.lastName = "Le nom est requis.";
     if (!formData.email) {
       newErrors.email = "L'email est requis.";
@@ -49,12 +49,12 @@ export default function RegisterPage() {
       newErrors.email = "Entrez une adresse email valide.";
     }
     if (formData.phone && !/^[\d\s+().-]{8,}$/.test(formData.phone)) {
-      newErrors.phone = "NumÃ©ro de tÃ©lÃ©phone invalide.";
+      newErrors.phone = "Numéro de téléphone invalide.";
     }
     if (!formData.password) {
       newErrors.password = "Le mot de passe est requis.";
     } else if (formData.password.length < 8) {
-      newErrors.password = "Au minimum 8 caractÃ¨res.";
+      newErrors.password = "Au minimum 8 caractères.";
     }
     if (!formData.confirmPassword) {
       newErrors.confirmPassword = "Confirmez le mot de passe.";
@@ -91,9 +91,9 @@ export default function RegisterPage() {
         });
         return;
       }
-      setErrors({ submit: res.data?.error ?? "Une erreur est survenue. RÃ©essayez." });
+      setErrors({ submit: res.data?.error ?? "Une erreur est survenue. Réessayez." });
     } catch (err) {
-      setErrors({ submit: err.response?.data?.error ?? "Une erreur est survenue. RÃ©essayez." });
+      setErrors({ submit: err.response?.data?.error ?? "Une erreur est survenue. Réessayez." });
     } finally {
       setIsLoading(false);
     }
@@ -105,7 +105,7 @@ export default function RegisterPage() {
         <div className="brand-content">
           <div className="brand-logo-placeholder">
             <img src={logo} alt="" width={32} height={32} />
-            <span>Deutsch PrÃ¼fungen</span>
+            <span>Deutsch Prüfungen</span>
           </div>
           <div className="brand-text">
             <h2>{t.auth.registerBrandTitle}</h2>
@@ -117,7 +117,7 @@ export default function RegisterPage() {
       <div className="login-form-panel">
         <div className="form-container">
           <Link className="auth-back-home" to="/">
-            â† {t.auth.backHome}
+            ← {t.auth.backHome}
           </Link>
 
           <div className="form-header">

@@ -2,14 +2,28 @@ const nodemailer = require("nodemailer");
 
 const BRAND_NAME = "N-Deutschprüfungen";
 const RESEND_API_URL = "https://api.resend.com/emails";
+const OFFICIAL_APP_BASE_URL = "https://xn--n-deutschprfungen-d3b.com";
+const OFFICIAL_DOMAIN_PATTERN = /n-deutschpr(?:\u00fc|\u00c3\u00bc|%c3%bc|%fc|\?|\ufffd)fungen(?:\.com)?/gi;
 
 const trimTrailingSlash = (value) => String(value || "").trim().replace(/\/+$/, "");
 
+const normalizePublicUrl = (value) => {
+  const repaired = String(value || "").replace(OFFICIAL_DOMAIN_PATTERN, "xn--n-deutschprfungen-d3b.com");
+  const trimmed = trimTrailingSlash(repaired);
+  if (!trimmed) return "";
+  try {
+    const url = new URL(trimmed);
+    return trimTrailingSlash(url.toString());
+  } catch {
+    return trimmed;
+  }
+};
+
 const getAppBaseUrl = () =>
-  trimTrailingSlash(
+  normalizePublicUrl(
     process.env.APP_BASE_URL ||
       process.env.FRONTEND_URL ||
-      "https://n-deutschprüfungen.com"
+      OFFICIAL_APP_BASE_URL
   );
 
 const getEmailFromName = () => process.env.EMAIL_FROM_NAME || BRAND_NAME;
@@ -360,6 +374,7 @@ const renderPromotionalEmail = ({ title, message, ctaUrl, ctaLabel, unsubscribeU
 module.exports = {
   BRAND_NAME,
   getAppBaseUrl,
+  normalizePublicUrl,
   getSupportEmail,
   sendEmail,
   renderVerificationEmail,

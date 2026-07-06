@@ -1287,11 +1287,21 @@ const GERMAN_HEADING_LABELS = {
   "read-9": ["Organisation der Raeume", "Paedagogische Angebote", "Praktische Einschraenkungen"],
 };
 
+const toPlainDisplayText = (value, fallback = "") => {
+  if (value == null || value === "") return fallback;
+  const raw = String(value);
+  const text = hasRichTextMarkup(raw) ? richTextToPlainText(raw) : raw;
+  return text.replace(/\s+/g, " ").trim() || fallback;
+};
+
 const getProtectedChoiceLabel = (task, option, index = 0) =>
-  GERMAN_CHOICE_LABELS[task.id]?.[option.value] ??
-  GERMAN_HEADING_LABELS[task.id]?.[index] ??
-  option.label ??
-  option;
+  toPlainDisplayText(
+    GERMAN_CHOICE_LABELS[task?.id]?.[option?.value] ??
+      GERMAN_HEADING_LABELS[task?.id]?.[index] ??
+      option?.label ??
+      option,
+    `Option ${index + 1}`
+  );
 
 const AUDIO_REPLAY_LIMIT = 5;
 const AUDIO_WORDS_PER_MINUTE = 132;
@@ -1593,10 +1603,10 @@ const getWritingSuggestions = (task, text) => {
   if (words < task.minWords) {
     germanSuggestions.push(`Fuegen Sie etwa ${task.minWords - words} Wörter hinzu, um das erwartete Minimum zu erreichen.`);
   }
-  if (!/(weil|deshalb|auÃŸerdem|jedoch|trotzdem|zum beispiel|daher|einerseits|andererseits)/i.test(text)) {
+  if (!/(weil|deshalb|außerdem|jedoch|trotzdem|zum beispiel|daher|einerseits|andererseits)/i.test(text)) {
     germanSuggestions.push("Fuegen Sie mindestens einen deutschen Konnektor ein, damit der Text fluessiger wird.");
   }
-  if (task.register === "formell" && !/(Sehr geehrte|Mit freundlichen GrÃ¼ÃŸen|bitte|wÃ¼rde)/i.test(text)) {
+  if (task.register === "formell" && !/(Sehr geehrte|Mit freundlichen Grüßen|bitte|würde)/i.test(text)) {
     germanSuggestions.push("Staerken Sie das formelle Register mit einer passenden Anrede und Schlussformel.");
   }
   if ((text.match(/\bich\b/gi) ?? []).length > 6) {
@@ -1829,15 +1839,15 @@ const buildSeriesModule = (baseModule, content, series) => {
 
 const stringifyAnswer = (value) => {
   if (value == null || value === "") return "Keine Antwort";
-  if (Array.isArray(value)) return value.filter(Boolean).join(" > ") || "Keine Antwort";
-  if (value == null || value === "") return "Aucune réponse";
-  if (Array.isArray(value)) return value.filter(Boolean).join(" > ") || "Aucune réponse";
+  if (Array.isArray(value)) {
+    return value.map((item) => toPlainDisplayText(item)).filter(Boolean).join(" > ") || "Keine Antwort";
+  }
   if (typeof value === "object") {
     return Object.entries(value)
-      .map(([key, item]) => `${key}: ${item || "-"}`)
+      .map(([key, item]) => `${toPlainDisplayText(key, "-")}: ${toPlainDisplayText(item, "-")}`)
       .join(", ");
   }
-  return String(value);
+  return toPlainDisplayText(value, "Keine Antwort");
 };
 
 const getAnswerLabel = (task, answer) => {
@@ -1866,8 +1876,8 @@ const buildResultSummary = (module, answers) => {
       return {
         id: task.id,
         number: index + 1,
-        title: task.title ?? task.question,
-        typeLabel: task.typeLabel,
+        title: toPlainDisplayText(task.title ?? task.question, `Aufgabe ${index + 1}`),
+        typeLabel: toPlainDisplayText(task.typeLabel),
         isCorrect: null,
         userAnswer: `${countWords(answers[index])} Wörter`,
         correctAnswer: formatWritingRequirementGerman(task),
@@ -1880,8 +1890,8 @@ const buildResultSummary = (module, answers) => {
       return {
         id: task.id,
         number: index + 1,
-        title: task.title ?? task.question,
-        typeLabel: task.typeLabel,
+        title: toPlainDisplayText(task.title ?? task.question, `Aufgabe ${index + 1}`),
+        typeLabel: toPlainDisplayText(task.typeLabel),
         isCorrect: taskScore >= PASS_SCORE,
         userAnswer: answers[index]?.duration ? `${answers[index].duration}s` : "Keine Antwort",
         correctAnswer: `Ziel: ${task.responseSeconds}s`,
@@ -1893,8 +1903,8 @@ const buildResultSummary = (module, answers) => {
       return {
         id: task.id,
         number: index + 1,
-        title: task.title ?? task.question,
-        typeLabel: task.typeLabel,
+        title: toPlainDisplayText(task.title ?? task.question, `Aufgabe ${index + 1}`),
+        typeLabel: toPlainDisplayText(task.typeLabel),
         isCorrect: null,
         userAnswer: `${countWords(answers[index])} mots`,
         correctAnswer: formatWritingRequirementFrench(task),
@@ -1907,8 +1917,8 @@ const buildResultSummary = (module, answers) => {
       return {
         id: task.id,
         number: index + 1,
-        title: task.title ?? task.question,
-        typeLabel: task.typeLabel,
+        title: toPlainDisplayText(task.title ?? task.question, `Aufgabe ${index + 1}`),
+        typeLabel: toPlainDisplayText(task.typeLabel),
         isCorrect: taskScore >= PASS_SCORE,
         userAnswer: answers[index]?.duration ? `${answers[index].duration}s` : "Aucune réponse",
         correctAnswer: `Cible: ${task.responseSeconds}s`,
@@ -1920,12 +1930,12 @@ const buildResultSummary = (module, answers) => {
     return {
       id: task.id,
       number: index + 1,
-      title: task.question,
-      typeLabel: task.typeLabel,
+      title: toPlainDisplayText(task.question, `Aufgabe ${index + 1}`),
+      typeLabel: toPlainDisplayText(task.typeLabel),
       isCorrect,
       userAnswer: getAnswerLabel(task, answers[index]),
       correctAnswer: getCorrectLabel(task),
-      explanation: task.explanation,
+      explanation: toPlainDisplayText(task.explanation),
     };
   });
 

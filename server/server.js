@@ -47,6 +47,7 @@ const {
 } = require("./services/ttsService");
 const {
   getAppBaseUrl,
+  normalizePublicUrl,
   sendEmail,
   renderVerificationEmail,
   renderResetPasswordEmail,
@@ -57,7 +58,7 @@ const {
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
-const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
+const FRONTEND_URL = normalizePublicUrl(process.env.FRONTEND_URL || process.env.APP_BASE_URL || "http://localhost:5173");
 const SERVE_CLIENT = process.env.SERVE_CLIENT === "true";
 const CLIENT_DIST_DIR = SERVE_CLIENT
   ? process.env.CLIENT_DIST_DIR
@@ -415,8 +416,11 @@ const sendResetEmail = async (user, token) => {
   return link;
 };
 
-const buildFrontendUrl = (pathName, params = {}) => {
-  const url = new URL(pathName, `${getAppBaseUrl()}/`);
+const buildFrontendUrl = (pathName, params = {}, overrideEnvName = "") => {
+  const configuredUrl = overrideEnvName ? normalizePublicUrl(process.env[overrideEnvName]) : "";
+  const url = configuredUrl
+    ? new URL(configuredUrl)
+    : new URL(pathName, `${getAppBaseUrl()}/`);
   Object.entries(params).forEach(([key, value]) => {
     if (value !== undefined && value !== null && value !== "") url.searchParams.set(key, value);
   });
@@ -424,7 +428,7 @@ const buildFrontendUrl = (pathName, params = {}) => {
 };
 
 const sendVerificationCodeEmail = async (user, token, code) => {
-  const verifyUrl = buildFrontendUrl("/verify-email", { email: user.email });
+  const verifyUrl = buildFrontendUrl("/verify-email", { email: user.email }, "VERIFY_EMAIL_URL");
   const legacyLink = buildFrontendUrl(`/verify-email/${token}`);
   const email = renderVerificationEmail({ user, code, verifyUrl });
   await sendEmail({
@@ -442,7 +446,7 @@ const sendVerificationCodeEmail = async (user, token, code) => {
 };
 
 const sendPasswordResetEmail = async (user, token) => {
-  const resetUrl = buildFrontendUrl(`/reset-password/${token}`);
+  const resetUrl = buildFrontendUrl("/reset-password", { token }, "RESET_PASSWORD_URL");
   const email = renderResetPasswordEmail({ user, resetUrl });
   await sendEmail({
     pool,
@@ -1072,16 +1076,43 @@ const cleanText = (value) =>
     .replace(/[ \t]{2,}/g, " ")
     .trim();
 
+const decodeHtmlEntities = (value) =>
+  String(value ?? "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCharCode(parseInt(code, 16)));
+
+const cleanPlainText = (value) =>
+  cleanText(
+    decodeHtmlEntities(value)
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/(?:p|div|li|tr|h[1-6])>/gi, "\n")
+      .replace(/<[^>]+>/g, " ")
+  );
+
 const clipText = (value, max = 1200) => {
   const text = cleanText(value);
   if (text.length <= max) return text;
   return `${text.slice(0, Math.max(0, max - 1)).trim()}…`;
 };
 
+const clipPlainText = (value, max = 1200) => {
+  const text = cleanPlainText(value);
+  if (text.length <= max) return text;
+  return `${text.slice(0, Math.max(0, max - 1)).trim()}...`;
+};
+
 const extractCorrectValue = (correctAnswer) => {
   const correct = asJsonObject(correctAnswer);
   const value = correct.value ?? correct.answer ?? correct.correct ?? correct.correctAnswer;
-  return value == null ? "" : String(value).trim();
+  return value == null ? "" : cleanPlainText(value);
 };
 
 const normalizeChoiceOptions = (options) => {
@@ -1092,7 +1123,7 @@ const normalizeChoiceOptions = (options) => {
       const label = option?.label ?? option?.text ?? option?.title ?? value;
       return {
         value: String(value),
-        label: clipText(label, 280),
+        label: clipPlainText(label, 280),
       };
     })
     .filter((option) => option.value && option.label);
@@ -1847,7 +1878,7 @@ const registerHandler = async (req, res) => {
          verification_code_hash, verification_code_expires_at,
          last_verification_email_sent_at, marketing_emails_enabled
        )
-       VALUES ($1, $2, $3, $4, $5, 'user', 'active', $6, $7, $8, $9, $10, CASE WHEN $7 IS NULL THEN NULL ELSE NOW() END, $11)
+       VALUES ($1, $2, $3, $4, $5, 'user', 'active', $6, $7, $8, $9, $10, NULL, $11)
        RETURNING id, email, username, first_name, last_name, email_verified, marketing_emails_enabled`,
       [
         normalizedEmail,
@@ -1863,14 +1894,25 @@ const registerHandler = async (req, res) => {
         marketingOptIn,
       ]
     );
-    const verificationUrl = verificationToken
-      ? await sendVerificationCodeEmail(insert.rows[0], verificationToken, verificationCode)
-      : null;
+    let verificationUrl = null;
+    let emailDeliveryFailed = false;
+    if (verificationToken) {
+      try {
+        verificationUrl = await sendVerificationCodeEmail(insert.rows[0], verificationToken, verificationCode);
+        await pool.query(`UPDATE users SET last_verification_email_sent_at = NOW() WHERE id = $1`, [insert.rows[0].id]);
+      } catch (emailErr) {
+        emailDeliveryFailed = true;
+        console.error("Verification email delivery failed", emailErr);
+      }
+    }
     return res.status(201).json({
       ok: true,
       requiresEmailVerification: EMAIL_VERIFICATION_ENABLED,
+      emailDeliveryFailed,
       message: EMAIL_VERIFICATION_ENABLED
-        ? "Compte créé. Entrez le code de vérification envoyé par email."
+        ? emailDeliveryFailed
+          ? "Compte créé. L'email de vérification n'a pas pu être envoyé pour le moment; vous pouvez demander un nouveau code depuis la page de vérification."
+          : "Compte créé. Entrez le code de vérification envoyé par email."
         : "Account created. You can now log in.",
       devVerificationUrl: process.env.NODE_ENV === "production" ? undefined : verificationUrl?.legacyLink,
     });
@@ -1924,7 +1966,7 @@ const resendVerificationHandler = async (req, res) => {
            verification_expires_at = $2,
            verification_code_hash = $3,
            verification_code_expires_at = $4,
-           last_verification_email_sent_at = NOW()
+           last_verification_email_sent_at = NULL
        WHERE id = $5`,
       [
         tokenHash(token),
@@ -1934,7 +1976,17 @@ const resendVerificationHandler = async (req, res) => {
         user.id,
       ]
     );
-    const verificationUrl = await sendVerificationCodeEmail(user, token, code);
+    let verificationUrl;
+    try {
+      verificationUrl = await sendVerificationCodeEmail(user, token, code);
+      await pool.query(`UPDATE users SET last_verification_email_sent_at = NOW() WHERE id = $1`, [user.id]);
+    } catch (emailErr) {
+      console.error("Verification resend delivery failed", emailErr);
+      return res.status(502).json({
+        ok: false,
+        error: "L'email de vérification n'a pas pu être envoyé pour le moment. Réessayez dans quelques minutes.",
+      });
+    }
     return res.json({
       ok: true,
       message: "Si une vérification est nécessaire, un nouveau code a été envoyé.",
@@ -2218,7 +2270,16 @@ const forgotPasswordHandler = async (req, res) => {
         `UPDATE users SET reset_token_hash = $1, reset_expires_at = $2 WHERE id = $3`,
         [tokenHash(token), expiresFromNow(RESET_MINUTES, "minutes"), user.id]
       );
-      resetUrl = await sendPasswordResetEmail(user, token);
+      try {
+        resetUrl = await sendPasswordResetEmail(user, token);
+      } catch (emailErr) {
+        console.error("Password reset email delivery failed", emailErr);
+        await pool.query(`UPDATE users SET reset_token_hash = NULL, reset_expires_at = NULL WHERE id = $1`, [user.id]);
+        return res.status(502).json({
+          ok: false,
+          error: "L'email de réinitialisation n'a pas pu être envoyé pour le moment. Réessayez dans quelques minutes.",
+        });
+      }
     }
 
     return res.json({
@@ -2263,7 +2324,11 @@ const resetPasswordHandler = async (req, res) => {
     }
     await pool.query(`UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL`, [updated.rows[0].id]);
     await logUserAction(updated.rows[0].id, "auth.password_reset", req);
-    await sendPasswordChangedNoticeEmail(updated.rows[0]);
+    try {
+      await sendPasswordChangedNoticeEmail(updated.rows[0]);
+    } catch (emailErr) {
+      console.error("Password changed notice failed", emailErr);
+    }
     return res.json({ ok: true, message: "Password updated. You can now log in." });
   } catch (err) {
     console.error(err);

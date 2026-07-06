@@ -7,11 +7,13 @@ const NAME_GENDER_HINTS = {
   female: [
     "anna", "anne", "eva", "julia", "julie", "maria", "sarah", "laura", "lena", "clara",
     "gabi", "sabine", "monika", "petra", "susanne", "katrin", "katja", "miriam", "frau",
-    "mutter", "tochter", "moderatorin", "sprecherin", "lehrerin", "kundin",
+    "mutter", "tochter", "moderatorin", "sprecherin", "lehrerin", "kundin", "karin",
+    "nadine", "nicole", "stefanie", "verena", "hanna", "sophie", "frau dr",
   ],
   male: [
     "mike", "michael", "ben", "daniel", "frank", "paul", "peter", "thomas", "klaus",
     "markus", "herr", "vater", "sohn", "moderator", "sprecher", "lehrer", "kunde",
+    "stefan", "hans", "max", "tim", "jan", "andreas", "martin", "herr dr",
   ],
 };
 
@@ -41,12 +43,15 @@ const isSpeechMetadataLine = (line = "") => {
 
 const cleanSpeakableText = (value) =>
   normalizeText(value)
+    .replace(/\[[^\]]*(?:geräusch|gerausch|musik|jingle|pause|hintergrund|background|sfx|lachen|applaus|signal|radio|cafe|café)[^\]]*\]/gi, " ")
     .replace(/[■•◆●]/g, " ")
     .replace(/\[\s*_{2,}\s*\]/g, " ")
     .replace(/\[\s*(?:\+|–|-|richtig|falsch)?\s*\]/gi, " ")
     .replace(/_{2,}/g, " ")
     .replace(/[|<>()[\]{}]/g, " ")
     .replace(/[“”"„]/g, "")
+    .replace(/[+*=#\\/^`~@$%€£§©®™]/g, " ")
+    .replace(/\b([a-d])\s*[.)]\s*/gi, "$1 ")
     .replace(/\s*[-–—]\s*/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -211,6 +216,25 @@ const isStructuralSpeakerLabel = (speakerName) => {
 
 const hasSpeakerSetting = (setting = {}) => Object.keys(setting).length > 0;
 
+const normalizeSpeechRate = (...values) => {
+  for (const value of values) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric > 0) return Math.max(0.78, Math.min(1.04, numeric));
+    const key = normalizeKey(value);
+    if (!key) continue;
+    if (/(langsam|slow|ruhig|calm|lent)/.test(key)) return 0.84;
+    if (/(schnell|fast|rapid|vite)/.test(key)) return 0.98;
+    if (/(moderat|normal|standard|mittel|moyen)/.test(key)) return 0.91;
+  }
+  return 0.91;
+};
+
+const getGenderPitch = (gender) => {
+  if (gender === "male") return 0.9;
+  if (gender === "female") return 1.06;
+  return 1;
+};
+
 const isProbablyMobile = () => {
   if (typeof navigator === "undefined") return false;
   return /android|iphone|ipad|ipod|mobile|samsungbrowser|wv\)/i.test(navigator.userAgent || "");
@@ -276,8 +300,8 @@ export const buildListeningVoicePlan = ({ audio = {}, voices = [] } = {}) => {
       voice,
       voiceName: voice?.name || "Browser default German voice",
       lang: voice?.lang || "de-DE",
-      rate: Math.max(0.72, Math.min(1.02, Number(setting.speed || audio.rate) || 0.9)),
-      pitch: gender === "male" ? 0.76 : gender === "female" ? 1.14 : 0.98,
+      rate: normalizeSpeechRate(setting.speed, setting.rate, audio.rate),
+      pitch: getGenderPitch(gender),
     });
   });
 
@@ -288,8 +312,8 @@ export const buildListeningVoicePlan = ({ audio = {}, voices = [] } = {}) => {
     voice: null,
     voiceName: "Browser default German voice",
     lang: "de-DE",
-    rate: Math.max(0.72, Math.min(1.02, Number(audio.rate) || 0.9)),
-    pitch: 0.98,
+    rate: normalizeSpeechRate(audio.rate),
+    pitch: 1,
   };
 
   return {
