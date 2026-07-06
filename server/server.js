@@ -953,6 +953,59 @@ const normalizeChoiceOptions = (options) => {
     .filter((option) => option.value && option.label);
 };
 
+const LISTENING_STUDENT_INSTRUCTION = "Hören Sie den Audiotext und beantworten Sie die Aufgaben zu diesem Teil.";
+
+const foldPlain = (value) =>
+  String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+const isListeningSourceLine = (line = "") => {
+  const folded = foldPlain(line).replace(/^[■•*\-\s]+/, "").trim();
+  return (
+    /^(type|type de document|voix|voice|sprecher|sprecherin|rolle|role|debit|tempo|style|registre|bruitages|sfx|transcription audio|transkription|transcript|script audio|skript|fiche de production|plan de production|profils? de voix)\b/.test(folded) ||
+    /^(femme|homme|female|male|frau|mann),?\s*\d/.test(folded) ||
+    /^(debut|milieu|fin)\s*:/.test(folded)
+  );
+};
+
+const cleanListeningStudentText = (value) =>
+  cleanText(value)
+    .replace(/[■•]/g, "")
+    .replace(/\[\s*_{2,}\s*\]/g, "")
+    .replace(/\[\s*(?:\+|–|-|richtig|falsch)?\s*\]/gi, "")
+    .replace(/_{2,}/g, "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !isListeningSourceLine(line))
+    .filter((line) => !/^(?:korrig|correction|loesung|losung|answer key)\b/i.test(foldPlain(line)))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+const extractListeningStudentPrompt = (value, fallbackTitle = "") => {
+  const raw = cleanText(value);
+  const markers = [
+    /(?:^|\n)\s*Aufgaben\s+\d{1,2}/i,
+    /(?:^|\n)\s*Aufgabe\s+\d{1,2}\s*:/i,
+    /(?:^|\n)\s*Fragen\s+\d{1,2}/i,
+    /(?:^|\n)\s*Questions?\s*\/?\s*T(?:A|Â)CHES/i,
+    /(?:^|\n)\s*\d{1,2}\.\s+\S/i,
+  ];
+  const starts = markers
+    .map((regex) => raw.match(regex)?.index ?? -1)
+    .filter((index) => index >= 0);
+  const taskOnly = starts.length ? raw.slice(Math.min(...starts)) : "";
+  const cleaned = cleanListeningStudentText(taskOnly || raw);
+  const safeTitle = cleanListeningStudentText(fallbackTitle);
+  if (!cleaned || cleaned.length < 12 || /transcription audio|transkription|script audio/i.test(cleaned.slice(0, 140))) {
+    return safeTitle ? `${LISTENING_STUDENT_INSTRUCTION}\n\n${safeTitle}` : LISTENING_STUDENT_INSTRUCTION;
+  }
+  return `${LISTENING_STUDENT_INSTRUCTION}\n\n${clipText(cleaned, 2400)}`;
+};
+
 const toPublicSeriesList = (rows, routeMeta = {}) => {
   const groups = new Map();
 
@@ -1011,12 +1064,15 @@ const toPublicSeriesList = (rows, routeMeta = {}) => {
   }
 
   return Array.from(groups.values()).map((series) => {
-    MODULE_ORDER.forEach((moduleId) => {
+    const expectedModules = series.examId === "telc"
+      ? MODULE_ORDER
+      : MODULE_ORDER.filter((moduleId) => moduleId !== "sprach");
+    expectedModules.forEach((moduleId) => {
       if (!series.modules[moduleId]) {
         series.modules[moduleId] = buildUnavailableModuleMeta(moduleId);
       }
     });
-    const moduleIds = MODULE_ORDER.filter((moduleId) => series.modules[moduleId]);
+    const moduleIds = expectedModules.filter((moduleId) => series.modules[moduleId]);
     const orderedModules = Object.fromEntries(
       moduleIds.map((moduleId) => [moduleId, series.modules[moduleId]])
     );
@@ -1088,6 +1144,59 @@ const buildTaskPartMeta = (question, index = 0) => {
     partDurationMinutes: Number(question.section_duration_minutes) || null,
     partPoints: Number(question.section_points) || null,
     sourceQuestionNumber: metadata.sourceQuestionNumber ?? question.position ?? index + 1,
+  };
+};
+
+const buildListeningTask = (question, index = 0) => {
+  const questionType = String(question.question_type || "").toLowerCase();
+  const correctValue = extractCorrectValue(question.correct_answer);
+  const options = normalizeChoiceOptions(question.options);
+  const metadata = asJsonObject(question.source_metadata);
+  const base = {
+    id: `db-question-${question.id}`,
+    level: question.level || "B1",
+    typeLabel: question.section_title || `Hören Teil ${question.part_number || index + 1}`,
+    question: extractListeningStudentPrompt(question.prompt || question.section_instructions, question.section_title),
+    hint: "Hören Sie den Audiotext aufmerksam und beantworten Sie die Aufgaben.",
+    explanation: question.explanation || "Antwort aus dem importierten Hörverstehen-Modul.",
+    sourceQuestionId: question.id,
+    contentStyle: asJsonObject(metadata.contentStyle),
+    ...buildTaskPartMeta(question, index),
+    partInstructions: LISTENING_STUDENT_INSTRUCTION,
+  };
+
+  if (questionType.includes("true_false")) {
+    return {
+      ...base,
+      type: "trueFalse",
+      correct: /^(richtig|true|vrai|ja|yes)$/i.test(correctValue) ? "true" : "false",
+    };
+  }
+
+  if (questionType.includes("multiple") && options.length >= 2) {
+    return {
+      ...base,
+      type: "multiple",
+      options,
+      correct: correctValue || options[0].value,
+    };
+  }
+
+  if (questionType.includes("matching") && options.length) {
+    return {
+      ...base,
+      type: "select",
+      options,
+      correct: correctValue || options[0].value,
+      alternatives: correctValue ? [correctValue.toLowerCase(), correctValue.toUpperCase()] : [],
+    };
+  }
+
+  return {
+    ...base,
+    type: "blank",
+    correct: correctValue,
+    alternatives: correctValue ? [correctValue.toLowerCase(), correctValue.toUpperCase()] : [],
   };
 };
 
@@ -1354,8 +1463,12 @@ const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {} 
     label: `Teil ${section.part_number || section.position}`,
     number: Number(section.part_number) || Number(section.position) || null,
     heading: applyExamAlias(section.title, routeMeta),
-    text: clipText(applyExamAlias(section.instructions || section.title, routeMeta), 2600),
-    instructions: clipText(applyExamAlias(section.instructions || section.title, routeMeta), 5200),
+    text: moduleId === "listen"
+      ? LISTENING_STUDENT_INSTRUCTION
+      : clipText(applyExamAlias(section.instructions || section.title, routeMeta), 2600),
+    instructions: moduleId === "listen"
+      ? LISTENING_STUDENT_INSTRUCTION
+      : clipText(applyExamAlias(section.instructions || section.title, routeMeta), 5200),
     durationMinutes: Number(section.duration_minutes) || null,
     points: Number(section.points) || null,
   }));
@@ -1365,6 +1478,8 @@ const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {} 
     tasks = questions.map((question, index) => buildWritingTask(question, index));
   } else if (moduleId === "speak") {
     tasks = questions.map((question, index) => buildSpeakingTask(question, index));
+  } else if (moduleId === "listen") {
+    tasks = questions.map((question, index) => buildListeningTask(question, index));
   } else {
     tasks = questions.map((question, index) => buildReadingTask(question, index));
   }

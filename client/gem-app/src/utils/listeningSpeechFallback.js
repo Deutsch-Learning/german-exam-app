@@ -30,8 +30,48 @@ const normalizeKey = (value) =>
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
 
+const isSpeechMetadataLine = (line = "") => {
+  const key = normalizeKey(line);
+  return (
+    /^(type|type de document|voix|voice|sprecher|sprecherin|rolle|role|debit|tempo|style|registre|bruitages|sfx|transcription audio|transkription|transcript|script audio|skript|fiche de production|plan de production|profils? de voix)\b/.test(key) ||
+    /^(femme|homme|female|male|frau|mann)\s+\d/.test(key) ||
+    /^(debut|milieu|fin)\b/.test(key)
+  );
+};
+
+const cleanSpeakableText = (value) =>
+  normalizeText(value)
+    .replace(/[■•◆●]/g, " ")
+    .replace(/\[\s*_{2,}\s*\]/g, " ")
+    .replace(/\[\s*(?:\+|–|-|richtig|falsch)?\s*\]/gi, " ")
+    .replace(/_{2,}/g, " ")
+    .replace(/[|<>()[\]{}]/g, " ")
+    .replace(/[“”"„]/g, "")
+    .replace(/\s*[-–—]\s*/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const sanitizeTranscriptForSpeech = (value) => {
+  const lines = normalizeText(value)
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const cleanLines = [];
+
+  for (const line of lines) {
+    const key = normalizeKey(line);
+    if (/^(aufgaben|aufgabe\s+\d|questions?|corrig|correction|loesung|losung|answer key)\b/.test(key)) break;
+    if (isSpeechMetadataLine(line)) continue;
+    const cleanLine = cleanSpeakableText(line);
+    if (cleanLine) cleanLines.push(cleanLine);
+  }
+
+  return cleanLines.join("\n").trim();
+};
+
 const splitIntoSpeakableChunks = (text) => {
-  const normalized = normalizeText(text);
+  const normalized = cleanSpeakableText(text);
   if (normalized.length <= MAX_UTTERANCE_CHARS) return [normalized].filter(Boolean);
   const sentences = normalized.split(/(?<=[.!?])\s+/);
   const chunks = [];
@@ -63,10 +103,10 @@ const estimateDuration = (segments, rate = 0.92) => {
 
 const parseSegmentLine = (line, fallbackSpeaker) => {
   const match = line.match(/^([^:\n]{2,56})\s*:\s*(.+)$/);
-  if (!match) return { speaker: fallbackSpeaker, text: line };
+  if (!match) return { speaker: fallbackSpeaker, text: cleanSpeakableText(line) };
   return {
-    speaker: match[1].trim(),
-    text: normalizeText(match[2]),
+    speaker: cleanSpeakableText(match[1]),
+    text: cleanSpeakableText(match[2]),
   };
 };
 
@@ -74,7 +114,7 @@ export const parseListeningSpeechSegments = (audio = {}) => {
   const tracks = Array.isArray(audio.tracks) ? audio.tracks : [];
   const segments = [];
   tracks.forEach((track, trackIndex) => {
-    const text = normalizeText(track.transcript || track.audio?.transcript || "");
+    const text = sanitizeTranscriptForSpeech(track.transcript || track.audio?.transcript || "");
     const fallbackSpeaker = track.title || `Narrator ${trackIndex + 1}`;
     text.split("\n").map((line) => line.trim()).filter(Boolean).forEach((line) => {
       const parsed = parseSegmentLine(line, fallbackSpeaker);
@@ -88,7 +128,7 @@ export const parseListeningSpeechSegments = (audio = {}) => {
 
   if (segments.length) return segments.filter((segment) => segment.text);
 
-  return normalizeText(audio.transcript || "")
+  return sanitizeTranscriptForSpeech(audio.transcript || "")
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean)

@@ -2765,6 +2765,21 @@ const getB2SeriesPatterns = (metadata) => {
   const sectionType = metadata.sectionType;
   const patterns = [];
 
+  if (sectionType === "listen") {
+    if (provider === "ecl") {
+      patterns.push(/(?:^|\n)\s*S(?:\u00c9|E)RIE\s+0?(\d{1,2})\s*[-\u2010-\u2015]\s*([^\n]+)/gi);
+    }
+    if (provider === "telc") {
+      patterns.push(/(?:^|\n)\s*SUJET\s+0?(\d{1,2})\s*[-\u2010-\u2015]\s*([^\n]+)/gi);
+    }
+    if (provider === "osd") {
+      patterns.push(/(?:^|\n)\s*N\s+0?(\d{1,2})\s+([^\n]+)/gi);
+    }
+    if (provider === "goethe") {
+      patterns.push(/(?:^|\n)\s*(?:Pr(?:\u00fc|ue)fung|PR(?:\u00dc|UE)FUNG)\s+0?(\d{1,2})\s*(?:\||[-\u2010-\u2015]|Thema:)\s*([^\n]+)/gi);
+    }
+  }
+
   if (provider === "telc" && sectionType === "read") {
     patterns.push(/(?:^|\n)\s*(?:\u00dcBUNGSHEFT|UEBUNGSHEFT|UBUNGSHEFT)\s+0?(\d{1,2})\b(?:[^\n]*\n\s*Thema:\s*([^\n]+))?/gi);
   }
@@ -2793,6 +2808,7 @@ const getB2SeriesPatterns = (metadata) => {
 
 const splitB2NumberedBlocks = (text, metadata) => {
   const clean = stripPdfPageMarkers(text);
+  const minBlocks = metadata.sectionType === "listen" ? 5 : 10;
   const candidates = getB2SeriesPatterns(metadata)
     .map((pattern, priority) => ({
       priority,
@@ -2817,7 +2833,7 @@ const splitB2NumberedBlocks = (text, metadata) => {
         })
         .filter((block) => block.seriesNumber >= 1 && block.seriesNumber <= 20 && block.bodyLength >= 450),
     }))
-    .filter((candidate) => candidate.blocks.length >= 10);
+    .filter((candidate) => candidate.blocks.length >= minBlocks);
 
   if (!candidates.length) return [];
   candidates.sort((a, b) => {
@@ -2836,14 +2852,94 @@ const getB2QuestionType = (sectionType, partNumber) => {
   return "compound";
 };
 
+const cleanB2ListeningText = (value) =>
+  normalizeText(value)
+    .split("\n")
+    .map((line) => line.replace(/[ \t]{2,}/g, " ").trim())
+    .filter(Boolean)
+    .filter((line) => !/^(?:[-\u2010-\u2015]\s*)?(?:zweite wiedergabe|pause|playback|audio script)\b/i.test(line))
+    .join("\n")
+    .trim();
+
+const trimB2ListeningBlock = (value, max = 9000) => cleanB2ListeningText(value).slice(0, max);
+
+const extractB2ListeningProduction = (body) => {
+  const markers = [
+    /(?:^|\n)\s*(?:\p{Extended_Pictographic}\s*)?FICHE\s+DE\s+PRODUCTION\s+AUDIO\b[^\n]*/iu,
+    /(?:^|\n)\s*PLAN\s+DE\s+PRODUCTION\s+AUDIO\b[^\n]*/iu,
+    /(?:^|\n)\s*PROFILS?\s+DE\s+VOIX\b[^\n]*/iu,
+    /(?:^|\n)\s*BRUITAGES?\b[^\n]*/iu,
+    /(?:^|\n)\s*SFX\b[^\n]*/iu,
+  ];
+  const endMarkers = [
+    /(?:^|\n)\s*(?:QUESTIONS|AUFGABEN|Aufgaben)\b/i,
+    /(?:^|\n)\s*(?:Corrig|L(?:o|\u00f6|oe)sungen|L(?:o|\u00f6|oe)sungsschl(?:u|\u00fc|ue)ssel)\b/i,
+    /(?:^|\n)\s*(?:TEIL|Teil|AUFGABE|Aufgabe|Texte?|TEXTE?)\s+[1-5]\b/i,
+  ];
+  for (const marker of markers) {
+    const production = getBetweenMarkers(body, marker, endMarkers);
+    if (production) return trimB2ListeningBlock(production, 3000);
+  }
+  return "";
+};
+
+const extractB2ListeningTranscript = (body) => {
+  const markers = [
+    /(?:^|\n)\s*(?:TRANSCRIPTION\s+AUDIO|Transcription\s+audio)\s*:/i,
+    /(?:^|\n)\s*Transkription\s*:/i,
+    /(?:^|\n)\s*Skript\s*:/i,
+    /(?:^|\n)\s*SCRIPT\s+AUDIO[^\n]*/i,
+    /(?:^|\n)\s*Transcription\s+du\s+document\s+sonore[^\n]*/i,
+  ];
+  const endMarkers = [
+    /(?:^|\n)\s*(?:QUESTIONS\s*\/\s*T(?:A|Â)CHES|QUESTIONS|AUFGABEN|Aufgaben)\b/i,
+    /(?:^|\n)\s*Aufgabe\s+\d{1,2}\s*:/i,
+    /(?:^|\n)\s*(?:PLAN\s+DE\s+PRODUCTION|FICHE\s+DE\s+PRODUCTION|Corrig|L(?:o|\u00f6|oe)sungen|L(?:o|\u00f6|oe)sungsschl(?:u|\u00fc|ue)ssel)\b/i,
+  ];
+  for (const marker of markers) {
+    const raw = getBetweenMarkers(body, marker, endMarkers);
+    if (!raw) continue;
+    const transcript = trimB2ListeningBlock(raw.replace(marker, ""), 12000);
+    if (transcript.length > 30) return transcript;
+  }
+
+  const beforeQuestions = body.split(/(?:^|\n)\s*(?:QUESTIONS|AUFGABEN|Aufgaben)\b/i)[0] || body;
+  const lines = cleanB2ListeningText(beforeQuestions)
+    .split("\n")
+    .filter((line) => /:\s*\S/.test(line) || line.split(/\s+/).length >= 6);
+  return trimB2ListeningBlock(lines.join("\n"), 12000);
+};
+
+const buildB2ListeningAudioForSection = ({ provider, title, body, header, partNumber, seriesTitle }) => {
+  const transcript = extractB2ListeningTranscript(body);
+  const production = extractB2ListeningProduction(body);
+  const audio = buildListeningAudioMetadata({
+    provider,
+    documentType: title || header || "H\u00f6rverstehen",
+    situation: seriesTitle || header || title || "",
+    transcript,
+    production,
+    partNumber,
+    title,
+  });
+  return { transcript, production, audio };
+};
+
 const buildB2FallbackSections = ({ block, metadata, occurrenceIndex = 0 }) => {
   const sectionType = metadata.sectionType;
-  const partMatches = [...block.text.matchAll(/(?:^|\n)\s*(?:(?:LESEVERSTEHEN|SCHREIBEN|SPRECHEN)\s*[-\u2010-\u2015]\s*)?(?:TEIL|Teil|AUFGABE|Aufgabe)\s+([1-5])\s*[-\u2010-\u2015:|.]?\s*([^\n]*)/gi)]
+  const provider = normalizeDetectedProvider(metadata.provider);
+  const labelPattern = sectionType === "listen" && provider === "ecl"
+    ? "(TEIL|Teil|AUFGABE|Aufgabe|TEXTE|Texte|Text)"
+    : "(TEIL|Teil|AUFGABE|Aufgabe)";
+  const partRegex = new RegExp(`(?:^|\\n)\\s*(?:[n■•]\\s*)?(?:(?:LESEVERSTEHEN|SCHREIBEN|SPRECHEN|H(?:\\u00d6|OE|O)RVERSTEHEN)\\s*[-\\u2010-\\u2015]\\s*)?${labelPattern}\\s+([1-5])\\s*[-\\u2010-\\u2015:|.]?\\s*([^\\n]*)`, "gi");
+  const partMatches = [...block.text.matchAll(partRegex)]
     .filter((match) => {
-      const partNumber = Number(match[1]);
+      const partNumber = Number(match[2]);
       const header = compactText(match[0]);
+      const titleFragment = compactText(match[3]);
       const answerKeyCount = (header.match(/\b\d{1,2}\s*:\s*[A-ZRFN]\b/gi) || []).length;
       if (partNumber < 1 || partNumber > 5) return false;
+      if (sectionType === "listen" && /^\d{1,2}\s*:/.test(titleFragment)) return false;
       if (/L(?:o|\u00f6|oe)sungen|L(?:o|\u00f6|oe)sungsschl(?:u|\u00fc|ue)ssel|Musterl(?:o|\u00f6|oe)sung|Kriterien|Bewertungsraster/i.test(header)) return false;
       if (answerKeyCount >= 2) return false;
       if (/Gesamtpunktzahl|Pkt\.\s*Niveau|Meinung\s*\/\s*15/i.test(header)) return false;
@@ -2853,7 +2949,21 @@ const buildB2FallbackSections = ({ block, metadata, occurrenceIndex = 0 }) => {
   const makeSection = ({ partNumber, title, body, header }) => {
     const prompt = trimForDb([header, body].filter(Boolean).join("\n"), 9000);
     const points = sectionType === "write" ? (partNumber === 2 ? 40 : 60) : sectionType === "speak" ? null : null;
-    const durationMinutes = sectionType === "write" ? (partNumber === 2 ? 25 : 50) : sectionType === "speak" ? 5 : null;
+    const durationMinutes = sectionType === "write" ? (partNumber === 2 ? 25 : 50) : sectionType === "speak" ? 5 : sectionType === "listen" ? 10 : null;
+    const listening = sectionType === "listen"
+      ? buildB2ListeningAudioForSection({ provider, title, body, header, partNumber, seriesTitle: block.title })
+      : null;
+    const sectionMetadata = {
+      b2Fallback: true,
+      sourceHeader: header || title || "",
+      ...(listening ? {
+        listening: true,
+        transcript: listening.transcript,
+        audio: listening.audio,
+        production: listening.production,
+      } : {}),
+    };
+    const questionMetadata = { b2Fallback: true, sourceSeriesNumber: block.seriesNumber };
     return {
       sectionType,
       partNumber,
@@ -2861,8 +2971,8 @@ const buildB2FallbackSections = ({ block, metadata, occurrenceIndex = 0 }) => {
       instructions: trimForDb(body, 9000),
       durationMinutes,
       points,
-      scoring: { points, durationMinutes },
-      metadata: { b2Fallback: true, sourceHeader: header || title || "" },
+      scoring: { points, durationMinutes, ...(sectionType === "listen" ? { listeningPasses: 2 } : {}) },
+      metadata: sectionMetadata,
       questions: [
         {
           questionType: getB2QuestionType(sectionType, partNumber),
@@ -2872,7 +2982,8 @@ const buildB2FallbackSections = ({ block, metadata, occurrenceIndex = 0 }) => {
           explanation: null,
           position: partNumber,
           scoring: { points, durationMinutes },
-          metadata: { b2Fallback: true, sourceSeriesNumber: block.seriesNumber },
+          metadata: questionMetadata,
+          ...(listening ? { transcript: listening.transcript, audio: listening.audio } : {}),
           sectionType,
         },
       ],
@@ -2882,9 +2993,11 @@ const buildB2FallbackSections = ({ block, metadata, occurrenceIndex = 0 }) => {
   if (partMatches.length) {
     return partMatches.map((match, index) => {
       const next = partMatches[index + 1];
-      const partNumber = Number(match[1]);
+      const label = match[1];
+      const partNumber = Number(match[2]);
       const header = compactText(match[0]);
-      const title = `${/aufgabe/i.test(match[0]) ? "Aufgabe" : "Teil"} ${partNumber}: ${compactText(match[2]) || SECTION_LABELS[sectionType] || "Aufgabe"}`;
+      const displayLabel = /aufgabe/i.test(label) ? "Aufgabe" : /text/i.test(label) ? "Text" : "Teil";
+      const title = `${displayLabel} ${partNumber}: ${compactText(match[3]) || SECTION_LABELS[sectionType] || "Aufgabe"}`;
       const body = block.text.slice(match.index + match[0].length, next ? next.index : block.text.length);
       return makeSection({ partNumber, title, body, header });
     });
@@ -2919,7 +3032,7 @@ const parseB2NumberedSeries = (text, metadata) => {
       let sections = seriesBlocks.flatMap((block, occurrenceIndex) =>
         buildB2FallbackSections({ block, metadata, occurrenceIndex })
       );
-      if (metadata.sectionType === "write") {
+      if (metadata.sectionType === "write" || metadata.sectionType === "listen") {
         const seenParts = new Set();
         sections = sections.filter((section) => {
           const partKey = Number(section.partNumber) || section.title;
@@ -2973,6 +3086,10 @@ const parseStructuredContent = (text, metadata) => {
   if ((provider === "telc" || /Sprachbausteine/i.test(text)) && metadata.sectionType === "sprach") {
     const series = parseTelcSprachbausteineSeries(text, metadata);
     if (series.length) return series;
+  }
+  if (metadata.level === "B2" && metadata.sectionType === "listen") {
+    const series = parseB2NumberedSeries(text, metadata);
+    if (series.length > 1) return series;
   }
   if (provider === "telc" && metadata.level === "B2" && metadata.sectionType === "read") {
     const series = parseB2NumberedSeries(text, metadata);

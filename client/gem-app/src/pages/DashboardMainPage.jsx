@@ -119,6 +119,7 @@ const TopNav = ({ onToggleMenu, onGoHome, onGoDashboard, onGoProfile, onGoActual
               <button type="button" className={styles.dropdownItem} onClick={() => onGoModule("listen")}>{labels.modules.listen}</button>
               <button type="button" className={styles.dropdownItem} onClick={() => onGoModule("write")}>{labels.modules.write}</button>
               <button type="button" className={styles.dropdownItem} onClick={() => onGoModule("speak")}>{labels.modules.speak}</button>
+              <button type="button" className={styles.dropdownItem} onClick={() => onGoModule("sprach")}>{labels.modules.sprach}</button>
             </div>
           ) : null}
         </div>

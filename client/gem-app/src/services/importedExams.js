@@ -1,6 +1,7 @@
 import API from "./api";
 
 const CACHE_TTL_MS = 5 * 60_000;
+const CACHE_VERSION = "2026-07-05-sprach-hoeren";
 const SERIES_STORAGE_PREFIX = "imported-series:";
 const seriesCache = new Map();
 const moduleCache = new Map();
@@ -27,7 +28,7 @@ const readStoredSeries = (key) => {
     const raw = window.localStorage.getItem(`${SERIES_STORAGE_PREFIX}${key}`);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (!parsed || Date.now() - Number(parsed.createdAt) > CACHE_TTL_MS) {
+    if (!parsed || parsed.version !== CACHE_VERSION || Date.now() - Number(parsed.createdAt) > CACHE_TTL_MS) {
       window.localStorage.removeItem(`${SERIES_STORAGE_PREFIX}${key}`);
       return null;
     }
@@ -42,7 +43,7 @@ const writeStoredSeries = (key, series) => {
   try {
     window.localStorage.setItem(
       `${SERIES_STORAGE_PREFIX}${key}`,
-      JSON.stringify({ createdAt: Date.now(), series })
+      JSON.stringify({ version: CACHE_VERSION, createdAt: Date.now(), series })
     );
   } catch {
     // Cache writes are optional; network results still drive the UI.

@@ -28,6 +28,7 @@ import {
   ShieldCheck,
   SkipForward,
   Square,
+  Timer,
   TimerReset,
   Trophy,
   Volume2,
@@ -63,6 +64,7 @@ const LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"];
 const PASS_SCORE = 70;
 const MOBILE_AUDIO_UNSUPPORTED_MESSAGE =
   "Audio playback is not supported by this browser on this device. Please try Chrome, update your browser, or use another device. If an audio file is available for this test, it will be played instead.";
+const PART_TRANSITION_SECONDS = 10;
 
 const ImportedLoadingDots = ({ label = "Importierte Aufgaben werden geladen" }) => (
   <span className={styles.importedLoadingDots} role="status" aria-label={label}>
@@ -71,6 +73,74 @@ const ImportedLoadingDots = ({ label = "Importierte Aufgaben werden geladen" }) 
     <span />
   </span>
 );
+
+const cleanTeilTitle = (value = "") =>
+  String(value || "").replace(/^Teil\s+\d+\s*[-:]\s*/i, "").trim();
+
+const TeilTransitionScreen = ({
+  nextTeilTitle = "",
+  nextTeilNumber,
+  durationSeconds = PART_TRANSITION_SECONDS,
+  onComplete,
+}) => {
+  const [remaining, setRemaining] = useState(durationSeconds);
+  const onCompleteRef = useRef(onComplete);
+  const completedRef = useRef(false);
+
+  useEffect(() => {
+    onCompleteRef.current = onComplete;
+  }, [onComplete]);
+
+  useEffect(() => {
+    completedRef.current = false;
+    setRemaining(durationSeconds);
+    const startTime = Date.now();
+
+    const tick = () => {
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      const nextRemaining = Math.max(0, durationSeconds - elapsed);
+      setRemaining((value) => (value === nextRemaining ? value : nextRemaining));
+      if (nextRemaining <= 0 && !completedRef.current) {
+        completedRef.current = true;
+        window.clearInterval(interval);
+        window.setTimeout(() => onCompleteRef.current?.(), 180);
+      }
+    };
+
+    const interval = window.setInterval(tick, 200);
+    tick();
+    return () => window.clearInterval(interval);
+  }, [durationSeconds]);
+
+  const progress = durationSeconds > 0 ? ((durationSeconds - remaining) / durationSeconds) * 360 : 360;
+  const title = cleanTeilTitle(nextTeilTitle);
+
+  return (
+    <section className={styles.teilTransitionOverlay} aria-live="polite" aria-label="Der nächste Teil beginnt gleich">
+      <div className={styles.teilTransitionPanel}>
+        <div className={styles.teilTransitionIcon}>
+          <Timer size={34} />
+        </div>
+        <p className={styles.sectionLabel}>Teilwechsel</p>
+        <h2>Der nächste Teil beginnt gleich</h2>
+        <p className={styles.teilTransitionNext}>
+          Teil {nextTeilNumber || ""}
+          {title ? `: ${title}` : ""}
+        </p>
+        <p className={styles.teilTransitionText}>Der nächste Teil beginnt in</p>
+        <div
+          className={styles.teilTransitionRing}
+          style={{ "--transition-progress": `${progress}deg` }}
+          aria-label={`${remaining} Sekunden`}
+        >
+          <span>{remaining}</span>
+        </div>
+        <p className={styles.teilTransitionSeconds}>Sekunden</p>
+        <p className={styles.teilTransitionHint}>Bereite dich auf die nächste Aufgabe vor.</p>
+      </div>
+    </section>
+  );
+};
 
 const readingPassage = {
   title: "La bibliothèque universitaire devient plus flexible",
@@ -1984,6 +2054,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const [simulationMode, setSimulationMode] = useState(true);
   const [completed, setCompleted] = useState(false);
   const [partIntroVisible, setPartIntroVisible] = useState(true);
+  const [partTransition, setPartTransition] = useState(null);
   const [navPanelOpen, setNavPanelOpen] = useState(false);
   const [, setSaveStatus] = useState("");
   const [resultStatus, setResultStatus] = useState("");
@@ -2569,6 +2640,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setSimulationMode(true);
     setCompleted(false);
     setPartIntroVisible(true);
+    setPartTransition(null);
     setWritingVersions([]);
     setSavedSimulationId(null);
     setWritingCorrection(null);
@@ -2596,6 +2668,47 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     }
   }, [armExamTimer, armPrepTimer, examParts, module, stopListeningAmbience, totalExamDuration]);
 
+  const beginPart = useCallback((part, startIndex, { logStart = true } = {}) => {
+    const safeIndex = part?.firstIndex ?? startIndex ?? currentIndex;
+    setCurrentIndex(safeIndex);
+    setPartIntroVisible(false);
+    armExamTimer(part ? getPartDurationSeconds(module, part) : totalExamDuration, { running: true });
+    setSpeakingPhase("prep");
+    armPrepTimer(module.tasks[safeIndex]?.prepSeconds ?? speakingTasks[0].prepSeconds, {
+      running: module.id === "speak" && simulationMode,
+    });
+    setPrepActive(module.id === "speak" && simulationMode);
+    setRecordingSeconds(0);
+    recordingSecondsRef.current = 0;
+    if (logStart) {
+      persistProgress(`Teil ${part?.number ?? currentPartIndex + 1} demarree a ${formatClock()}`);
+    }
+  }, [armExamTimer, armPrepTimer, currentIndex, currentPartIndex, module, persistProgress, simulationMode, totalExamDuration]);
+
+  const startPartTransition = useCallback((nextPart, nextIndex, message = "") => {
+    if (!nextPart) return false;
+    timerDeadlineRef.current = null;
+    prepDeadlineRef.current = null;
+    setPrepActive(false);
+    setPartIntroVisible(false);
+    setNavPanelOpen(false);
+    setPartTransition({
+      id: `${nextPart.id || nextPart.number || nextIndex}-${Date.now()}`,
+      nextPart,
+      nextIndex,
+    });
+    if (message) setResultStatus(message);
+    return true;
+  }, []);
+
+  const completePartTransition = useCallback(() => {
+    if (!partTransition?.nextPart) return;
+    const { nextPart, nextIndex } = partTransition;
+    setPartTransition(null);
+    setResultStatus("");
+    beginPart(nextPart, nextIndex);
+  }, [beginPart, partTransition]);
+
   const goToNext = useCallback(() => {
     if (currentIndex >= totalTasks - 1) {
       finishModule();
@@ -2603,17 +2716,17 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     }
     const nextPart = currentPart && currentIndex >= currentPart.lastIndex ? examParts[currentPartIndex + 1] : null;
     const nextIndex = nextPart ? nextPart.firstIndex : Math.min(totalTasks - 1, currentIndex + 1);
+    if (startPartTransition(nextPart, nextIndex)) return;
     setCurrentIndex(nextIndex);
-    setPartIntroVisible(Boolean(nextPart));
-    if (nextPart) armExamTimer(getPartDurationSeconds(module, nextPart), { running: false });
+    setPartIntroVisible(false);
     setSpeakingPhase("prep");
     armPrepTimer(module.tasks[nextIndex]?.prepSeconds ?? speakingTasks[0].prepSeconds, {
-      running: module.id === "speak" && simulationMode && !nextPart,
+      running: module.id === "speak" && simulationMode,
     });
-    setPrepActive(module.id === "speak" && simulationMode && !nextPart);
+    setPrepActive(module.id === "speak" && simulationMode);
     setRecordingSeconds(0);
     recordingSecondsRef.current = 0;
-  }, [armExamTimer, armPrepTimer, currentIndex, currentPart, currentPartIndex, examParts, finishModule, module, simulationMode, totalTasks]);
+  }, [armPrepTimer, currentIndex, currentPart, currentPartIndex, examParts, finishModule, module, simulationMode, startPartTransition, totalTasks]);
 
   const goToPrevious = useCallback(() => {
     const previousIndex = Math.max(0, currentIndex - 1);
@@ -2917,19 +3030,18 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
     const nextPart = currentPart && currentIndex >= currentPart.lastIndex ? examParts[currentPartIndex + 1] : null;
     const nextIndex = nextPart ? nextPart.firstIndex : Math.min(totalTasks - 1, currentIndex + 1);
+    if (startPartTransition(nextPart, nextIndex, `Zeit abgelaufen. Teil ${nextPart?.number ?? currentPartIndex + 2} beginnt gleich.`)) return;
     setCurrentIndex(nextIndex);
-    setPartIntroVisible(Boolean(nextPart));
-    if (nextPart) armExamTimer(getPartDurationSeconds(module, nextPart), { running: false });
+    setPartIntroVisible(false);
     setSpeakingPhase("prep");
     armPrepTimer(module.tasks[nextIndex]?.prepSeconds ?? speakingTasks[0].prepSeconds, {
-      running: module.id === "speak" && simulationMode && !nextPart,
+      running: module.id === "speak" && simulationMode,
     });
-    setPrepActive(module.id === "speak" && simulationMode && !nextPart);
+    setPrepActive(module.id === "speak" && simulationMode);
     setRecordingSeconds(0);
     recordingSecondsRef.current = 0;
   }, [
     armPrepTimer,
-    armExamTimer,
     currentIndex,
     currentPart,
     currentPartIndex,
@@ -2939,6 +3051,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     module,
     persistProgress,
     simulationMode,
+    startPartTransition,
     stopRecording,
     totalTasks,
   ]);
@@ -2954,37 +3067,27 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
     const nextPart = currentPart ? examParts[currentPartIndex + 1] : null;
     if (nextPart) {
-      setResultStatus(`Temps termine. Passage a la partie ${nextPart.number ?? currentPartIndex + 2}.`);
-      setCurrentIndex(nextPart.firstIndex);
-      setPartIntroVisible(true);
-      armExamTimer(getPartDurationSeconds(module, nextPart), { running: false });
-      armPrepTimer(module.tasks[nextPart.firstIndex]?.prepSeconds ?? speakingTasks[0].prepSeconds, { running: false });
-      setPrepActive(false);
-      setSpeakingPhase("prep");
-      setRecordingSeconds(0);
-      recordingSecondsRef.current = 0;
+      startPartTransition(nextPart, nextPart.firstIndex, `Zeit abgelaufen. Teil ${nextPart.number ?? currentPartIndex + 2} beginnt gleich.`);
       return;
     }
 
     setResultStatus("Zeit abgelaufen. Die Antworten werden angezeigt.");
     finishModule();
   }, [
-    armExamTimer,
-    armPrepTimer,
     audioPlaying,
     currentPart,
     currentPartIndex,
     examParts,
     finishModule,
     isRecording,
-    module,
     pauseListeningAudio,
     persistProgress,
+    startPartTransition,
     stopRecording,
   ]);
 
   useEffect(() => {
-    if (!simulationMode || completed || partIntroVisible || module.unavailable) {
+    if (!simulationMode || completed || partIntroVisible || partTransition || module.unavailable) {
       timerDeadlineRef.current = null;
       timerExpiredRef.current = false;
       return undefined;
@@ -3011,10 +3114,10 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     }, 250);
 
     return () => window.clearInterval(interval);
-  }, [completed, currentPart?.id, finishCurrentTimedSection, module.unavailable, partIntroVisible, simulationMode]);
+  }, [completed, currentPart?.id, finishCurrentTimedSection, module.unavailable, partIntroVisible, partTransition, simulationMode]);
 
   useEffect(() => {
-    if (module.id !== "speak" || !simulationMode || !prepActive || completed || partIntroVisible) {
+    if (module.id !== "speak" || !simulationMode || !prepActive || completed || partIntroVisible || partTransition) {
       prepDeadlineRef.current = null;
       prepExpiredRef.current = false;
       return undefined;
@@ -3053,6 +3156,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     currentTask.responseSeconds,
     module.id,
     partIntroVisible,
+    partTransition,
     prepActive,
     simulationMode,
     speakingPhase,
@@ -3076,18 +3180,9 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
   const startCurrentPart = useCallback(() => {
     const startIndex = currentPart?.firstIndex ?? currentIndex;
-    setCurrentIndex(startIndex);
-    setPartIntroVisible(false);
-    armExamTimer(currentPart ? getPartDurationSeconds(module, currentPart) : totalExamDuration, { running: true });
-    setSpeakingPhase("prep");
-    armPrepTimer(module.tasks[startIndex]?.prepSeconds ?? speakingTasks[0].prepSeconds, {
-      running: module.id === "speak" && simulationMode,
-    });
-    setPrepActive(module.id === "speak" && simulationMode);
-    setRecordingSeconds(0);
-    recordingSecondsRef.current = 0;
-    persistProgress(`Part ${currentPart?.number ?? currentPartIndex + 1} demarree a ${formatClock()}`);
-  }, [armExamTimer, armPrepTimer, currentIndex, currentPart, currentPartIndex, module, persistProgress, simulationMode, totalExamDuration]);
+    setPartTransition(null);
+    beginPart(currentPart, startIndex);
+  }, [beginPart, currentIndex, currentPart]);
 
   const handleReadableWheel = useCallback((event) => {
     const target = event.currentTarget;
@@ -3133,7 +3228,15 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     if (hasRichTextMarkup(text)) {
       return renderRichExamText(text, keyPrefix, styles.questionText);
     }
-    return <h2 className={styles.questionText}>{text}</h2>;
+    const plainText = String(text ?? "").trim();
+    if (plainText.length > 180 || plainText.includes("\n")) {
+      return (
+        <div className={styles.questionTextBlock}>
+          {renderStructuredExamText(plainText, keyPrefix)}
+        </div>
+      );
+    }
+    return <h2 className={styles.questionText}>{plainText}</h2>;
   };
 
   const renderPartMaterial = (part, { compact = false } = {}) => {
@@ -3657,7 +3760,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     const audioProgressPercent = currentAudioDuration
       ? Math.min(100, (audioTimestamp / currentAudioDuration) * 100)
       : 0;
-    const productionAudioMissing = !module.audio?.audioUrl;
     const listeningAudioElement = (
       <audio
         ref={listeningAudioRef}
@@ -3719,13 +3821,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
             <div className={styles.lockedNote}>
               <Lock size={18} />
-              Transkript zum Schutz des Tests ausgeblendet.
+              Das Transkript ist während der Prüfung ausgeblendet.
             </div>
-            {productionAudioMissing ? (
-              <p className={styles.warningText}>
-                <AlertCircle size={16} /> Produktionsaudio wurde noch nicht generiert. Bis dahin nutzt diese Aufgabe eine Browser-Stimme mit Hintergrundatmosphaere.
-              </p>
-            ) : null}
             {audioError ? (
               <p className={styles.warningText}>
                 <AlertCircle size={16} /> {toGermanStatus(audioError)}
@@ -3800,13 +3897,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
           <div className={styles.lockedNote}>
             <Lock size={18} />
-            Transcript hidden for test protection.
+            Das Transkript ist während der Prüfung ausgeblendet.
           </div>
-          {productionAudioMissing ? (
-            <p className={styles.warningText}>
-              <AlertCircle size={16} /> Production audio has not been generated yet. This exercise will use browser speech with background ambience for now.
-            </p>
-          ) : null}
           {audioError ? (
             <p className={styles.warningText}>
               <AlertCircle size={16} /> {toGermanStatus(audioError)}
@@ -4613,6 +4705,15 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
   return (
     <div className={styles.page} style={{ "--module-accent": module.accent, "--module-soft": module.soft }}>
+      {partTransition ? (
+        <TeilTransitionScreen
+          key={partTransition.id}
+          nextTeilTitle={partTransition.nextPart?.displayTitle}
+          nextTeilNumber={partTransition.nextPart?.number}
+          durationSeconds={PART_TRANSITION_SECONDS}
+          onComplete={completePartTransition}
+        />
+      ) : null}
       <nav className={styles.nav}>
         <button
           type="button"
@@ -4703,7 +4804,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           {!completed && !module.unavailable ? renderExamSidebar() : null}
         </div>
 
-        {!completed && !module.unavailable && !partIntroVisible ? (
+        {!completed && !module.unavailable && !partIntroVisible && !partTransition ? (
           <section
             className={`${styles.actionPanel} ${styles.stepActionPanel}`}
             aria-label="Aufgabennavigation"
