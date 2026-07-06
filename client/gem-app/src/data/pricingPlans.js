@@ -5,8 +5,18 @@ export const unlockedSections = [
   { title: "Expression Écrite", detail: "Exercices guidés & corrections" },
 ];
 
-export const certificationLabels = ["Goethe", "ÖSD", "TELC", "ECL"];
-export const certificationKeys = ["goethe", "osd", "telc", "ecl"];
+export const certificationOptions = [
+  { key: "goethe", label: "Goethe" },
+  { key: "osd", label: "ÖSD" },
+  { key: "telc", label: "TELC" },
+  { key: "ecl", label: "ECL" },
+];
+
+export const certificationLabels = certificationOptions.map((option) => option.label);
+export const certificationKeys = certificationOptions.map((option) => option.key);
+
+export const formatEuro = (value) =>
+  `€${Number(value || 0).toFixed(2).replace(".", ",")}`;
 
 export const pricingSections = [
   {
@@ -82,7 +92,7 @@ export const enrichPricingPlan = (level, plan) => ({
   ...plan,
   id: buildPlanId(level, plan.planKey),
   level,
-  certifications: certificationKeys,
+  availableCertifications: certificationOptions,
   certificationLabels,
   unlockedSections: unlockedSections.map((section) => section.title),
   sectionDetails: unlockedSections,

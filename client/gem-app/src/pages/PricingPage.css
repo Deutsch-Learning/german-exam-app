@@ -325,6 +325,10 @@
   box-shadow: 0 28px 60px rgba(15, 23, 42, 0.22);
 }
 
+.pricing-certification-modal {
+  width: min(640px, 100%);
+}
+
 .pricing-modal h2,
 .checkout-panel h1 {
   margin: 0 0 20px;
@@ -374,6 +378,11 @@
   color: #344054;
 }
 
+.pricing-modal-message.compact {
+  margin-top: -8px;
+  margin-bottom: 18px;
+}
+
 .pricing-modal-status {
   color: #047857;
 }
@@ -384,6 +393,77 @@
 
 .pricing-modal-button {
   margin-top: 22px;
+}
+
+.pricing-certification-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 18px 0;
+}
+
+.pricing-certification-option {
+  min-height: 76px;
+  border: 1px solid #fee2e2;
+  border-radius: 14px;
+  background: #ffffff;
+  color: #111827;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  align-content: center;
+  gap: 3px 10px;
+  padding: 14px;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease, background 0.18s ease;
+}
+
+.pricing-certification-option span {
+  font-size: 1rem;
+  font-weight: 950;
+}
+
+.pricing-certification-option strong {
+  color: #667085;
+  font-size: 0.82rem;
+  font-weight: 850;
+}
+
+.pricing-certification-option svg {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  color: #d0d5dd;
+}
+
+.pricing-certification-option:hover {
+  transform: translateY(-1px);
+  border-color: #f97066;
+  box-shadow: 0 12px 24px rgba(190, 23, 33, 0.08);
+}
+
+.pricing-certification-option.selected {
+  border-color: #d71920;
+  background: linear-gradient(180deg, #fff7f7, #ffffff);
+  box-shadow: 0 12px 26px rgba(190, 23, 33, 0.12);
+}
+
+.pricing-certification-option.selected svg {
+  color: #d71920;
+}
+
+.pricing-selection-note {
+  margin: 14px 0 0;
+  color: #111827;
+  font-size: 0.9rem;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.pricing-selection-note.muted {
+  color: #667085;
 }
 
 .pricing-modal-secondary {
@@ -469,5 +549,9 @@
   .pricing-modal-summary strong {
     text-align: left;
     margin-top: -5px;
+  }
+
+  .pricing-certification-grid {
+    grid-template-columns: 1fr;
   }
 }

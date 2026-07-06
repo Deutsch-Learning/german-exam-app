@@ -91,11 +91,52 @@ export const normalizeSeriesLevel = (series) => {
   return match || "";
 };
 
-export const hasActiveSubscriptionForLevel = (level) => {
+export const normalizeCertificationKey = (value) => {
+  const raw = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  if (raw.includes("goethe")) return "goethe";
+  const normalized = raw.replace(/ö/g, "o").replace(/oe/g, "o");
+  if (normalized.includes("telc")) return "telc";
+  if (normalized.includes("ecl")) return "ecl";
+  if (normalized.includes("osd")) return "osd";
+  return "";
+};
+
+export const normalizeSeriesCertification = (series) => {
+  const fields = [
+    series?.provider,
+    series?.certification,
+    series?.certificationKey,
+    series?.examId,
+    series?.exam_id,
+    series?.accessExamId,
+    series?.access_exam_id,
+    series?.name,
+    series?.examName,
+    series?.exam_name,
+    series?.title,
+  ];
+  return fields.map(normalizeCertificationKey).find(Boolean) || "";
+};
+
+const getSubscriptionCertifications = (subscription) => {
+  const raw = Array.isArray(subscription?.selectedCertifications)
+    ? subscription.selectedCertifications
+    : Array.isArray(subscription?.selected_certifications)
+      ? subscription.selected_certifications
+      : Array.isArray(subscription?.certifications)
+        ? subscription.certifications
+        : [];
+  return raw.map(normalizeCertificationKey).filter(Boolean);
+};
+
+export const hasActiveSubscriptionForLevel = (level, certification = "") => {
   const auth = getAuthUser();
   if (!auth?.id) return false;
   const normalizedLevel = String(level ?? "").trim().toUpperCase();
   if (!["B1", "B2"].includes(normalizedLevel)) return false;
+  const normalizedCertification = normalizeCertificationKey(certification);
 
   const subscriptions = Array.isArray(auth.active_subscriptions)
     ? auth.active_subscriptions
@@ -108,7 +149,13 @@ export const hasActiveSubscriptionForLevel = (level) => {
     const status = String(subscription?.status ?? "").toLowerCase();
     const expiresAt = subscription?.expiresAt || subscription?.expires_at;
     const expiresAtMs = expiresAt ? new Date(expiresAt).getTime() : 0;
-    return subscriptionLevel === normalizedLevel && status === "active" && expiresAtMs > now;
+    const certifications = getSubscriptionCertifications(subscription);
+    return (
+      subscriptionLevel === normalizedLevel &&
+      status === "active" &&
+      expiresAtMs > now &&
+      (!normalizedCertification || certifications.includes(normalizedCertification))
+    );
   });
 };
 
@@ -131,7 +178,8 @@ export const hasPaidSeriesAccess = (series = null) => {
   if (broadAccess) return true;
 
   const level = normalizeSeriesLevel(series);
-  return level ? hasActiveSubscriptionForLevel(level) : false;
+  const certification = normalizeSeriesCertification(series);
+  return level && certification ? hasActiveSubscriptionForLevel(level, certification) : false;
 };
 
 export const hasPartialSeriesAccess = (series) => {

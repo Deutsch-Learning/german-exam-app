@@ -5,7 +5,12 @@ import "./PricingPage.css";
 import logo from "../assets/images/logo.png";
 import { createCheckoutSession } from "../services/checkout";
 import { getAuthUser } from "../utils/access";
-import { pricingSections, enrichPricingPlan } from "../data/pricingPlans";
+import {
+  certificationOptions,
+  enrichPricingPlan,
+  formatEuro,
+  pricingSections,
+} from "../data/pricingPlans";
 
 const PriceText = ({ value }) => {
   const [euros, cents = ""] = String(value).replace("€", "").split(",");
@@ -18,13 +23,28 @@ const PriceText = ({ value }) => {
   );
 };
 
-const CheckoutModal = ({ plan, checkout, loading, error, onClose }) => {
+const CheckoutModal = ({
+  plan,
+  selectedCertifications,
+  checkout,
+  loading,
+  error,
+  onClose,
+  onToggleCertification,
+  onConfirm,
+}) => {
   if (!plan) return null;
+
+  const selectedCount = selectedCertifications.length;
+  const totalPrice = Number((plan.priceEur * selectedCount).toFixed(2));
+  const selectedLabels = certificationOptions
+    .filter((option) => selectedCertifications.includes(option.key))
+    .map((option) => `${option.label} ${plan.level}`);
 
   return (
     <div className="pricing-modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section
-        className="pricing-modal"
+        className="pricing-modal pricing-certification-modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby="checkout-title"
@@ -35,24 +55,64 @@ const CheckoutModal = ({ plan, checkout, loading, error, onClose }) => {
         </button>
         <p className="pricing-kicker">Pack sélectionné</p>
         <h2 id="checkout-title">{plan.level} {plan.planName}</h2>
-        <div className="pricing-modal-summary">
-          <span>Durée</span><strong>{plan.durationDays} jours</strong>
-          <span>Prix</span><strong>{plan.displayPrice}</strong>
-          <span>Simulateur écrit</span><strong>{plan.writingSimulatorAttempts} essais</strong>
-          <span>Certifications</span><strong>{plan.certificationLabels.join(", ")}</strong>
+        <p className="pricing-modal-message compact">
+          Choisissez les certifications que vous voulez débloquer pour ce pack.
+        </p>
+
+        <div className="pricing-certification-grid" aria-label={`Certifications ${plan.level}`}>
+          {certificationOptions.map((option) => {
+            const selected = selectedCertifications.includes(option.key);
+            return (
+              <button
+                className={`pricing-certification-option ${selected ? "selected" : ""}`}
+                key={option.key}
+                type="button"
+                aria-pressed={selected}
+                onClick={() => onToggleCertification(option.key)}
+              >
+                <span>{option.label}</span>
+                <strong>{plan.level}</strong>
+                <CheckCircle2 size={18} />
+              </button>
+            );
+          })}
         </div>
+
+        <div className="pricing-modal-summary">
+          <span>Prix de base</span><strong>{formatEuro(plan.priceEur)} par certification</strong>
+          <span>Durée</span><strong>{plan.durationDays} jours</strong>
+          <span>Simulateur écrit</span><strong>{plan.writingSimulatorAttempts} essais</strong>
+          <span>Sélection</span><strong>{selectedCount || 0} certification{selectedCount > 1 ? "s" : ""}</strong>
+          <span>Total</span><strong>{formatEuro(totalPrice)}</strong>
+        </div>
+
+        {selectedLabels.length ? (
+          <p className="pricing-selection-note">
+            Accès choisi : {selectedLabels.join(", ")}
+          </p>
+        ) : (
+          <p className="pricing-selection-note muted">
+            Sélectionnez au moins une certification pour continuer.
+          </p>
+        )}
+
         <p className="pricing-modal-message">
           Paiement bientôt disponible. Ce pack est prêt pour l’intégration du paiement.
         </p>
         {checkout?.checkoutSession?.status ? (
           <p className="pricing-modal-status">
-            Session préparée : {checkout.checkoutSession.status}
+            Session préparée : {checkout.checkoutSession.status} · Total {formatEuro(checkout.checkoutSession.finalPriceEur)}
           </p>
         ) : null}
         {error ? <p className="pricing-modal-error">{error}</p> : null}
-        <button className="pricing-modal-button" type="button" disabled={loading}>
+        <button
+          className="pricing-modal-button"
+          type="button"
+          disabled={loading || selectedCount < 1}
+          onClick={onConfirm}
+        >
           <CreditCard size={18} />
-          {loading ? "Préparation..." : "Paiement bientôt disponible"}
+          {loading ? "Préparation..." : "Continuer"}
         </button>
       </section>
     </div>
@@ -62,12 +122,13 @@ const CheckoutModal = ({ plan, checkout, loading, error, onClose }) => {
 export default function OffersPage() {
   const navigate = useNavigate();
   const [selectedPlan, setSelectedPlan] = useState(null);
+  const [selectedCertifications, setSelectedCertifications] = useState([]);
   const [checkout, setCheckout] = useState(null);
   const [checkoutError, setCheckoutError] = useState("");
   const [loadingPlanId, setLoadingPlanId] = useState("");
   const user = useMemo(() => getAuthUser(), []);
 
-  const handleSubscribe = async (plan) => {
+  const openPlanSelector = (plan) => {
     const userNow = getAuthUser();
     if (!userNow?.id) {
       navigate("/session-expired", {
@@ -80,11 +141,34 @@ export default function OffersPage() {
     }
 
     setSelectedPlan(plan);
+    setSelectedCertifications([]);
     setCheckout(null);
     setCheckoutError("");
-    setLoadingPlanId(plan.id);
+  };
+
+  const toggleCertification = (key) => {
+    setSelectedCertifications((prev) =>
+      prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]
+    );
+    setCheckout(null);
+    setCheckoutError("");
+  };
+
+  const confirmCheckout = async () => {
+    if (!selectedPlan || selectedCertifications.length < 1) return;
+    setCheckout(null);
+    setCheckoutError("");
+    setLoadingPlanId(selectedPlan.id);
     try {
-      const session = await createCheckoutSession({ userId: userNow.id, ...plan, provider: "manual" });
+      const finalPriceEur = Number((selectedPlan.priceEur * selectedCertifications.length).toFixed(2));
+      const session = await createCheckoutSession({
+        ...selectedPlan,
+        basePriceEur: selectedPlan.priceEur,
+        selectedCertifications,
+        selectedCertificationCount: selectedCertifications.length,
+        finalPriceEur,
+        provider: "manual",
+      });
       setCheckout(session);
     } catch (err) {
       setCheckoutError(
@@ -153,7 +237,7 @@ export default function OffersPage() {
                       <button
                         className="pricing-subscribe-button"
                         type="button"
-                        onClick={() => handleSubscribe(plan)}
+                        onClick={() => openPlanSelector(plan)}
                         disabled={loadingPlanId === plan.id}
                       >
                         <CheckCircle2 size={15} />
@@ -168,17 +252,21 @@ export default function OffersPage() {
         ))}
 
         <p className="pricing-footer-note">
-          Tarifs valables pour les quatre certifications ciblées : Goethe, ÖSD, TELC, ECL, à niveau et durée équivalents.
+          Tarifs valables pour les certifications ciblées : Goethe, ÖSD, TELC, ECL, à niveau et durée équivalents.
         </p>
       </main>
 
       <CheckoutModal
         plan={selectedPlan}
+        selectedCertifications={selectedCertifications}
         checkout={checkout}
         loading={Boolean(loadingPlanId)}
         error={checkoutError}
+        onToggleCertification={toggleCertification}
+        onConfirm={confirmCheckout}
         onClose={() => {
           setSelectedPlan(null);
+          setSelectedCertifications([]);
           setCheckout(null);
           setCheckoutError("");
         }}

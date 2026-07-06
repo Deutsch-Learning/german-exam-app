@@ -1,26 +1,29 @@
 import API from "./api";
 
 export const createCheckoutSession = async ({
-  userId,
   level,
   planKey,
   planName,
+  basePriceEur,
   priceEur,
   durationDays,
   writingSimulatorAttempts,
-  certifications,
+  selectedCertifications,
+  selectedCertificationCount,
+  finalPriceEur,
   unlockedSections,
   provider = "manual",
 }) => {
   const payload = {
-    userId,
     level,
     planKey,
     planName,
-    priceEur,
+    basePriceEur: Number(basePriceEur ?? priceEur),
     durationDays,
     writingSimulatorAttempts,
-    certifications,
+    selectedCertifications,
+    selectedCertificationCount,
+    finalPriceEur,
     unlockedSections,
     provider,
   };
