@@ -26,7 +26,9 @@ const getAppBaseUrl = () =>
       OFFICIAL_APP_BASE_URL
   );
 
-const getEmailFromName = () => process.env.EMAIL_FROM_NAME || BRAND_NAME;
+const MAILBOX_FROM_NAME = "Deutschprüfungen";
+
+const getEmailFromName = () => process.env.EMAIL_FROM_NAME || MAILBOX_FROM_NAME;
 
 const getSupportEmail = () =>
   process.env.SUPPORT_EMAIL ||
@@ -35,14 +37,21 @@ const getSupportEmail = () =>
 
 const getEmailFromAddress = () => {
   const configured = process.env.EMAIL_FROM || process.env.EMAIL_FROM_ADDRESS || "";
-  if (configured.includes("<")) return configured;
+  const addressMatch = configured.match(/<([^>]+)>/);
+  if (addressMatch?.[1]) return addressMatch[1].trim();
   return configured || "no-reply@xn--n-deutschprfungen-d3b.com";
+};
+
+const encodeEmailDisplayName = (value) => {
+  const name = String(value || "").trim();
+  if (!name) return "";
+  if (/^[\x20-\x7e]+$/.test(name)) return name.replace(/["\\]/g, "");
+  return `=?UTF-8?B?${Buffer.from(name, "utf8").toString("base64")}?=`;
 };
 
 const getFormattedFrom = () => {
   const from = getEmailFromAddress();
-  if (from.includes("<")) return from;
-  return `${getEmailFromName()} <${from}>`;
+  return `${encodeEmailDisplayName(getEmailFromName())} <${from}>`;
 };
 
 const escapeHtml = (value = "") =>
