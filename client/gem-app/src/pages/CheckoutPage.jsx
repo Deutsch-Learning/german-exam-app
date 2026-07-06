@@ -35,19 +35,19 @@ export default function CheckoutPage() {
           <h1>{plan.level} {plan.planName}</h1>
           <div className="pricing-modal-summary">
             <span>Durée</span><strong>{plan.durationDays} jours</strong>
-            <span>Prix</span><strong>{plan.displayPrice}</strong>
+            <span>Prix de base</span><strong>{plan.displayPrice}</strong>
             <span>Simulateur écrit</span><strong>{plan.writingSimulatorAttempts} essais</strong>
-            <span>Certifications</span><strong>{plan.certificationLabels.join(", ")}</strong>
+            <span>Certifications</span><strong>À choisir sur la page tarifs</strong>
           </div>
           <p className="pricing-modal-message">
-            Paiement bientôt disponible. Ce pack est prêt pour l’intégration du paiement.
+            Paiement bientôt disponible. Choisissez d’abord vos certifications pour préparer le bon total.
           </p>
           <div className="pricing-modal-actions">
-            <Link className="pricing-modal-button" to="/dashboard">
-              Dashboard
+            <Link className="pricing-modal-button" to="/offers">
+              Choisir les certifications
             </Link>
-            <Link className="pricing-modal-secondary" to="/offers">
-              Choisir un autre pack
+            <Link className="pricing-modal-secondary" to="/dashboard">
+              Dashboard
             </Link>
           </div>
         </section>

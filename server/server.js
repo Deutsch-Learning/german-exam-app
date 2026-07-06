@@ -272,6 +272,7 @@ const normalizeStringArray = (value, allowed = []) => {
   const allowedSet = new Set(allowed.map((item) => String(item).toLowerCase()));
   return raw
     .map((item) => String(item ?? "").trim().toLowerCase())
+    .map((item) => (item === "ösd" ? "osd" : item))
     .filter((item, index, arr) => item && (!allowedSet.size || allowedSet.has(item)) && arr.indexOf(item) === index);
 };
 
@@ -286,8 +287,11 @@ const mapSubscriptionRow = (row) => ({
   expiresAt: row.expires_at,
   durationDays: Number(row.duration_days ?? 0),
   priceEur: Number(row.price_eur ?? row.amount_paid ?? 0),
+  basePriceEur: Number(row.price_eur ?? 0),
+  finalPriceEur: Number(row.amount_paid ?? 0),
   currency: row.currency || "EUR",
-  certifications: normalizeStringArray(row.certifications, SUBSCRIPTION_CERTIFICATIONS),
+  selectedCertifications: normalizeStringArray(row.selected_certifications, SUBSCRIPTION_CERTIFICATIONS),
+  certifications: normalizeStringArray(row.selected_certifications, SUBSCRIPTION_CERTIFICATIONS),
   unlockedSections: normalizeStringArray(row.unlocked_sections, SUBSCRIPTION_SECTIONS),
   writingSimulatorAttempts: Number(row.writing_simulator_attempts ?? 0),
   writingAttemptsUsed: Number(row.writing_attempts_used ?? 0),
@@ -301,9 +305,9 @@ const getActiveSubscriptionsForUser = async (userId) => {
   if (!Number.isInteger(Number(userId)) || Number(userId) <= 0) return [];
   const result = await pool.query(
     `SELECT us.id, us.plan_id, us.level, us.plan_key, us.status, us.starts_at, us.expires_at,
-            us.amount_paid, us.currency,
+            us.amount_paid, us.currency, us.selected_certifications,
             sp.plan_name, sp.duration_days, sp.price_eur, sp.writing_simulator_attempts,
-            sp.certifications, sp.unlocked_sections,
+            sp.unlocked_sections,
             COALESCE(wsu.attempts_used, 0) AS writing_attempts_used
      FROM user_subscriptions us
      JOIN subscription_plans sp ON sp.id = us.plan_id
@@ -319,11 +323,18 @@ const getActiveSubscriptionsForUser = async (userId) => {
   return result.rows.map(mapSubscriptionRow);
 };
 
-const getActiveSubscriptionForUser = async (userId, level) => {
+const getActiveSubscriptionsForUserLevel = async (userId, level) => {
   const normalizedLevel = normalizeSubscriptionLevel(level);
-  if (!normalizedLevel) return null;
+  if (!normalizedLevel) return [];
   const subscriptions = await getActiveSubscriptionsForUser(Number(userId));
-  return subscriptions.find((subscription) => subscription.level === normalizedLevel) ?? null;
+  return subscriptions.filter((subscription) => subscription.level === normalizedLevel);
+};
+
+const getActiveSubscriptionForUser = async (userId, level, certification = "") => {
+  const subscriptions = await getActiveSubscriptionsForUserLevel(userId, level);
+  const cert = normalizeStringArray([certification], SUBSCRIPTION_CERTIFICATIONS)[0] || "";
+  if (!cert) return subscriptions[0] ?? null;
+  return subscriptions.find((subscription) => subscription.certifications.includes(cert)) ?? null;
 };
 
 const sanitizeUserWithSubscriptions = async (user) => ({
@@ -335,7 +346,7 @@ const userHasSubscriptionAccess = (user, subscription, certification, section) =
   if (!user?.id) return false;
   if (user.role === "admin" || user.has_full_access || user.hasFullAccess) return true;
   if (!subscription) return false;
-  const cert = String(certification ?? "").trim().toLowerCase();
+  const cert = normalizeStringArray([certification], SUBSCRIPTION_CERTIFICATIONS)[0] || "";
   const unlockedSection = String(section ?? "").trim().toLowerCase();
   return (
     (!cert || subscription.certifications.includes(cert)) &&
@@ -754,6 +765,7 @@ async function ensureSchema() {
       expires_at TIMESTAMPTZ NOT NULL,
       payment_provider TEXT NOT NULL DEFAULT 'manual',
       payment_reference TEXT,
+      selected_certifications JSONB NOT NULL DEFAULT '[]'::jsonb,
       amount_paid NUMERIC(10,2) NOT NULL DEFAULT 0,
       currency TEXT NOT NULL DEFAULT 'EUR',
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -783,14 +795,21 @@ async function ensureSchema() {
       status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'active', 'expired', 'cancelled', 'failed', 'succeeded')),
       amount NUMERIC(10,2) NOT NULL CHECK (amount >= 0),
       currency TEXT NOT NULL DEFAULT 'EUR',
+      selected_certifications JSONB NOT NULL DEFAULT '[]'::jsonb,
       metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
+  await pool.query(`ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS selected_certifications JSONB NOT NULL DEFAULT '[]'::jsonb;`);
+  await pool.query(`ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS selected_certifications JSONB NOT NULL DEFAULT '[]'::jsonb;`);
   await pool.query(`
     CREATE INDEX IF NOT EXISTS user_subscriptions_user_level_status_idx
       ON user_subscriptions(user_id, level, status, expires_at DESC);
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS user_subscriptions_selected_certifications_idx
+      ON user_subscriptions USING GIN (selected_certifications);
   `);
   await pool.query(`
     CREATE INDEX IF NOT EXISTS writing_simulator_usage_user_level_idx
@@ -3508,11 +3527,13 @@ app.get("/api/subscriptions/access", requireAuth, async (req, res) => {
   try {
     const level = normalizeSubscriptionLevel(req.query.level);
     if (!level) return res.status(400).json({ ok: false, error: "A valid B1 or B2 level is required" });
-    const subscription = await getActiveSubscriptionForUser(req.user.id, level);
+    const certification = normalizeStringArray([req.query.certification], SUBSCRIPTION_CERTIFICATIONS)[0] || "";
+    const subscription = await getActiveSubscriptionForUser(req.user.id, level, certification);
     const canAccess = userHasSubscriptionAccess(req.user, subscription, req.query.certification, req.query.section);
     return res.json({
       ok: true,
       level,
+      certification,
       canAccess,
       subscription,
       remainingWritingAttempts: subscription?.writingAttemptsRemaining ?? 0,
@@ -3528,8 +3549,18 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
     const level = normalizeSubscriptionLevel(req.body?.level);
     const planKey = normalizePlanKey(req.body?.planKey);
     const provider = normalizePaymentProvider(req.body?.provider);
+    const rawSelectedCertifications = Array.isArray(req.body?.selectedCertifications)
+      ? req.body.selectedCertifications
+      : [];
+    const selectedCertifications = normalizeStringArray(rawSelectedCertifications, SUBSCRIPTION_CERTIFICATIONS);
     if (!level || !planKey) {
       return res.status(400).json({ ok: false, error: "A valid pricing plan is required" });
+    }
+    if (!selectedCertifications.length) {
+      return res.status(400).json({ ok: false, error: "Select at least one certification" });
+    }
+    if (selectedCertifications.length !== rawSelectedCertifications.length) {
+      return res.status(400).json({ ok: false, error: "One or more selected certifications are invalid" });
     }
 
     const planResult = await pool.query(
@@ -3542,22 +3573,30 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
     );
     const plan = planResult.rows[0];
     if (!plan) return res.status(404).json({ ok: false, error: "Pricing plan not found" });
+    const basePriceEur = Number(plan.price_eur);
+    const selectedCertificationCount = selectedCertifications.length;
+    const finalPriceEur = Number((basePriceEur * selectedCertificationCount).toFixed(2));
 
     const transaction = await pool.query(
-      `INSERT INTO payment_transactions (user_id, plan_id, provider, status, amount, currency, metadata)
-       VALUES ($1, $2, $3, 'pending', $4, $5, $6::jsonb)
+      `INSERT INTO payment_transactions (user_id, plan_id, provider, status, amount, currency, selected_certifications, metadata)
+       VALUES ($1, $2, $3, 'pending', $4, $5, $6::jsonb, $7::jsonb)
        RETURNING id, status, created_at`,
       [
         req.user.id,
         plan.id,
         provider,
-        plan.price_eur,
+        finalPriceEur,
         plan.currency,
+        JSON.stringify(selectedCertifications),
         JSON.stringify({
           level: plan.level,
           planKey: plan.plan_key,
           planName: plan.plan_name,
           durationDays: Number(plan.duration_days),
+          basePriceEur,
+          selectedCertifications,
+          selectedCertificationCount,
+          finalPriceEur,
           writingSimulatorAttempts: Number(plan.writing_simulator_attempts),
           requestedProvider: provider,
         }),
@@ -3574,11 +3613,15 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
         level: plan.level,
         planKey: plan.plan_key,
         planName: plan.plan_name,
-        amount: Number(plan.price_eur),
+        amount: finalPriceEur,
+        basePriceEur,
+        selectedCertifications,
+        selectedCertificationCount,
+        finalPriceEur,
         currency: plan.currency,
         durationDays: Number(plan.duration_days),
         writingSimulatorAttempts: Number(plan.writing_simulator_attempts),
-        certifications: normalizeStringArray(plan.certifications, SUBSCRIPTION_CERTIFICATIONS),
+        certifications: selectedCertifications,
         unlockedSections: normalizeStringArray(plan.unlocked_sections, SUBSCRIPTION_SECTIONS),
         message: "Paiement bientôt disponible. Ce pack est prêt pour l’intégration du paiement.",
       },
