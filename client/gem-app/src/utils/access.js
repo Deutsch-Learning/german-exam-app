@@ -69,14 +69,56 @@ export const hasAuthSessionHint = () =>
 
 export const isAdmin = () => getAuthUser()?.role === "admin";
 
-export const hasPaidSeriesAccess = () => {
+export const normalizeSeriesLevel = (series) => {
+  const fields = [
+    series?.level,
+    series?.targetLevel,
+    series?.target_level,
+    series?.examLevel,
+    series?.exam_level,
+    series?.examId,
+    series?.exam_id,
+    series?.accessExamId,
+    series?.access_exam_id,
+    series?.name,
+    series?.examName,
+    series?.exam_name,
+    series?.title,
+  ];
+  const match = fields
+    .map((field) => String(field ?? "").match(/\b(B1|B2)\b/i)?.[1]?.toUpperCase())
+    .find(Boolean);
+  return match || "";
+};
+
+export const hasActiveSubscriptionForLevel = (level) => {
+  const auth = getAuthUser();
+  if (!auth?.id) return false;
+  const normalizedLevel = String(level ?? "").trim().toUpperCase();
+  if (!["B1", "B2"].includes(normalizedLevel)) return false;
+
+  const subscriptions = Array.isArray(auth.active_subscriptions)
+    ? auth.active_subscriptions
+    : Array.isArray(auth.activeSubscriptions)
+      ? auth.activeSubscriptions
+      : [];
+  const now = Date.now();
+  return subscriptions.some((subscription) => {
+    const subscriptionLevel = String(subscription?.level ?? "").toUpperCase();
+    const status = String(subscription?.status ?? "").toLowerCase();
+    const expiresAt = subscription?.expiresAt || subscription?.expires_at;
+    const expiresAtMs = expiresAt ? new Date(expiresAt).getTime() : 0;
+    return subscriptionLevel === normalizedLevel && status === "active" && expiresAtMs > now;
+  });
+};
+
+export const hasPaidSeriesAccess = (series = null) => {
   const auth = getAuthUser();
   if (!auth?.id) return false;
 
   const plan = String(auth?.plan ?? auth?.subscriptionPlan ?? "").toLowerCase();
   const status = String(auth?.subscription?.status ?? auth?.subscriptionStatus ?? "").toLowerCase();
-
-  return Boolean(
+  const broadAccess = Boolean(
     auth?.has_full_access ||
       auth?.hasFullAccess ||
       auth?.isPremium ||
@@ -86,6 +128,10 @@ export const hasPaidSeriesAccess = () => {
       ["active", "trialing", "paid"].includes(status) ||
       (plan && !["free", "visitor"].includes(plan))
   );
+  if (broadAccess) return true;
+
+  const level = normalizeSeriesLevel(series);
+  return level ? hasActiveSubscriptionForLevel(level) : false;
 };
 
 export const hasPartialSeriesAccess = (series) => {
@@ -108,6 +154,6 @@ export const hasPartialSeriesAccess = (series) => {
 };
 
 export const canOpenSeries = (series) =>
-  Boolean(series?.isFree) || hasPaidSeriesAccess() || hasPartialSeriesAccess(series);
+  Boolean(series?.isFree) || hasPaidSeriesAccess(series) || hasPartialSeriesAccess(series);
 
 export const isVisitorSeriesAttempt = (series) => Boolean(series?.isFree) && !isLoggedIn();

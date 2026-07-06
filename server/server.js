@@ -123,6 +123,16 @@ const EMAIL_VERIFICATION_REQUIRED =
   (EMAIL_VERIFICATION_MODE === "strict" || process.env.EMAIL_VERIFICATION_REQUIRED === "true");
 const LEVEL_ORDER = ["A1", "A2", "B1", "B2", "C1", "C2"];
 const NOT_SPECIFIED_LEVEL = "Not specified";
+const SUBSCRIPTION_CERTIFICATIONS = ["goethe", "osd", "telc", "ecl"];
+const SUBSCRIPTION_SECTIONS = ["read", "listen", "speak", "write"];
+const SUBSCRIPTION_PLAN_SEEDS = [
+  { level: "B1", planKey: "starter", planName: "Starter", durationDays: 5, priceEur: 14.99, writingSimulatorAttempts: 3 },
+  { level: "B1", planKey: "standard", planName: "Standard", durationDays: 15, priceEur: 29.99, writingSimulatorAttempts: 6 },
+  { level: "B1", planKey: "intensif", planName: "Intensif", durationDays: 30, priceEur: 54.99, writingSimulatorAttempts: 10 },
+  { level: "B2", planKey: "starter", planName: "Starter", durationDays: 5, priceEur: 19.99, writingSimulatorAttempts: 3 },
+  { level: "B2", planKey: "standard", planName: "Standard", durationDays: 15, priceEur: 34.99, writingSimulatorAttempts: 6 },
+  { level: "B2", planKey: "intensif", planName: "Intensif", durationDays: 30, priceEur: 64.99, writingSimulatorAttempts: 10 },
+];
 
 if (!process.env.JWT_SECRET && isProduction) {
   throw new Error("JWT_SECRET is required in production");
@@ -230,6 +240,107 @@ const normalizePartialAccess = (value) => {
       seen.add(key);
       return true;
     });
+};
+
+const normalizeSubscriptionLevel = (value) => {
+  const level = String(value ?? "").trim().toUpperCase();
+  return ["B1", "B2"].includes(level) ? level : "";
+};
+
+const normalizePlanKey = (value) => {
+  const key = String(value ?? "").trim().toLowerCase();
+  return ["starter", "standard", "intensif"].includes(key) ? key : "";
+};
+
+const normalizePaymentProvider = (value) => {
+  const provider = String(value ?? "").trim().toLowerCase();
+  return ["stripe", "cinetpay", "notpay", "manual"].includes(provider) ? provider : "manual";
+};
+
+const normalizeStringArray = (value, allowed = []) => {
+  const raw = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? (() => {
+          try {
+            return JSON.parse(value);
+          } catch {
+            return [];
+          }
+        })()
+      : [];
+  const allowedSet = new Set(allowed.map((item) => String(item).toLowerCase()));
+  return raw
+    .map((item) => String(item ?? "").trim().toLowerCase())
+    .filter((item, index, arr) => item && (!allowedSet.size || allowedSet.has(item)) && arr.indexOf(item) === index);
+};
+
+const mapSubscriptionRow = (row) => ({
+  id: row.id,
+  planId: row.plan_id,
+  level: row.level,
+  planKey: row.plan_key,
+  planName: row.plan_name,
+  status: row.status,
+  startsAt: row.starts_at,
+  expiresAt: row.expires_at,
+  durationDays: Number(row.duration_days ?? 0),
+  priceEur: Number(row.price_eur ?? row.amount_paid ?? 0),
+  currency: row.currency || "EUR",
+  certifications: normalizeStringArray(row.certifications, SUBSCRIPTION_CERTIFICATIONS),
+  unlockedSections: normalizeStringArray(row.unlocked_sections, SUBSCRIPTION_SECTIONS),
+  writingSimulatorAttempts: Number(row.writing_simulator_attempts ?? 0),
+  writingAttemptsUsed: Number(row.writing_attempts_used ?? 0),
+  writingAttemptsRemaining: Math.max(
+    0,
+    Number(row.writing_simulator_attempts ?? 0) - Number(row.writing_attempts_used ?? 0)
+  ),
+});
+
+const getActiveSubscriptionsForUser = async (userId) => {
+  if (!Number.isInteger(Number(userId)) || Number(userId) <= 0) return [];
+  const result = await pool.query(
+    `SELECT us.id, us.plan_id, us.level, us.plan_key, us.status, us.starts_at, us.expires_at,
+            us.amount_paid, us.currency,
+            sp.plan_name, sp.duration_days, sp.price_eur, sp.writing_simulator_attempts,
+            sp.certifications, sp.unlocked_sections,
+            COALESCE(wsu.attempts_used, 0) AS writing_attempts_used
+     FROM user_subscriptions us
+     JOIN subscription_plans sp ON sp.id = us.plan_id
+     LEFT JOIN writing_simulator_usage wsu ON wsu.subscription_id = us.id AND wsu.user_id = us.user_id
+     WHERE us.user_id = $1
+       AND us.status = 'active'
+       AND us.starts_at <= NOW()
+       AND us.expires_at > NOW()
+       AND sp.is_active = TRUE
+     ORDER BY us.expires_at DESC`,
+    [Number(userId)]
+  );
+  return result.rows.map(mapSubscriptionRow);
+};
+
+const getActiveSubscriptionForUser = async (userId, level) => {
+  const normalizedLevel = normalizeSubscriptionLevel(level);
+  if (!normalizedLevel) return null;
+  const subscriptions = await getActiveSubscriptionsForUser(Number(userId));
+  return subscriptions.find((subscription) => subscription.level === normalizedLevel) ?? null;
+};
+
+const sanitizeUserWithSubscriptions = async (user) => ({
+  ...sanitizeUser(user),
+  active_subscriptions: await getActiveSubscriptionsForUser(Number(user?.id)),
+});
+
+const userHasSubscriptionAccess = (user, subscription, certification, section) => {
+  if (!user?.id) return false;
+  if (user.role === "admin" || user.has_full_access || user.hasFullAccess) return true;
+  if (!subscription) return false;
+  const cert = String(certification ?? "").trim().toLowerCase();
+  const unlockedSection = String(section ?? "").trim().toLowerCase();
+  return (
+    (!cert || subscription.certifications.includes(cert)) &&
+    (!unlockedSection || subscription.unlockedSections.includes(unlockedSection))
+  );
 };
 
 const getClientIp = (req) =>
@@ -612,6 +723,127 @@ async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS simulations_user_created_at_idx
       ON simulations(user_id, created_at DESC);
   `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS subscription_plans (
+      id SERIAL PRIMARY KEY,
+      level TEXT NOT NULL CHECK (level IN ('B1', 'B2')),
+      plan_key TEXT NOT NULL CHECK (plan_key IN ('starter', 'standard', 'intensif')),
+      plan_name TEXT NOT NULL,
+      duration_days INTEGER NOT NULL CHECK (duration_days > 0),
+      price_eur NUMERIC(10,2) NOT NULL CHECK (price_eur >= 0),
+      currency TEXT NOT NULL DEFAULT 'EUR',
+      writing_simulator_attempts INTEGER NOT NULL CHECK (writing_simulator_attempts >= 0),
+      certifications JSONB NOT NULL DEFAULT '[]'::jsonb,
+      unlocked_sections JSONB NOT NULL DEFAULT '[]'::jsonb,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(level, plan_key)
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS user_subscriptions (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      plan_id INTEGER NOT NULL REFERENCES subscription_plans(id) ON DELETE RESTRICT,
+      level TEXT NOT NULL CHECK (level IN ('B1', 'B2')),
+      plan_key TEXT NOT NULL CHECK (plan_key IN ('starter', 'standard', 'intensif')),
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'active', 'expired', 'cancelled', 'failed')),
+      starts_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL,
+      payment_provider TEXT NOT NULL DEFAULT 'manual',
+      payment_reference TEXT,
+      amount_paid NUMERIC(10,2) NOT NULL DEFAULT 0,
+      currency TEXT NOT NULL DEFAULT 'EUR',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS writing_simulator_usage (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      subscription_id INTEGER NOT NULL REFERENCES user_subscriptions(id) ON DELETE CASCADE,
+      level TEXT NOT NULL CHECK (level IN ('B1', 'B2')),
+      attempts_allowed INTEGER NOT NULL CHECK (attempts_allowed >= 0),
+      attempts_used INTEGER NOT NULL DEFAULT 0 CHECK (attempts_used >= 0),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(user_id, subscription_id, level)
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS payment_transactions (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      plan_id INTEGER NOT NULL REFERENCES subscription_plans(id) ON DELETE RESTRICT,
+      provider TEXT NOT NULL DEFAULT 'manual' CHECK (provider IN ('stripe', 'cinetpay', 'notpay', 'manual')),
+      provider_reference TEXT,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'active', 'expired', 'cancelled', 'failed', 'succeeded')),
+      amount NUMERIC(10,2) NOT NULL CHECK (amount >= 0),
+      currency TEXT NOT NULL DEFAULT 'EUR',
+      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS user_subscriptions_user_level_status_idx
+      ON user_subscriptions(user_id, level, status, expires_at DESC);
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS writing_simulator_usage_user_level_idx
+      ON writing_simulator_usage(user_id, level);
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS payment_transactions_user_created_idx
+      ON payment_transactions(user_id, created_at DESC);
+  `);
+  await pool.query(`ALTER TABLE subscription_plans ENABLE ROW LEVEL SECURITY;`);
+  await pool.query(`ALTER TABLE user_subscriptions ENABLE ROW LEVEL SECURITY;`);
+  await pool.query(`ALTER TABLE writing_simulator_usage ENABLE ROW LEVEL SECURITY;`);
+  await pool.query(`ALTER TABLE payment_transactions ENABLE ROW LEVEL SECURITY;`);
+  await pool.query(`
+    DO $$
+    BEGIN
+      CREATE POLICY subscription_plans_read_active
+        ON subscription_plans
+        FOR SELECT
+        USING (is_active = TRUE);
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$;
+  `);
+  for (const plan of SUBSCRIPTION_PLAN_SEEDS) {
+    await pool.query(
+      `INSERT INTO subscription_plans (
+         level, plan_key, plan_name, duration_days, price_eur, currency,
+         writing_simulator_attempts, certifications, unlocked_sections, is_active, updated_at
+       )
+       VALUES ($1, $2, $3, $4, $5, 'EUR', $6, $7::jsonb, $8::jsonb, TRUE, NOW())
+       ON CONFLICT (level, plan_key)
+       DO UPDATE SET
+         plan_name = EXCLUDED.plan_name,
+         duration_days = EXCLUDED.duration_days,
+         price_eur = EXCLUDED.price_eur,
+         currency = EXCLUDED.currency,
+         writing_simulator_attempts = EXCLUDED.writing_simulator_attempts,
+         certifications = EXCLUDED.certifications,
+         unlocked_sections = EXCLUDED.unlocked_sections,
+         is_active = TRUE,
+         updated_at = NOW()`,
+      [
+        plan.level,
+        plan.planKey,
+        plan.planName,
+        plan.durationDays,
+        plan.priceEur,
+        plan.writingSimulatorAttempts,
+        JSON.stringify(SUBSCRIPTION_CERTIFICATIONS),
+        JSON.stringify(SUBSCRIPTION_SECTIONS),
+      ]
+    );
+  }
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS refresh_tokens (
@@ -2043,7 +2275,7 @@ const verifyEmailGetHandler = async (req, res) => {
     const user = await verifyEmailToken(req.params.token);
     if (!user) return res.status(400).json({ ok: false, error: "Invalid or expired verification link" });
     await sendWelcomeEmailOnce(user);
-    return res.json({ ok: true, user: sanitizeUser(user) });
+    return res.json({ ok: true, user: await sanitizeUserWithSubscriptions(user) });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ ok: false, error: "Server error" });
@@ -2060,7 +2292,7 @@ const verifyEmailPostHandler = async (req, res) => {
       : await verifyEmailCode(req.body?.email, req.body?.code);
     if (!user) return res.status(400).json({ ok: false, error: "Invalid or expired verification code" });
     await sendWelcomeEmailOnce(user);
-    return res.json({ ok: true, user: sanitizeUser(user) });
+    return res.json({ ok: true, user: await sanitizeUserWithSubscriptions(user) });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ ok: false, error: "Server error" });
@@ -2113,7 +2345,7 @@ const loginHandler = async (req, res) => {
       expiresIn: auth.expiresIn,
       redirectTo: user.role === "admin" ? "/admin/dashboard" : "/dashboard",
       requiresEmailVerification: EMAIL_VERIFICATION_ENABLED && !user.email_verified,
-      user: sanitizeUser({ ...user, last_login_at: new Date().toISOString() }),
+      user: await sanitizeUserWithSubscriptions({ ...user, last_login_at: new Date().toISOString() }),
     });
   } catch (err) {
     console.error(err);
@@ -2207,7 +2439,7 @@ const refreshHandler = async (req, res) => {
       token: auth.token,
       accessToken: auth.token,
       expiresIn: auth.expiresIn,
-      user: sanitizeUser(user),
+      user: await sanitizeUserWithSubscriptions(user),
     });
   } catch (err) {
     console.error(err);
@@ -2332,7 +2564,7 @@ app.post("/reset-password", resetPasswordHandler);
 app.post("/api/auth/reset-password", resetPasswordHandler);
 
 const profileHandler = async (req, res) => {
-  return res.json({ ok: true, user: sanitizeUser(req.user) });
+  return res.json({ ok: true, user: await sanitizeUserWithSubscriptions(req.user) });
 };
 
 app.get("/me", requireAuth, profileHandler);
@@ -2613,7 +2845,7 @@ const dashboardHandler = async (req, res) => {
 
     return res.json({
       ok: true,
-      user: sanitizeUser({
+      user: await sanitizeUserWithSubscriptions({
         ...req.user,
         current_level: progressSnapshot.currentLevel,
         target_level: progressSnapshot.targetLevel,
@@ -2730,7 +2962,7 @@ const updateProfileHandler = async (req, res) => {
     }
     return res.json({
       ok: true,
-      user: sanitizeUser(updated.rows[0]),
+      user: await sanitizeUserWithSubscriptions(updated.rows[0]),
       requiresEmailVerification: shouldSendVerification,
       devVerificationUrl: process.env.NODE_ENV === "production" ? undefined : verificationUrl?.legacyLink,
     });
@@ -2759,7 +2991,7 @@ const updateEmailPreferencesHandler = async (req, res) => {
                  marketing_emails_enabled, created_at, last_login_at`,
       [req.user.id, marketingEnabled]
     );
-    return res.json({ ok: true, user: sanitizeUser(updated.rows[0]) });
+    return res.json({ ok: true, user: await sanitizeUserWithSubscriptions(updated.rows[0]) });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ ok: false, error: "Server error" });
@@ -3227,6 +3459,202 @@ app.get("/api/audio/generated/:assetId", async (req, res) => {
   } catch (err) {
     console.error("Generated audio stream failed", err);
     return res.status(500).json({ ok: false, error: "Audio unavailable" });
+  }
+});
+
+app.get("/api/subscription-plans", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, level, plan_key, plan_name, duration_days, price_eur, currency,
+              writing_simulator_attempts, certifications, unlocked_sections
+       FROM subscription_plans
+       WHERE is_active = TRUE
+       ORDER BY level, CASE plan_key WHEN 'starter' THEN 1 WHEN 'standard' THEN 2 ELSE 3 END`
+    );
+    return res.json({
+      ok: true,
+      plans: result.rows.map((row) => ({
+        id: row.id,
+        level: row.level,
+        planKey: row.plan_key,
+        planName: row.plan_name,
+        durationDays: Number(row.duration_days),
+        priceEur: Number(row.price_eur),
+        currency: row.currency,
+        writingSimulatorAttempts: Number(row.writing_simulator_attempts),
+        certifications: normalizeStringArray(row.certifications, SUBSCRIPTION_CERTIFICATIONS),
+        unlockedSections: normalizeStringArray(row.unlocked_sections, SUBSCRIPTION_SECTIONS),
+      })),
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.get("/api/subscriptions/me", requireAuth, async (req, res) => {
+  try {
+    return res.json({
+      ok: true,
+      activeSubscriptions: await getActiveSubscriptionsForUser(req.user.id),
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.get("/api/subscriptions/access", requireAuth, async (req, res) => {
+  try {
+    const level = normalizeSubscriptionLevel(req.query.level);
+    if (!level) return res.status(400).json({ ok: false, error: "A valid B1 or B2 level is required" });
+    const subscription = await getActiveSubscriptionForUser(req.user.id, level);
+    const canAccess = userHasSubscriptionAccess(req.user, subscription, req.query.certification, req.query.section);
+    return res.json({
+      ok: true,
+      level,
+      canAccess,
+      subscription,
+      remainingWritingAttempts: subscription?.writingAttemptsRemaining ?? 0,
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.post("/api/checkout/session", requireAuth, async (req, res) => {
+  try {
+    const level = normalizeSubscriptionLevel(req.body?.level);
+    const planKey = normalizePlanKey(req.body?.planKey);
+    const provider = normalizePaymentProvider(req.body?.provider);
+    if (!level || !planKey) {
+      return res.status(400).json({ ok: false, error: "A valid pricing plan is required" });
+    }
+
+    const planResult = await pool.query(
+      `SELECT id, level, plan_key, plan_name, duration_days, price_eur, currency,
+              writing_simulator_attempts, certifications, unlocked_sections
+       FROM subscription_plans
+       WHERE level = $1 AND plan_key = $2 AND is_active = TRUE
+       LIMIT 1`,
+      [level, planKey]
+    );
+    const plan = planResult.rows[0];
+    if (!plan) return res.status(404).json({ ok: false, error: "Pricing plan not found" });
+
+    const transaction = await pool.query(
+      `INSERT INTO payment_transactions (user_id, plan_id, provider, status, amount, currency, metadata)
+       VALUES ($1, $2, $3, 'pending', $4, $5, $6::jsonb)
+       RETURNING id, status, created_at`,
+      [
+        req.user.id,
+        plan.id,
+        provider,
+        plan.price_eur,
+        plan.currency,
+        JSON.stringify({
+          level: plan.level,
+          planKey: plan.plan_key,
+          planName: plan.plan_name,
+          durationDays: Number(plan.duration_days),
+          writingSimulatorAttempts: Number(plan.writing_simulator_attempts),
+          requestedProvider: provider,
+        }),
+      ]
+    );
+
+    return res.json({
+      ok: true,
+      checkoutSession: {
+        provider,
+        status: transaction.rows[0].status,
+        transactionId: transaction.rows[0].id,
+        planId: plan.id,
+        level: plan.level,
+        planKey: plan.plan_key,
+        planName: plan.plan_name,
+        amount: Number(plan.price_eur),
+        currency: plan.currency,
+        durationDays: Number(plan.duration_days),
+        writingSimulatorAttempts: Number(plan.writing_simulator_attempts),
+        certifications: normalizeStringArray(plan.certifications, SUBSCRIPTION_CERTIFICATIONS),
+        unlockedSections: normalizeStringArray(plan.unlocked_sections, SUBSCRIPTION_SECTIONS),
+        message: "Paiement bientôt disponible. Ce pack est prêt pour l’intégration du paiement.",
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.post("/api/writing-simulator/attempts/consume", requireAuth, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const level = normalizeSubscriptionLevel(req.body?.level);
+    if (!level) return res.status(400).json({ ok: false, error: "A valid B1 or B2 level is required" });
+    const active = await client.query(
+      `SELECT us.id, us.user_id, us.level, sp.writing_simulator_attempts
+       FROM user_subscriptions us
+       JOIN subscription_plans sp ON sp.id = us.plan_id
+       WHERE us.user_id = $1
+         AND us.level = $2
+         AND us.status = 'active'
+         AND us.starts_at <= NOW()
+         AND us.expires_at > NOW()
+         AND sp.is_active = TRUE
+       ORDER BY us.expires_at DESC
+       LIMIT 1`,
+      [req.user.id, level]
+    );
+    const subscription = active.rows[0];
+    if (!subscription && !(req.user.role === "admin" || req.user.has_full_access)) {
+      return res.status(403).json({ ok: false, error: "No active subscription for this level" });
+    }
+    if (!subscription && (req.user.role === "admin" || req.user.has_full_access)) {
+      return res.json({ ok: true, level, remainingWritingAttempts: null, unlimited: true });
+    }
+
+    await client.query("BEGIN");
+    await client.query(
+      `INSERT INTO writing_simulator_usage (user_id, subscription_id, level, attempts_allowed, attempts_used)
+       VALUES ($1, $2, $3, $4, 0)
+       ON CONFLICT (user_id, subscription_id, level)
+       DO UPDATE SET attempts_allowed = EXCLUDED.attempts_allowed, updated_at = NOW()`,
+      [req.user.id, subscription.id, level, Number(subscription.writing_simulator_attempts)]
+    );
+    const consumed = await client.query(
+      `UPDATE writing_simulator_usage
+       SET attempts_used = attempts_used + 1, updated_at = NOW()
+       WHERE user_id = $1
+         AND subscription_id = $2
+         AND level = $3
+         AND attempts_used < attempts_allowed
+       RETURNING attempts_allowed, attempts_used`,
+      [req.user.id, subscription.id, level]
+    );
+    if (!consumed.rows[0]) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ ok: false, error: "No writing simulator attempts remaining" });
+    }
+    await client.query("COMMIT");
+    const usage = consumed.rows[0];
+    return res.json({
+      ok: true,
+      level,
+      attemptsAllowed: Number(usage.attempts_allowed),
+      attemptsUsed: Number(usage.attempts_used),
+      remainingWritingAttempts: Math.max(0, Number(usage.attempts_allowed) - Number(usage.attempts_used)),
+    });
+  } catch (err) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {}
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  } finally {
+    client.release();
   }
 });
 

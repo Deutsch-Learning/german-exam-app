@@ -4,7 +4,12 @@ import logo from "../assets/images/logo.png";
 
 export default function SessionExpiredPage() {
   const { state } = useLocation();
-  const offerText = state?.offerId ? `Offer selected: ${state.offerId}.` : "";
+  const selectedPlan = state?.selectedPlan;
+  const offerText = selectedPlan
+    ? `Pack sélectionné : ${selectedPlan.level} ${selectedPlan.planName} - ${selectedPlan.displayPrice}.`
+    : state?.offerId
+      ? `Pack sélectionné : ${state.offerId}.`
+      : "";
 
   return (
     <div className="simple-page">
@@ -12,26 +17,26 @@ export default function SessionExpiredPage() {
         <div className="simple-topbar">
           <Link className="simple-logo" to="/">
             <img src={logo} alt="" />
-            Deutsch Prüfungen
+            Deutschprüfungen
           </Link>
         </div>
 
         <section className="simple-card status-panel">
-          <p className="simple-eyebrow">Session</p>
-          <h1>Your session has expired</h1>
+          <p className="simple-eyebrow">Connexion requise</p>
+          <h1>Connectez-vous pour continuer</h1>
           <p>
-            {offerText} Create an account or log in to continue with this offer. You can
-            also continue as a visitor and return to the landing page.
+            {offerText} Créez un compte ou connectez-vous pour continuer avec ce pack.
+            Le paiement sera préparé uniquement après connexion.
           </p>
           <div className="simple-actions">
-            <Link className="simple-button" to="/register">
-              Create an account
+            <Link className="simple-button" to="/register" state={state}>
+              Créer un compte
             </Link>
-            <Link className="simple-secondary-button" to="/login">
-              Login
+            <Link className="simple-secondary-button" to="/login" state={state}>
+              Se connecter
             </Link>
             <Link className="simple-secondary-button" to="/">
-              Continue as a visitor
+              Continuer comme visiteur
             </Link>
           </div>
         </section>
