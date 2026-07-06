@@ -16,6 +16,7 @@ export default function RegisterPage() {
     phone: "",
     password: "",
     confirmPassword: "",
+    marketingEmailsEnabled: false,
     acceptTerms: false,
   });
   const [errors, setErrors] = useState({});
@@ -78,10 +79,12 @@ export default function RegisterPage() {
         username: formData.username,
         firstName: formData.firstName,
         lastName: formData.lastName,
+        marketingEmailsEnabled: formData.marketingEmailsEnabled,
       });
       if (res.data?.ok) {
         navigate(`/verify-email?email=${encodeURIComponent(formData.email)}`, {
           state: {
+            email: formData.email,
             message: res.data.message,
             devVerificationUrl: res.data.devVerificationUrl,
           },
@@ -317,6 +320,19 @@ export default function RegisterPage() {
               {errors.confirmPassword && (
                 <span className="error-text">{errors.confirmPassword}</span>
               )}
+            </div>
+
+            <div className="form-group">
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  name="marketingEmailsEnabled"
+                  checked={formData.marketingEmailsEnabled}
+                  onChange={handleChange}
+                />
+                <span className="checkbox-custom" />
+                Neuigkeiten, Angebote und Lerntipps per E-Mail erhalten.
+              </label>
             </div>
 
             <div className="form-group">

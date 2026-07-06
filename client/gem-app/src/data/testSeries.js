@@ -25,6 +25,12 @@ export const simulationModules = [
     shortLabel: "Oral expression",
     description: "Timed prompts, personal argumentation, image description, and role-play.",
   },
+  {
+    id: "sprach",
+    label: "Sprachbausteine",
+    shortLabel: "Language elements",
+    description: "TELC grammar and vocabulary cloze tasks.",
+  },
 ];
 
 const examSeriesSeeds = {

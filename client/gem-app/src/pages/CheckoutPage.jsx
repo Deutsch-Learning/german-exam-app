@@ -1,49 +1,53 @@
 import { Link, Navigate, useParams } from "react-router-dom";
-import "./SimplePages.css";
+import "./PricingPage.css";
 import logo from "../assets/images/logo.png";
-import { offerPlans } from "../data/siteContent";
 import NotFoundPage from "./NotFoundPage";
 import { getAuthUser } from "../utils/access";
+import { findPricingPlan } from "../data/pricingPlans";
 
 export default function CheckoutPage() {
   const { offerId } = useParams();
-  const offer = offerPlans.find((item) => item.id === offerId);
+  const plan = findPricingPlan(offerId);
   const user = getAuthUser();
 
   if (!user?.id) {
     return <Navigate to="/session-expired" replace state={{ offerId }} />;
   }
 
-  if (!offer) {
-    return <NotFoundPage message="The offer you selected is not available." />;
+  if (!plan) {
+    return <NotFoundPage message="Le pack sélectionné n’est pas disponible." />;
   }
 
   return (
-    <div className="simple-page">
-      <main className="simple-shell">
-        <div className="simple-topbar">
-          <Link className="simple-logo" to="/">
+    <div className="official-pricing-page">
+      <main className="official-pricing-shell checkout-shell">
+        <div className="pricing-topbar inline">
+          <Link className="pricing-logo" to="/">
             <img src={logo} alt="" />
-            Deutsch Prüfungen
+            Deutschprüfungen
           </Link>
-          <Link className="simple-home-link" to="/dashboard">
-            Dashboard
+          <Link className="pricing-home-link" to="/offers">
+            Retour aux tarifs
           </Link>
         </div>
-
-        <section className="simple-card">
-          <p className="simple-eyebrow">Checkout</p>
-          <h1>{offer.name}</h1>
-          <p>
-            You are logged in and ready to continue with the {offer.name} offer at
-            {" "}{offer.price}. Payment integration can be connected here.
+        <section className="pricing-modal checkout-panel">
+          <p className="pricing-kicker">Pack sélectionné</p>
+          <h1>{plan.level} {plan.planName}</h1>
+          <div className="pricing-modal-summary">
+            <span>Durée</span><strong>{plan.durationDays} jours</strong>
+            <span>Prix</span><strong>{plan.displayPrice}</strong>
+            <span>Simulateur écrit</span><strong>{plan.writingSimulatorAttempts} essais</strong>
+            <span>Certifications</span><strong>{plan.certificationLabels.join(", ")}</strong>
+          </div>
+          <p className="pricing-modal-message">
+            Paiement bientôt disponible. Ce pack est prêt pour l’intégration du paiement.
           </p>
-          <div className="simple-actions">
-            <Link className="simple-button" to="/dashboard">
-              Continue to dashboard
+          <div className="pricing-modal-actions">
+            <Link className="pricing-modal-button" to="/dashboard">
+              Dashboard
             </Link>
-            <Link className="simple-secondary-button" to="/offers">
-              Back to offers
+            <Link className="pricing-modal-secondary" to="/offers">
+              Choisir un autre pack
             </Link>
           </div>
         </section>

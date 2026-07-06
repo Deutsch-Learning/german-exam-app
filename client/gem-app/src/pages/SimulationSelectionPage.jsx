@@ -106,6 +106,9 @@ export const SimulationTopNav = ({ onGoHome, onGoAbout, onGoProfile, onGoDashboa
               <button type="button" className={styles.dropdownItem} onClick={() => onGoModule("speak")}>
                 {t.modules.speak}
               </button>
+              <button type="button" className={styles.dropdownItem} onClick={() => onGoModule("sprach")}>
+                {t.modules.sprach}
+              </button>
             </div>
           ) : null}
         </div>

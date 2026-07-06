@@ -209,6 +209,39 @@
   box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.18);
 }
 
+.checkboxRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #f9fafb;
+  color: #111827;
+  font-weight: 800;
+  font-size: 0.9rem;
+}
+
+.checkboxRow input {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  accent-color: #facc15;
+  flex-shrink: 0;
+}
+
+.checkboxRow span {
+  display: grid;
+  gap: 4px;
+}
+
+.checkboxRow small {
+  color: #64748b;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  font-weight: 650;
+}
+
 .submitBtn,
 .verifyBtn {
   min-height: 46px;
@@ -254,6 +287,18 @@
 .emptyState {
   color: #64748b;
   line-height: 1.55;
+}
+
+.verifyLink {
+  display: inline-flex;
+  margin-top: 8px;
+  color: #92400e;
+  font-weight: 850;
+  text-decoration: none;
+}
+
+.verifyLink:hover {
+  text-decoration: underline;
 }
 
 .verifiedBadge {

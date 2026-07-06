@@ -138,27 +138,3 @@ export const examSimulations = [
     level: "B2",
   },
 ];
-
-export const offerPlans = [
-  {
-    id: "starter",
-    name: "Starter",
-    price: "$30.99",
-    description: "A focused package for learners who want realistic entry-level practice.",
-    features: ["5 full simulations", "Automatic correction", "Progress overview"],
-  },
-  {
-    id: "intensive",
-    name: "Intensive",
-    price: "$45.99",
-    description: "The balanced option for regular practice across all exam modules.",
-    features: ["Unlimited simulations", "Written feedback", "Oral-expression practice"],
-  },
-  {
-    id: "premium",
-    name: "Premium",
-    price: "$99.99",
-    description: "Personalized preparation with stronger tracking and premium support.",
-    features: ["All test series", "Tutor correction", "Priority guidance"],
-  },
-];

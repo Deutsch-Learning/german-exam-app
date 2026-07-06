@@ -45,10 +45,20 @@ const {
   normalizeProvider,
   TtsConfigurationError,
 } = require("./services/ttsService");
+const {
+  getAppBaseUrl,
+  normalizePublicUrl,
+  sendEmail,
+  renderVerificationEmail,
+  renderResetPasswordEmail,
+  renderWelcomeEmail,
+  renderPasswordChangedEmail,
+  renderPromotionalEmail,
+} = require("./services/emailService");
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
-const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
+const FRONTEND_URL = normalizePublicUrl(process.env.FRONTEND_URL || process.env.APP_BASE_URL || "http://localhost:5173");
 const SERVE_CLIENT = process.env.SERVE_CLIENT === "true";
 const CLIENT_DIST_DIR = SERVE_CLIENT
   ? process.env.CLIENT_DIST_DIR
@@ -106,9 +116,23 @@ const REFRESH_DAYS = 7;
 const REFRESH_MAX_AGE_MS = REFRESH_DAYS * 24 * 60 * 60 * 1000;
 const COOKIE_SECURE = isProduction;
 const DEFAULT_TOTAL_AVAILABLE_EXAMS = Number(process.env.TOTAL_AVAILABLE_EXAMS || 20);
-const EMAIL_VERIFICATION_REQUIRED = process.env.EMAIL_VERIFICATION_REQUIRED === "true";
+const EMAIL_VERIFICATION_ENABLED = process.env.EMAIL_VERIFICATION_ENABLED !== "false";
+const EMAIL_VERIFICATION_MODE = String(process.env.EMAIL_VERIFICATION_MODE || "soft").toLowerCase();
+const EMAIL_VERIFICATION_REQUIRED =
+  EMAIL_VERIFICATION_ENABLED &&
+  (EMAIL_VERIFICATION_MODE === "strict" || process.env.EMAIL_VERIFICATION_REQUIRED === "true");
 const LEVEL_ORDER = ["A1", "A2", "B1", "B2", "C1", "C2"];
 const NOT_SPECIFIED_LEVEL = "Not specified";
+const SUBSCRIPTION_CERTIFICATIONS = ["goethe", "osd", "telc", "ecl"];
+const SUBSCRIPTION_SECTIONS = ["read", "listen", "speak", "write"];
+const SUBSCRIPTION_PLAN_SEEDS = [
+  { level: "B1", planKey: "starter", planName: "Starter", durationDays: 5, priceEur: 14.99, writingSimulatorAttempts: 3 },
+  { level: "B1", planKey: "standard", planName: "Standard", durationDays: 15, priceEur: 29.99, writingSimulatorAttempts: 6 },
+  { level: "B1", planKey: "intensif", planName: "Intensif", durationDays: 30, priceEur: 54.99, writingSimulatorAttempts: 10 },
+  { level: "B2", planKey: "starter", planName: "Starter", durationDays: 5, priceEur: 19.99, writingSimulatorAttempts: 3 },
+  { level: "B2", planKey: "standard", planName: "Standard", durationDays: 15, priceEur: 34.99, writingSimulatorAttempts: 6 },
+  { level: "B2", planKey: "intensif", planName: "Intensif", durationDays: 30, priceEur: 64.99, writingSimulatorAttempts: 10 },
+];
 
 if (!process.env.JWT_SECRET && isProduction) {
   throw new Error("JWT_SECRET is required in production");
@@ -149,6 +173,7 @@ const authRateLimiter = rateLimit({
 
 const TOKEN_BYTES = 32;
 const VERIFICATION_HOURS = 24;
+const VERIFICATION_CODE_MINUTES = 15;
 const RESET_MINUTES = 60;
 
 const isEmail = (value) =>
@@ -158,6 +183,8 @@ const normalizeEmail = (value) => String(value ?? "").trim().toLowerCase();
 const tokenHash = (token) =>
   crypto.createHash("sha256").update(token).digest("hex");
 const makeToken = () => crypto.randomBytes(TOKEN_BYTES).toString("hex");
+const makeVerificationCode = () => crypto.randomInt(0, 1_000_000).toString().padStart(6, "0");
+const verificationCodeHash = (email, code) => tokenHash(`${normalizeEmail(email)}:${String(code || "").trim()}`);
 const expiresFromNow = (amount, unit) => {
   const date = new Date();
   if (unit === "hours") date.setHours(date.getHours() + amount);
@@ -179,6 +206,7 @@ const sanitizeUser = (user) => ({
   partial_access: normalizePartialAccess(user.partial_access),
   current_level: user.current_level || NOT_SPECIFIED_LEVEL,
   target_level: user.target_level || null,
+  marketing_emails_enabled: Boolean(user.marketing_emails_enabled),
   created_at: user.created_at,
   last_login_at: user.last_login_at,
 });
@@ -212,6 +240,107 @@ const normalizePartialAccess = (value) => {
       seen.add(key);
       return true;
     });
+};
+
+const normalizeSubscriptionLevel = (value) => {
+  const level = String(value ?? "").trim().toUpperCase();
+  return ["B1", "B2"].includes(level) ? level : "";
+};
+
+const normalizePlanKey = (value) => {
+  const key = String(value ?? "").trim().toLowerCase();
+  return ["starter", "standard", "intensif"].includes(key) ? key : "";
+};
+
+const normalizePaymentProvider = (value) => {
+  const provider = String(value ?? "").trim().toLowerCase();
+  return ["stripe", "cinetpay", "notpay", "manual"].includes(provider) ? provider : "manual";
+};
+
+const normalizeStringArray = (value, allowed = []) => {
+  const raw = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? (() => {
+          try {
+            return JSON.parse(value);
+          } catch {
+            return [];
+          }
+        })()
+      : [];
+  const allowedSet = new Set(allowed.map((item) => String(item).toLowerCase()));
+  return raw
+    .map((item) => String(item ?? "").trim().toLowerCase())
+    .filter((item, index, arr) => item && (!allowedSet.size || allowedSet.has(item)) && arr.indexOf(item) === index);
+};
+
+const mapSubscriptionRow = (row) => ({
+  id: row.id,
+  planId: row.plan_id,
+  level: row.level,
+  planKey: row.plan_key,
+  planName: row.plan_name,
+  status: row.status,
+  startsAt: row.starts_at,
+  expiresAt: row.expires_at,
+  durationDays: Number(row.duration_days ?? 0),
+  priceEur: Number(row.price_eur ?? row.amount_paid ?? 0),
+  currency: row.currency || "EUR",
+  certifications: normalizeStringArray(row.certifications, SUBSCRIPTION_CERTIFICATIONS),
+  unlockedSections: normalizeStringArray(row.unlocked_sections, SUBSCRIPTION_SECTIONS),
+  writingSimulatorAttempts: Number(row.writing_simulator_attempts ?? 0),
+  writingAttemptsUsed: Number(row.writing_attempts_used ?? 0),
+  writingAttemptsRemaining: Math.max(
+    0,
+    Number(row.writing_simulator_attempts ?? 0) - Number(row.writing_attempts_used ?? 0)
+  ),
+});
+
+const getActiveSubscriptionsForUser = async (userId) => {
+  if (!Number.isInteger(Number(userId)) || Number(userId) <= 0) return [];
+  const result = await pool.query(
+    `SELECT us.id, us.plan_id, us.level, us.plan_key, us.status, us.starts_at, us.expires_at,
+            us.amount_paid, us.currency,
+            sp.plan_name, sp.duration_days, sp.price_eur, sp.writing_simulator_attempts,
+            sp.certifications, sp.unlocked_sections,
+            COALESCE(wsu.attempts_used, 0) AS writing_attempts_used
+     FROM user_subscriptions us
+     JOIN subscription_plans sp ON sp.id = us.plan_id
+     LEFT JOIN writing_simulator_usage wsu ON wsu.subscription_id = us.id AND wsu.user_id = us.user_id
+     WHERE us.user_id = $1
+       AND us.status = 'active'
+       AND us.starts_at <= NOW()
+       AND us.expires_at > NOW()
+       AND sp.is_active = TRUE
+     ORDER BY us.expires_at DESC`,
+    [Number(userId)]
+  );
+  return result.rows.map(mapSubscriptionRow);
+};
+
+const getActiveSubscriptionForUser = async (userId, level) => {
+  const normalizedLevel = normalizeSubscriptionLevel(level);
+  if (!normalizedLevel) return null;
+  const subscriptions = await getActiveSubscriptionsForUser(Number(userId));
+  return subscriptions.find((subscription) => subscription.level === normalizedLevel) ?? null;
+};
+
+const sanitizeUserWithSubscriptions = async (user) => ({
+  ...sanitizeUser(user),
+  active_subscriptions: await getActiveSubscriptionsForUser(Number(user?.id)),
+});
+
+const userHasSubscriptionAccess = (user, subscription, certification, section) => {
+  if (!user?.id) return false;
+  if (user.role === "admin" || user.has_full_access || user.hasFullAccess) return true;
+  if (!subscription) return false;
+  const cert = String(certification ?? "").trim().toLowerCase();
+  const unlockedSection = String(section ?? "").trim().toLowerCase();
+  return (
+    (!cert || subscription.certifications.includes(cert)) &&
+    (!unlockedSection || subscription.unlockedSections.includes(unlockedSection))
+  );
 };
 
 const getClientIp = (req) =>
@@ -398,6 +527,92 @@ const sendResetEmail = async (user, token) => {
   return link;
 };
 
+const buildFrontendUrl = (pathName, params = {}, overrideEnvName = "") => {
+  const configuredUrl = overrideEnvName ? normalizePublicUrl(process.env[overrideEnvName]) : "";
+  const url = configuredUrl
+    ? new URL(configuredUrl)
+    : new URL(pathName, `${getAppBaseUrl()}/`);
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") url.searchParams.set(key, value);
+  });
+  return url.toString();
+};
+
+const sendVerificationCodeEmail = async (user, token, code) => {
+  const verifyUrl = buildFrontendUrl("/verify-email", { email: user.email }, "VERIFY_EMAIL_URL");
+  const legacyLink = buildFrontendUrl(`/verify-email/${token}`);
+  const email = renderVerificationEmail({ user, code, verifyUrl });
+  await sendEmail({
+    pool,
+    userId: user.id,
+    to: user.email,
+    type: "verification",
+    subject: email.subject,
+    text: `${email.text}\n\nLien de secours : ${legacyLink}`,
+    html: email.html,
+    idempotencyKey: `verify-${user.id}-${tokenHash(token).slice(0, 16)}`,
+    metadata: { verifyUrl, legacyLink, expiresMinutes: VERIFICATION_CODE_MINUTES },
+  });
+  return { verifyUrl, legacyLink };
+};
+
+const sendPasswordResetEmail = async (user, token) => {
+  const resetUrl = buildFrontendUrl("/reset-password", { token }, "RESET_PASSWORD_URL");
+  const email = renderResetPasswordEmail({ user, resetUrl });
+  await sendEmail({
+    pool,
+    userId: user.id,
+    to: user.email,
+    type: "password_reset",
+    subject: email.subject,
+    text: email.text,
+    html: email.html,
+    idempotencyKey: `reset-${user.id}-${tokenHash(token).slice(0, 16)}`,
+    metadata: { resetUrl, expiresMinutes: RESET_MINUTES },
+  });
+  return resetUrl;
+};
+
+const sendWelcomeEmailOnce = async (user) => {
+  if (!user?.id || user.welcome_email_sent_at) return false;
+  const claimed = await pool.query(
+    `UPDATE users
+     SET welcome_email_sent_at = NOW()
+     WHERE id = $1
+       AND welcome_email_sent_at IS NULL
+     RETURNING id, email, username, first_name, welcome_email_sent_at`,
+    [user.id]
+  );
+  const row = claimed.rows[0];
+  if (!row) return false;
+  const email = renderWelcomeEmail({ user: row });
+  await sendEmail({
+    pool,
+    userId: row.id,
+    to: row.email,
+    type: "welcome",
+    subject: email.subject,
+    text: email.text,
+    html: email.html,
+    idempotencyKey: `welcome-${row.id}`,
+  });
+  return true;
+};
+
+const sendPasswordChangedNoticeEmail = async (user) => {
+  const email = renderPasswordChangedEmail({ user });
+  await sendEmail({
+    pool,
+    userId: user.id,
+    to: user.email,
+    type: "password_changed",
+    subject: email.subject,
+    text: email.text,
+    html: email.html,
+    idempotencyKey: `password-changed-${user.id}-${Date.now()}`,
+  });
+};
+
 async function ensureSchema() {
   await pool.query(`
     DO $$
@@ -437,6 +652,12 @@ async function ensureSchema() {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_token_hash TEXT;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_expires_at TIMESTAMPTZ;`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_code_hash TEXT;`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_code_expires_at TIMESTAMPTZ;`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_verification_email_sent_at TIMESTAMPTZ;`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS welcome_email_sent_at TIMESTAMPTZ;`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS marketing_emails_enabled BOOLEAN NOT NULL DEFAULT FALSE;`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS marketing_unsubscribed_at TIMESTAMPTZ;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_hash TEXT;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_expires_at TIMESTAMPTZ;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS has_full_access BOOLEAN NOT NULL DEFAULT FALSE;`);
@@ -469,18 +690,15 @@ async function ensureSchema() {
       WHERE verification_token_hash IS NOT NULL;
   `);
   await pool.query(`
+    CREATE INDEX IF NOT EXISTS users_verification_code_idx
+      ON users(verification_code_hash)
+      WHERE verification_code_hash IS NOT NULL;
+  `);
+  await pool.query(`
     CREATE INDEX IF NOT EXISTS users_reset_token_idx
       ON users(reset_token_hash)
       WHERE reset_token_hash IS NOT NULL;
   `);
-  await pool.query(`
-    UPDATE users
-    SET email_verified = TRUE,
-        email_verified_at = COALESCE(email_verified_at, NOW())
-    WHERE email_verified = FALSE
-      AND verification_token_hash IS NULL;
-  `);
-
   await pool.query(`
     CREATE TABLE IF NOT EXISTS simulations (
       id SERIAL PRIMARY KEY,
@@ -505,6 +723,127 @@ async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS simulations_user_created_at_idx
       ON simulations(user_id, created_at DESC);
   `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS subscription_plans (
+      id SERIAL PRIMARY KEY,
+      level TEXT NOT NULL CHECK (level IN ('B1', 'B2')),
+      plan_key TEXT NOT NULL CHECK (plan_key IN ('starter', 'standard', 'intensif')),
+      plan_name TEXT NOT NULL,
+      duration_days INTEGER NOT NULL CHECK (duration_days > 0),
+      price_eur NUMERIC(10,2) NOT NULL CHECK (price_eur >= 0),
+      currency TEXT NOT NULL DEFAULT 'EUR',
+      writing_simulator_attempts INTEGER NOT NULL CHECK (writing_simulator_attempts >= 0),
+      certifications JSONB NOT NULL DEFAULT '[]'::jsonb,
+      unlocked_sections JSONB NOT NULL DEFAULT '[]'::jsonb,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(level, plan_key)
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS user_subscriptions (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      plan_id INTEGER NOT NULL REFERENCES subscription_plans(id) ON DELETE RESTRICT,
+      level TEXT NOT NULL CHECK (level IN ('B1', 'B2')),
+      plan_key TEXT NOT NULL CHECK (plan_key IN ('starter', 'standard', 'intensif')),
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'active', 'expired', 'cancelled', 'failed')),
+      starts_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL,
+      payment_provider TEXT NOT NULL DEFAULT 'manual',
+      payment_reference TEXT,
+      amount_paid NUMERIC(10,2) NOT NULL DEFAULT 0,
+      currency TEXT NOT NULL DEFAULT 'EUR',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS writing_simulator_usage (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      subscription_id INTEGER NOT NULL REFERENCES user_subscriptions(id) ON DELETE CASCADE,
+      level TEXT NOT NULL CHECK (level IN ('B1', 'B2')),
+      attempts_allowed INTEGER NOT NULL CHECK (attempts_allowed >= 0),
+      attempts_used INTEGER NOT NULL DEFAULT 0 CHECK (attempts_used >= 0),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(user_id, subscription_id, level)
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS payment_transactions (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      plan_id INTEGER NOT NULL REFERENCES subscription_plans(id) ON DELETE RESTRICT,
+      provider TEXT NOT NULL DEFAULT 'manual' CHECK (provider IN ('stripe', 'cinetpay', 'notpay', 'manual')),
+      provider_reference TEXT,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'active', 'expired', 'cancelled', 'failed', 'succeeded')),
+      amount NUMERIC(10,2) NOT NULL CHECK (amount >= 0),
+      currency TEXT NOT NULL DEFAULT 'EUR',
+      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS user_subscriptions_user_level_status_idx
+      ON user_subscriptions(user_id, level, status, expires_at DESC);
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS writing_simulator_usage_user_level_idx
+      ON writing_simulator_usage(user_id, level);
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS payment_transactions_user_created_idx
+      ON payment_transactions(user_id, created_at DESC);
+  `);
+  await pool.query(`ALTER TABLE subscription_plans ENABLE ROW LEVEL SECURITY;`);
+  await pool.query(`ALTER TABLE user_subscriptions ENABLE ROW LEVEL SECURITY;`);
+  await pool.query(`ALTER TABLE writing_simulator_usage ENABLE ROW LEVEL SECURITY;`);
+  await pool.query(`ALTER TABLE payment_transactions ENABLE ROW LEVEL SECURITY;`);
+  await pool.query(`
+    DO $$
+    BEGIN
+      CREATE POLICY subscription_plans_read_active
+        ON subscription_plans
+        FOR SELECT
+        USING (is_active = TRUE);
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$;
+  `);
+  for (const plan of SUBSCRIPTION_PLAN_SEEDS) {
+    await pool.query(
+      `INSERT INTO subscription_plans (
+         level, plan_key, plan_name, duration_days, price_eur, currency,
+         writing_simulator_attempts, certifications, unlocked_sections, is_active, updated_at
+       )
+       VALUES ($1, $2, $3, $4, $5, 'EUR', $6, $7::jsonb, $8::jsonb, TRUE, NOW())
+       ON CONFLICT (level, plan_key)
+       DO UPDATE SET
+         plan_name = EXCLUDED.plan_name,
+         duration_days = EXCLUDED.duration_days,
+         price_eur = EXCLUDED.price_eur,
+         currency = EXCLUDED.currency,
+         writing_simulator_attempts = EXCLUDED.writing_simulator_attempts,
+         certifications = EXCLUDED.certifications,
+         unlocked_sections = EXCLUDED.unlocked_sections,
+         is_active = TRUE,
+         updated_at = NOW()`,
+      [
+        plan.level,
+        plan.planKey,
+        plan.planName,
+        plan.durationDays,
+        plan.priceEur,
+        plan.writingSimulatorAttempts,
+        JSON.stringify(SUBSCRIPTION_CERTIFICATIONS),
+        JSON.stringify(SUBSCRIPTION_SECTIONS),
+      ]
+    );
+  }
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS refresh_tokens (
@@ -554,6 +893,33 @@ async function ensureSchema() {
   await pool.query(`
     CREATE INDEX IF NOT EXISTS api_usage_user_created_idx
       ON api_usage_logs(user_id, created_at DESC);
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS email_events (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      email_type TEXT NOT NULL,
+      recipient TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      provider TEXT NOT NULL DEFAULT 'disabled',
+      status TEXT NOT NULL DEFAULT 'logged',
+      provider_message_id TEXT,
+      error_message TEXT,
+      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`
+    ALTER TABLE email_events ENABLE ROW LEVEL SECURITY;
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS email_events_user_created_idx
+      ON email_events(user_id, created_at DESC);
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS email_events_type_status_idx
+      ON email_events(email_type, status, created_at DESC);
   `);
 
   await pool.query(`
@@ -832,9 +1198,16 @@ const PUBLIC_MODULE_META = {
     description: "Imported speaking prompts from the original exam document.",
     defaultMinutes: 15,
   },
+  sprach: {
+    id: "sprach",
+    label: "Sprachbausteine",
+    shortLabel: "Language elements",
+    description: "Imported TELC grammar and vocabulary cloze tasks.",
+    defaultMinutes: 30,
+  },
 };
 
-const MODULE_ORDER = ["read", "listen", "write", "speak"];
+const MODULE_ORDER = ["read", "listen", "write", "speak", "sprach"];
 
 const buildUnavailableModuleMeta = (moduleId) => {
   const moduleMeta = PUBLIC_MODULE_META[moduleId];
@@ -912,13 +1285,41 @@ const parseSeriesNumber = (seriesId) => {
 
 const asJsonObject = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {};
 
-const cleanText = (value) =>
+const stripVisibleImportArtifacts = (value) =>
   String(value ?? "")
+    .replace(/---\s*PAGE\s+\d+\s*\/\s*\d+\s*---/gi, "")
+    .replace(/\bPAGE\s+\d+\s*\/\s*\d+\b/gi, "")
+    .replace(/\bCORRECTIONS?\b\s*$/gim, "")
+    .replace(/\bKORREKTUREN?\b\s*$/gim, "");
+
+const cleanText = (value) =>
+  stripVisibleImportArtifacts(value)
     .replace(/\r/g, "")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .replace(/[ \t]{2,}/g, " ")
     .trim();
+
+const decodeHtmlEntities = (value) =>
+  String(value ?? "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCharCode(parseInt(code, 16)));
+
+const cleanPlainText = (value) =>
+  cleanText(
+    decodeHtmlEntities(value)
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/(?:p|div|li|tr|h[1-6])>/gi, "\n")
+      .replace(/<[^>]+>/g, " ")
+  );
 
 const clipText = (value, max = 1200) => {
   const text = cleanText(value);
@@ -926,10 +1327,16 @@ const clipText = (value, max = 1200) => {
   return `${text.slice(0, Math.max(0, max - 1)).trim()}…`;
 };
 
+const clipPlainText = (value, max = 1200) => {
+  const text = cleanPlainText(value);
+  if (text.length <= max) return text;
+  return `${text.slice(0, Math.max(0, max - 1)).trim()}...`;
+};
+
 const extractCorrectValue = (correctAnswer) => {
   const correct = asJsonObject(correctAnswer);
   const value = correct.value ?? correct.answer ?? correct.correct ?? correct.correctAnswer;
-  return value == null ? "" : String(value).trim();
+  return value == null ? "" : cleanPlainText(value);
 };
 
 const normalizeChoiceOptions = (options) => {
@@ -940,10 +1347,114 @@ const normalizeChoiceOptions = (options) => {
       const label = option?.label ?? option?.text ?? option?.title ?? value;
       return {
         value: String(value),
-        label: clipText(label, 280),
+        label: clipPlainText(label, 280),
       };
     })
     .filter((option) => option.value && option.label);
+};
+
+const LISTENING_STUDENT_INSTRUCTION = "Hören Sie den Audiotext und beantworten Sie die Aufgaben zu diesem Teil.";
+
+const foldPlain = (value) =>
+  String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+const isListeningSourceLine = (line = "") => {
+  const raw = String(line ?? "").trim();
+  const rawFolded = foldPlain(raw);
+  if (
+    /^(?:n\s+)?(?:stimme|figur|stimme\/figur|bruitage|bruitages|sprecher|sprecherin|voice|voix|sfx)\s*[:/]/i.test(rawFolded) ||
+    /^\s*n?\s*\[(?:anfang|ende|hintergrund|pause|jingle|signal|gerausch|geraeusch|sound|sfx)/i.test(rawFolded) ||
+    /^(?!multiple-choice|richtig\/falsch|aufgabe|aufgaben|frage|fragen|question|questions)\p{L}[\p{L}\s.'-]{1,54}:\s*$/u.test(raw)
+  ) {
+    return true;
+  }
+  const folded = foldPlain(line).replace(/^[■•*\-\s]+/, "").trim();
+  return (
+    /^(type|type de document|voix|voice|sprecher|sprecherin|rolle|role|debit|tempo|style|registre|bruitages|sfx|transcription audio|transkription|transcript|script audio|skript|fiche de production|plan de production|profils? de voix)\b/.test(folded) ||
+    /^(femme|homme|female|male|frau|mann),?\s*\d/.test(folded) ||
+    /^(debut|milieu|fin)\s*:/.test(folded)
+  );
+};
+
+const hasListeningProductionMarkers = (value = "") => {
+  const folded = foldPlain(value);
+  return /stimme\/figur|transcription audio|transkription|script audio|bruitage|bruitages|voix\s*:|sprecher\s*:|speaker\s*:|gehort\s*:|multiple-choice|richtig\/falsch/.test(folded);
+};
+
+const extractFirstListeningExercise = (value = "") => {
+  const text = cleanText(value);
+  const multiple = text.match(
+    /Multiple-Choice\s*:\s*([^\n]+)(?:\n\s*a\)\s*([^\n]+))?(?:\n\s*b\)\s*([^\n]+))?(?:\n\s*c\)\s*([^\n]+))?/i
+  );
+  if (multiple) {
+    return [
+      multiple[1],
+      multiple[2] ? `a) ${multiple[2]}` : null,
+      multiple[3] ? `b) ${multiple[3]}` : null,
+      multiple[4] ? `c) ${multiple[4]}` : null,
+    ].filter(Boolean).join("\n");
+  }
+
+  const trueFalse = text.match(/Richtig\s*\/\s*Falsch\s*:\s*([^\n]+)/i);
+  if (trueFalse) return trueFalse[1];
+
+  const numbered = text.match(/(?:^|\n)\s*(\d{1,2}[.)]\s+[^\n]+)/);
+  return numbered ? numbered[1].trim() : "";
+};
+
+const cleanListeningStudentText = (value) =>
+  cleanText(value)
+    .replace(/\bSprecher\s*:/g, "Person:")
+    .replace(/\n\s*(?:FICHE DE CASTING|FICHE DE PRODUCTION|Casting requis|Bruitage de fond|Placement et dur[ée]e|Note\s*:\s*enregistrement)[\s\S]*$/i, "")
+    .replace(/[■•]/g, "")
+    .replace(/\[\s*_{2,}\s*\]/g, "")
+    .replace(/\[\s*(?:\+|–|-|richtig|falsch)?\s*\]/gi, "")
+    .replace(/_{2,}/g, "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !isListeningSourceLine(line))
+    .filter((line) => !/^(?:korrig|correction|loesung|losung|answer key)\b/i.test(foldPlain(line)))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+const cleanListeningOptionLabel = (value) =>
+  cleanListeningStudentText(value)
+    .replace(/\s*\/\s*Sprecher(?:in)?(?:\s*\d+)?\b/gi, "")
+    .replace(/\(\s*Sprecher(?:in)?(?:\s*\d+)?\s*\)/gi, "")
+    .replace(/^Sprecherin(?:\s*(\d+))?$/i, (_, number) => `Person${number ? ` ${number}` : ""}`)
+    .replace(/^Sprecher(?:\s*(\d+))?$/i, (_, number) => `Person${number ? ` ${number}` : ""}`)
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+const extractListeningStudentPrompt = (value, fallbackTitle = "") => {
+  const raw = cleanText(value);
+  const markers = [
+    /(?:^|\n)\s*Aufgaben\s+\d{1,2}/i,
+    /(?:^|\n)\s*Aufgabe\s+\d{1,2}\s*:/i,
+    /(?:^|\n)\s*Fragen\s+\d{1,2}/i,
+    /(?:^|\n)\s*Questions?\s*\/?\s*T(?:A|Â)CHES/i,
+    /(?:^|\n)\s*\d{1,2}\.\s+\S/i,
+  ];
+  const starts = markers
+    .map((regex) => raw.match(regex)?.index ?? -1)
+    .filter((index) => index >= 0);
+  const taskOnly = starts.length ? raw.slice(Math.min(...starts)) : "";
+  const cleaned = cleanListeningStudentText(taskOnly || raw);
+  const safeTitle = cleanListeningStudentText(fallbackTitle);
+  if (hasListeningProductionMarkers(raw) && cleaned.length > 900) {
+    const exercise = cleanListeningStudentText(extractFirstListeningExercise(cleaned));
+    if (exercise) return `${LISTENING_STUDENT_INSTRUCTION}\n\n${clipText(exercise, 900)}`;
+    return safeTitle ? `${LISTENING_STUDENT_INSTRUCTION}\n\n${safeTitle}` : LISTENING_STUDENT_INSTRUCTION;
+  }
+  if (!cleaned || cleaned.length < 12 || /transcription audio|transkription|script audio/i.test(cleaned.slice(0, 140))) {
+    return safeTitle ? `${LISTENING_STUDENT_INSTRUCTION}\n\n${safeTitle}` : LISTENING_STUDENT_INSTRUCTION;
+  }
+  return `${LISTENING_STUDENT_INSTRUCTION}\n\n${clipText(cleaned, 2400)}`;
 };
 
 const toPublicSeriesList = (rows, routeMeta = {}) => {
@@ -1004,12 +1515,15 @@ const toPublicSeriesList = (rows, routeMeta = {}) => {
   }
 
   return Array.from(groups.values()).map((series) => {
-    MODULE_ORDER.forEach((moduleId) => {
+    const expectedModules = series.examId === "telc"
+      ? MODULE_ORDER
+      : MODULE_ORDER.filter((moduleId) => moduleId !== "sprach");
+    expectedModules.forEach((moduleId) => {
       if (!series.modules[moduleId]) {
         series.modules[moduleId] = buildUnavailableModuleMeta(moduleId);
       }
     });
-    const moduleIds = MODULE_ORDER.filter((moduleId) => series.modules[moduleId]);
+    const moduleIds = expectedModules.filter((moduleId) => series.modules[moduleId]);
     const orderedModules = Object.fromEntries(
       moduleIds.map((moduleId) => [moduleId, series.modules[moduleId]])
     );
@@ -1060,6 +1574,7 @@ const queryImportedExamRows = async (provider, seriesNumber = null, level = null
                  WHEN 'listen' THEN 2
                  WHEN 'write' THEN 3
                  WHEN 'speak' THEN 4
+                 WHEN 'sprach' THEN 5
                  ELSE 9
                END,
                e.id
@@ -1080,6 +1595,61 @@ const buildTaskPartMeta = (question, index = 0) => {
     partDurationMinutes: Number(question.section_duration_minutes) || null,
     partPoints: Number(question.section_points) || null,
     sourceQuestionNumber: metadata.sourceQuestionNumber ?? question.position ?? index + 1,
+  };
+};
+
+const buildListeningTask = (question, index = 0) => {
+  const questionType = String(question.question_type || "").toLowerCase();
+  const correctValue = extractCorrectValue(question.correct_answer);
+  const options = normalizeChoiceOptions(question.options)
+    .map((option) => ({ ...option, label: cleanListeningOptionLabel(option.label) }))
+    .filter((option) => option.label);
+  const metadata = asJsonObject(question.source_metadata);
+  const base = {
+    id: `db-question-${question.id}`,
+    level: question.level || "B1",
+    typeLabel: question.section_title || `Hören Teil ${question.part_number || index + 1}`,
+    question: extractListeningStudentPrompt(question.prompt || question.section_instructions, question.section_title),
+    hint: "Hören Sie den Audiotext aufmerksam und beantworten Sie die Aufgaben.",
+    explanation: question.explanation || "Antwort aus dem importierten Hörverstehen-Modul.",
+    sourceQuestionId: question.id,
+    contentStyle: asJsonObject(metadata.contentStyle),
+    ...buildTaskPartMeta(question, index),
+    partInstructions: LISTENING_STUDENT_INSTRUCTION,
+  };
+
+  if (questionType.includes("true_false")) {
+    return {
+      ...base,
+      type: "trueFalse",
+      correct: /^(richtig|true|vrai|ja|yes)$/i.test(correctValue) ? "true" : "false",
+    };
+  }
+
+  if (questionType.includes("multiple") && options.length >= 2) {
+    return {
+      ...base,
+      type: "multiple",
+      options,
+      correct: correctValue || options[0].value,
+    };
+  }
+
+  if (questionType.includes("matching") && options.length) {
+    return {
+      ...base,
+      type: "select",
+      options,
+      correct: correctValue || options[0].value,
+      alternatives: correctValue ? [correctValue.toLowerCase(), correctValue.toUpperCase()] : [],
+    };
+  }
+
+  return {
+    ...base,
+    type: "blank",
+    correct: correctValue,
+    alternatives: correctValue ? [correctValue.toLowerCase(), correctValue.toUpperCase()] : [],
   };
 };
 
@@ -1346,8 +1916,12 @@ const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {} 
     label: `Teil ${section.part_number || section.position}`,
     number: Number(section.part_number) || Number(section.position) || null,
     heading: applyExamAlias(section.title, routeMeta),
-    text: clipText(applyExamAlias(section.instructions || section.title, routeMeta), 2600),
-    instructions: clipText(applyExamAlias(section.instructions || section.title, routeMeta), 5200),
+    text: moduleId === "listen"
+      ? LISTENING_STUDENT_INSTRUCTION
+      : clipText(applyExamAlias(section.instructions || section.title, routeMeta), 2600),
+    instructions: moduleId === "listen"
+      ? LISTENING_STUDENT_INSTRUCTION
+      : clipText(applyExamAlias(section.instructions || section.title, routeMeta), 5200),
     durationMinutes: Number(section.duration_minutes) || null,
     points: Number(section.points) || null,
   }));
@@ -1357,6 +1931,8 @@ const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {} 
     tasks = questions.map((question, index) => buildWritingTask(question, index));
   } else if (moduleId === "speak") {
     tasks = questions.map((question, index) => buildSpeakingTask(question, index));
+  } else if (moduleId === "listen") {
+    tasks = questions.map((question, index) => buildListeningTask(question, index));
   } else {
     tasks = questions.map((question, index) => buildReadingTask(question, index));
   }
@@ -1382,7 +1958,7 @@ const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {} 
     ],
     parts: sectionSummaries,
     passage:
-      moduleId === "read"
+      moduleId === "read" || moduleId === "sprach"
         ? {
             title: `${sourceLabel}: ${title}`,
             intro: applyExamAlias(metadata.instructions || "Lisez les textes et répondez aux questions.", routeMeta),
@@ -1497,7 +2073,7 @@ app.get("/api/exams/:provider/series/:seriesId/:moduleId", async (req, res) => {
 
 const registerHandler = async (req, res) => {
   try {
-    const { email, password, username, firstName, lastName } = req.body ?? {};
+    const { email, password, username, firstName, lastName, marketingEmailsEnabled } = req.body ?? {};
 
     if (!isEmail(email) || typeof password !== "string") {
       return res.status(400).json({ ok: false, error: "A valid email and password are required" });
@@ -1515,35 +2091,54 @@ const registerHandler = async (req, res) => {
     const safeFirst = typeof firstName === "string" ? firstName.trim().slice(0, 80) : null;
     const safeLast = typeof lastName === "string" ? lastName.trim().slice(0, 80) : null;
     const passwordHash = await bcrypt.hash(password, 12);
-    const verificationToken = EMAIL_VERIFICATION_REQUIRED ? makeToken() : null;
+    const verificationToken = EMAIL_VERIFICATION_ENABLED ? makeToken() : null;
+    const verificationCode = EMAIL_VERIFICATION_ENABLED ? makeVerificationCode() : null;
+    const marketingOptIn = marketingEmailsEnabled === true;
 
     const insert = await pool.query(
       `INSERT INTO users (
          email, username, first_name, last_name, password_hash, role, status,
-         email_verified, verification_token_hash, verification_expires_at
+         email_verified, verification_token_hash, verification_expires_at,
+         verification_code_hash, verification_code_expires_at,
+         last_verification_email_sent_at, marketing_emails_enabled
        )
-       VALUES ($1, $2, $3, $4, $5, 'user', 'active', $6, $7, $8)
-       RETURNING id, email, username, first_name, last_name, email_verified`,
+       VALUES ($1, $2, $3, $4, $5, 'user', 'active', $6, $7, $8, $9, $10, NULL, $11)
+       RETURNING id, email, username, first_name, last_name, email_verified, marketing_emails_enabled`,
       [
         normalizedEmail,
         safeUsername,
         safeFirst,
         safeLast,
         passwordHash,
-        !EMAIL_VERIFICATION_REQUIRED,
+        !EMAIL_VERIFICATION_ENABLED,
         verificationToken ? tokenHash(verificationToken) : null,
         verificationToken ? expiresFromNow(VERIFICATION_HOURS, "hours") : null,
+        verificationCode ? verificationCodeHash(normalizedEmail, verificationCode) : null,
+        verificationCode ? expiresFromNow(VERIFICATION_CODE_MINUTES, "minutes") : null,
+        marketingOptIn,
       ]
     );
-    const verificationUrl = verificationToken
-      ? await sendVerificationEmail(insert.rows[0], verificationToken)
-      : null;
+    let verificationUrl = null;
+    let emailDeliveryFailed = false;
+    if (verificationToken) {
+      try {
+        verificationUrl = await sendVerificationCodeEmail(insert.rows[0], verificationToken, verificationCode);
+        await pool.query(`UPDATE users SET last_verification_email_sent_at = NOW() WHERE id = $1`, [insert.rows[0].id]);
+      } catch (emailErr) {
+        emailDeliveryFailed = true;
+        console.error("Verification email delivery failed", emailErr);
+      }
+    }
     return res.status(201).json({
       ok: true,
-      message: EMAIL_VERIFICATION_REQUIRED
-        ? "Account created. Please confirm your email before logging in."
+      requiresEmailVerification: EMAIL_VERIFICATION_ENABLED,
+      emailDeliveryFailed,
+      message: EMAIL_VERIFICATION_ENABLED
+        ? emailDeliveryFailed
+          ? "Compte créé. L'email de vérification n'a pas pu être envoyé pour le moment; vous pouvez demander un nouveau code depuis la page de vérification."
+          : "Compte créé. Entrez le code de vérification envoyé par email."
         : "Account created. You can now log in.",
-      devVerificationUrl: process.env.NODE_ENV === "production" ? undefined : verificationUrl,
+      devVerificationUrl: process.env.NODE_ENV === "production" ? undefined : verificationUrl?.legacyLink,
     });
   } catch (err) {
     if (err && err.code === "23505") {
@@ -1562,7 +2157,7 @@ app.post("/api/auth/register", registerHandler);
 
 const resendVerificationHandler = async (req, res) => {
   try {
-    if (!EMAIL_VERIFICATION_REQUIRED) {
+    if (!EMAIL_VERIFICATION_ENABLED) {
       return res.json({ ok: true, message: "Email verification is currently disabled." });
     }
 
@@ -1572,7 +2167,7 @@ const resendVerificationHandler = async (req, res) => {
     }
 
     const r = await pool.query(
-      `SELECT id, email, username, first_name, email_verified FROM users WHERE email = $1`,
+      `SELECT id, email, username, first_name, email_verified, last_verification_email_sent_at FROM users WHERE email = $1`,
       [email]
     );
     const user = r.rows[0];
@@ -1580,18 +2175,47 @@ const resendVerificationHandler = async (req, res) => {
       return res.json({ ok: true, message: "If verification is needed, an email has been sent." });
     }
 
+    if (
+      user.last_verification_email_sent_at &&
+      Date.now() - new Date(user.last_verification_email_sent_at).getTime() < 60_000
+    ) {
+      return res.status(429).json({ ok: false, error: "Veuillez attendre une minute avant de demander un nouveau code." });
+    }
+
     const token = makeToken();
+    const code = makeVerificationCode();
     await pool.query(
       `UPDATE users
-       SET verification_token_hash = $1, verification_expires_at = $2
-       WHERE id = $3`,
-      [tokenHash(token), expiresFromNow(VERIFICATION_HOURS, "hours"), user.id]
+       SET verification_token_hash = $1,
+           verification_expires_at = $2,
+           verification_code_hash = $3,
+           verification_code_expires_at = $4,
+           last_verification_email_sent_at = NULL
+       WHERE id = $5`,
+      [
+        tokenHash(token),
+        expiresFromNow(VERIFICATION_HOURS, "hours"),
+        verificationCodeHash(email, code),
+        expiresFromNow(VERIFICATION_CODE_MINUTES, "minutes"),
+        user.id,
+      ]
     );
-    const verificationUrl = await sendVerificationEmail(user, token);
+    let verificationUrl;
+    try {
+      verificationUrl = await sendVerificationCodeEmail(user, token, code);
+      await pool.query(`UPDATE users SET last_verification_email_sent_at = NOW() WHERE id = $1`, [user.id]);
+    } catch (emailErr) {
+      console.error("Verification resend delivery failed", emailErr);
+      return res.status(502).json({
+        ok: false,
+        error: "L'email de vérification n'a pas pu être envoyé pour le moment. Réessayez dans quelques minutes.",
+      });
+    }
     return res.json({
       ok: true,
-      message: "If verification is needed, an email has been sent.",
-      devVerificationUrl: process.env.NODE_ENV === "production" ? undefined : verificationUrl,
+      message: "Si une vérification est nécessaire, un nouveau code a été envoyé.",
+      cooldownSeconds: 60,
+      devVerificationUrl: process.env.NODE_ENV === "production" ? undefined : verificationUrl?.legacyLink,
     });
   } catch (err) {
     console.error(err);
@@ -1609,13 +2233,39 @@ const verifyEmailToken = async (token) => {
      SET email_verified = TRUE,
          email_verified_at = NOW(),
          verification_token_hash = NULL,
-         verification_expires_at = NULL
+         verification_expires_at = NULL,
+         verification_code_hash = NULL,
+         verification_code_expires_at = NULL
      WHERE verification_token_hash = $1
        AND verification_expires_at > NOW()
      RETURNING id, email, username, first_name, last_name, date_of_birth, role, status,
                email_verified, has_full_access, partial_access, current_level, target_level,
-               created_at, last_login_at`,
+               marketing_emails_enabled, welcome_email_sent_at, created_at, last_login_at`,
     [tokenHash(token)]
+  );
+  return r.rows[0] ?? null;
+};
+
+const verifyEmailCode = async (email, code) => {
+  const normalizedEmail = normalizeEmail(email);
+  const normalizedCode = String(code || "").trim();
+  if (!isEmail(normalizedEmail) || !/^\d{6}$/.test(normalizedCode)) return null;
+
+  const r = await pool.query(
+    `UPDATE users
+     SET email_verified = TRUE,
+         email_verified_at = NOW(),
+         verification_token_hash = NULL,
+         verification_expires_at = NULL,
+         verification_code_hash = NULL,
+         verification_code_expires_at = NULL
+     WHERE email = $1
+       AND verification_code_hash = $2
+       AND verification_code_expires_at > NOW()
+     RETURNING id, email, username, first_name, last_name, date_of_birth, role, status,
+               email_verified, has_full_access, partial_access, current_level, target_level,
+               marketing_emails_enabled, welcome_email_sent_at, created_at, last_login_at`,
+    [normalizedEmail, verificationCodeHash(normalizedEmail, normalizedCode)]
   );
   return r.rows[0] ?? null;
 };
@@ -1624,7 +2274,8 @@ const verifyEmailGetHandler = async (req, res) => {
   try {
     const user = await verifyEmailToken(req.params.token);
     if (!user) return res.status(400).json({ ok: false, error: "Invalid or expired verification link" });
-    return res.json({ ok: true, user: sanitizeUser(user) });
+    await sendWelcomeEmailOnce(user);
+    return res.json({ ok: true, user: await sanitizeUserWithSubscriptions(user) });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ ok: false, error: "Server error" });
@@ -1636,9 +2287,12 @@ if (!isProduction) app.get("/verify-email/:token", verifyEmailGetHandler);
 
 const verifyEmailPostHandler = async (req, res) => {
   try {
-    const user = await verifyEmailToken(req.body?.token);
-    if (!user) return res.status(400).json({ ok: false, error: "Invalid or expired verification link" });
-    return res.json({ ok: true, user: sanitizeUser(user) });
+    const user = req.body?.token
+      ? await verifyEmailToken(req.body.token)
+      : await verifyEmailCode(req.body?.email, req.body?.code);
+    if (!user) return res.status(400).json({ ok: false, error: "Invalid or expired verification code" });
+    await sendWelcomeEmailOnce(user);
+    return res.json({ ok: true, user: await sanitizeUserWithSubscriptions(user) });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ ok: false, error: "Server error" });
@@ -1659,7 +2313,7 @@ const loginHandler = async (req, res) => {
     const userRes = await pool.query(
       `SELECT id, email, username, first_name, last_name, date_of_birth, password_hash, role, status,
               email_verified, has_full_access, partial_access, current_level, target_level,
-              created_at, last_login_at
+              marketing_emails_enabled, created_at, last_login_at
        FROM users
        WHERE email = $1`,
       [normalizeEmail(email)]
@@ -1690,7 +2344,8 @@ const loginHandler = async (req, res) => {
       accessToken: auth.token,
       expiresIn: auth.expiresIn,
       redirectTo: user.role === "admin" ? "/admin/dashboard" : "/dashboard",
-      user: sanitizeUser({ ...user, last_login_at: new Date().toISOString() }),
+      requiresEmailVerification: EMAIL_VERIFICATION_ENABLED && !user.email_verified,
+      user: await sanitizeUserWithSubscriptions({ ...user, last_login_at: new Date().toISOString() }),
     });
   } catch (err) {
     console.error(err);
@@ -1713,7 +2368,7 @@ const refreshHandler = async (req, res) => {
       `SELECT rt.id AS refresh_token_id, rt.user_id, rt.expires_at, rt.revoked_at,
               u.email, u.username, u.first_name, u.last_name, u.date_of_birth,
               u.role, u.status, u.email_verified, u.has_full_access, u.partial_access,
-              u.current_level, u.target_level, u.created_at, u.last_login_at
+              u.current_level, u.target_level, u.marketing_emails_enabled, u.created_at, u.last_login_at
        FROM refresh_tokens rt
        JOIN users u ON u.id = rt.user_id
        WHERE rt.token_hash = $1
@@ -1773,6 +2428,7 @@ const refreshHandler = async (req, res) => {
       partial_access: row.partial_access,
       current_level: row.current_level,
       target_level: row.target_level,
+      marketing_emails_enabled: row.marketing_emails_enabled,
       created_at: row.created_at,
       last_login_at: row.last_login_at,
     };
@@ -1783,7 +2439,7 @@ const refreshHandler = async (req, res) => {
       token: auth.token,
       accessToken: auth.token,
       expiresIn: auth.expiresIn,
-      user: sanitizeUser(user),
+      user: await sanitizeUserWithSubscriptions(user),
     });
   } catch (err) {
     console.error(err);
@@ -1832,13 +2488,22 @@ const forgotPasswordHandler = async (req, res) => {
     const user = r.rows[0];
     let resetUrl;
 
-    if (user && user.status === "active" && user.email_verified) {
+    if (user && user.status === "active") {
       const token = makeToken();
       await pool.query(
         `UPDATE users SET reset_token_hash = $1, reset_expires_at = $2 WHERE id = $3`,
         [tokenHash(token), expiresFromNow(RESET_MINUTES, "minutes"), user.id]
       );
-      resetUrl = await sendResetEmail(user, token);
+      try {
+        resetUrl = await sendPasswordResetEmail(user, token);
+      } catch (emailErr) {
+        console.error("Password reset email delivery failed", emailErr);
+        await pool.query(`UPDATE users SET reset_token_hash = NULL, reset_expires_at = NULL WHERE id = $1`, [user.id]);
+        return res.status(502).json({
+          ok: false,
+          error: "L'email de réinitialisation n'a pas pu être envoyé pour le moment. Réessayez dans quelques minutes.",
+        });
+      }
     }
 
     return res.json({
@@ -1874,7 +2539,7 @@ const resetPasswordHandler = async (req, res) => {
        WHERE reset_token_hash = $2
          AND reset_expires_at > NOW()
          AND status = 'active'
-       RETURNING id`,
+       RETURNING id, email, username, first_name`,
       [passwordHash, tokenHash(token)]
     );
 
@@ -1883,6 +2548,11 @@ const resetPasswordHandler = async (req, res) => {
     }
     await pool.query(`UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL`, [updated.rows[0].id]);
     await logUserAction(updated.rows[0].id, "auth.password_reset", req);
+    try {
+      await sendPasswordChangedNoticeEmail(updated.rows[0]);
+    } catch (emailErr) {
+      console.error("Password changed notice failed", emailErr);
+    }
     return res.json({ ok: true, message: "Password updated. You can now log in." });
   } catch (err) {
     console.error(err);
@@ -1894,7 +2564,7 @@ app.post("/reset-password", resetPasswordHandler);
 app.post("/api/auth/reset-password", resetPasswordHandler);
 
 const profileHandler = async (req, res) => {
-  return res.json({ ok: true, user: sanitizeUser(req.user) });
+  return res.json({ ok: true, user: await sanitizeUserWithSubscriptions(req.user) });
 };
 
 app.get("/me", requireAuth, profileHandler);
@@ -2175,7 +2845,7 @@ const dashboardHandler = async (req, res) => {
 
     return res.json({
       ok: true,
-      user: sanitizeUser({
+      user: await sanitizeUserWithSubscriptions({
         ...req.user,
         current_level: progressSnapshot.currentLevel,
         target_level: progressSnapshot.targetLevel,
@@ -2206,7 +2876,7 @@ if (!isProduction) app.get("/dashboard", requireAuth, dashboardHandler);
 
 const updateProfileHandler = async (req, res) => {
   try {
-    const { username, firstName, lastName, email, dateOfBirth } = req.body ?? {};
+    const { username, firstName, lastName, email, dateOfBirth, marketingEmailsEnabled } = req.body ?? {};
     if (
       typeof username !== "string" ||
       typeof firstName !== "string" ||
@@ -2239,9 +2909,14 @@ const updateProfileHandler = async (req, res) => {
     }
 
     const emailChanged = safeEmail !== req.user.email;
-    const shouldVerifyEmail = EMAIL_VERIFICATION_REQUIRED && emailChanged;
     const shouldTrustEmail = !EMAIL_VERIFICATION_REQUIRED && emailChanged;
-    const verificationToken = shouldVerifyEmail ? makeToken() : null;
+    const shouldSendVerification = EMAIL_VERIFICATION_ENABLED && emailChanged;
+    const verificationToken = shouldSendVerification ? makeToken() : null;
+    const verificationCode = shouldSendVerification ? makeVerificationCode() : null;
+    const marketingPreference =
+      typeof marketingEmailsEnabled === "boolean"
+        ? marketingEmailsEnabled
+        : Boolean(req.user.marketing_emails_enabled);
 
     const updated = await pool.query(
       `UPDATE users
@@ -2250,38 +2925,46 @@ const updateProfileHandler = async (req, res) => {
            last_name = $3,
            email = $4,
            date_of_birth = COALESCE($5::date, date_of_birth),
-           email_verified = CASE WHEN $6 THEN FALSE WHEN $10 THEN TRUE ELSE email_verified END,
-           email_verified_at = CASE WHEN $6 THEN NULL WHEN $10 THEN NOW() ELSE email_verified_at END,
+           email_verified = CASE WHEN $6 THEN FALSE WHEN $11 THEN TRUE ELSE email_verified END,
+           email_verified_at = CASE WHEN $6 THEN NULL WHEN $11 THEN NOW() ELSE email_verified_at END,
            verification_token_hash = CASE WHEN $6 THEN $7 ELSE verification_token_hash END,
-           verification_expires_at = CASE WHEN $6 THEN $8 ELSE verification_expires_at END
-       WHERE id = $9
+           verification_expires_at = CASE WHEN $6 THEN $8 ELSE verification_expires_at END,
+           verification_code_hash = CASE WHEN $6 THEN $9 ELSE verification_code_hash END,
+           verification_code_expires_at = CASE WHEN $6 THEN $10 ELSE verification_code_expires_at END,
+           last_verification_email_sent_at = CASE WHEN $6 THEN NOW() ELSE last_verification_email_sent_at END,
+           marketing_emails_enabled = $12,
+           marketing_unsubscribed_at = CASE WHEN $12 THEN NULL ELSE COALESCE(marketing_unsubscribed_at, NOW()) END
+       WHERE id = $13
        RETURNING id, email, username, first_name, last_name, date_of_birth, role, status,
                  email_verified, has_full_access, partial_access, current_level, target_level,
-                 created_at, last_login_at`,
+                 marketing_emails_enabled, welcome_email_sent_at, created_at, last_login_at`,
       [
         safeUsername,
         safeFirst,
         safeLast,
         safeEmail,
         safeDob || null,
-        shouldVerifyEmail,
+        shouldSendVerification,
         verificationToken ? tokenHash(verificationToken) : null,
         verificationToken ? expiresFromNow(VERIFICATION_HOURS, "hours") : null,
-        req.user.id,
+        verificationCode ? verificationCodeHash(safeEmail, verificationCode) : null,
+        verificationCode ? expiresFromNow(VERIFICATION_CODE_MINUTES, "minutes") : null,
         shouldTrustEmail,
+        marketingPreference,
+        req.user.id,
       ]
     );
 
     if (!updated.rows[0]) return res.status(404).json({ ok: false, error: "User not found" });
     let verificationUrl;
-    if (shouldVerifyEmail) {
-      verificationUrl = await sendVerificationEmail(updated.rows[0], verificationToken);
+    if (shouldSendVerification) {
+      verificationUrl = await sendVerificationCodeEmail(updated.rows[0], verificationToken, verificationCode);
     }
     return res.json({
       ok: true,
-      user: sanitizeUser(updated.rows[0]),
-      requiresEmailVerification: emailChanged,
-      devVerificationUrl: process.env.NODE_ENV === "production" ? undefined : verificationUrl,
+      user: await sanitizeUserWithSubscriptions(updated.rows[0]),
+      requiresEmailVerification: shouldSendVerification,
+      devVerificationUrl: process.env.NODE_ENV === "production" ? undefined : verificationUrl?.legacyLink,
     });
   } catch (err) {
     if (err && err.code === "23505") {
@@ -2294,6 +2977,28 @@ const updateProfileHandler = async (req, res) => {
 
 app.put("/me", requireAuth, updateProfileHandler);
 app.put("/api/user/profile", requireAuth, updateProfileHandler);
+
+const updateEmailPreferencesHandler = async (req, res) => {
+  try {
+    const marketingEnabled = req.body?.marketingEmailsEnabled === true;
+    const updated = await pool.query(
+      `UPDATE users
+       SET marketing_emails_enabled = $2,
+           marketing_unsubscribed_at = CASE WHEN $2 THEN NULL ELSE COALESCE(marketing_unsubscribed_at, NOW()) END
+       WHERE id = $1
+       RETURNING id, email, username, first_name, last_name, date_of_birth, role, status,
+                 email_verified, has_full_access, partial_access, current_level, target_level,
+                 marketing_emails_enabled, created_at, last_login_at`,
+      [req.user.id, marketingEnabled]
+    );
+    return res.json({ ok: true, user: await sanitizeUserWithSubscriptions(updated.rows[0]) });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+};
+
+app.put("/api/user/email-preferences", requireAuth, updateEmailPreferencesHandler);
 
 const createSimulationHandler = async (req, res) => {
   try {
@@ -2426,8 +3131,10 @@ app.post("/contact", async (req, res) => {
       return res.status(400).json({ ok: false, error: "Please provide valid contact details" });
     }
 
-    await sendTransactionalEmail({
-      to: process.env.CONTACT_TO || "appgerman989@gmail.com",
+    await sendEmail({
+      pool,
+      to: process.env.CONTACT_TO || process.env.SUPPORT_EMAIL || "support@n-deutschprüfungen.com",
+      type: "contact",
       subject: `Nouveau message contact: ${safeFirst} ${safeLast}`,
       text: [
         `Nom: ${safeLast}`,
@@ -2752,6 +3459,202 @@ app.get("/api/audio/generated/:assetId", async (req, res) => {
   } catch (err) {
     console.error("Generated audio stream failed", err);
     return res.status(500).json({ ok: false, error: "Audio unavailable" });
+  }
+});
+
+app.get("/api/subscription-plans", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, level, plan_key, plan_name, duration_days, price_eur, currency,
+              writing_simulator_attempts, certifications, unlocked_sections
+       FROM subscription_plans
+       WHERE is_active = TRUE
+       ORDER BY level, CASE plan_key WHEN 'starter' THEN 1 WHEN 'standard' THEN 2 ELSE 3 END`
+    );
+    return res.json({
+      ok: true,
+      plans: result.rows.map((row) => ({
+        id: row.id,
+        level: row.level,
+        planKey: row.plan_key,
+        planName: row.plan_name,
+        durationDays: Number(row.duration_days),
+        priceEur: Number(row.price_eur),
+        currency: row.currency,
+        writingSimulatorAttempts: Number(row.writing_simulator_attempts),
+        certifications: normalizeStringArray(row.certifications, SUBSCRIPTION_CERTIFICATIONS),
+        unlockedSections: normalizeStringArray(row.unlocked_sections, SUBSCRIPTION_SECTIONS),
+      })),
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.get("/api/subscriptions/me", requireAuth, async (req, res) => {
+  try {
+    return res.json({
+      ok: true,
+      activeSubscriptions: await getActiveSubscriptionsForUser(req.user.id),
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.get("/api/subscriptions/access", requireAuth, async (req, res) => {
+  try {
+    const level = normalizeSubscriptionLevel(req.query.level);
+    if (!level) return res.status(400).json({ ok: false, error: "A valid B1 or B2 level is required" });
+    const subscription = await getActiveSubscriptionForUser(req.user.id, level);
+    const canAccess = userHasSubscriptionAccess(req.user, subscription, req.query.certification, req.query.section);
+    return res.json({
+      ok: true,
+      level,
+      canAccess,
+      subscription,
+      remainingWritingAttempts: subscription?.writingAttemptsRemaining ?? 0,
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.post("/api/checkout/session", requireAuth, async (req, res) => {
+  try {
+    const level = normalizeSubscriptionLevel(req.body?.level);
+    const planKey = normalizePlanKey(req.body?.planKey);
+    const provider = normalizePaymentProvider(req.body?.provider);
+    if (!level || !planKey) {
+      return res.status(400).json({ ok: false, error: "A valid pricing plan is required" });
+    }
+
+    const planResult = await pool.query(
+      `SELECT id, level, plan_key, plan_name, duration_days, price_eur, currency,
+              writing_simulator_attempts, certifications, unlocked_sections
+       FROM subscription_plans
+       WHERE level = $1 AND plan_key = $2 AND is_active = TRUE
+       LIMIT 1`,
+      [level, planKey]
+    );
+    const plan = planResult.rows[0];
+    if (!plan) return res.status(404).json({ ok: false, error: "Pricing plan not found" });
+
+    const transaction = await pool.query(
+      `INSERT INTO payment_transactions (user_id, plan_id, provider, status, amount, currency, metadata)
+       VALUES ($1, $2, $3, 'pending', $4, $5, $6::jsonb)
+       RETURNING id, status, created_at`,
+      [
+        req.user.id,
+        plan.id,
+        provider,
+        plan.price_eur,
+        plan.currency,
+        JSON.stringify({
+          level: plan.level,
+          planKey: plan.plan_key,
+          planName: plan.plan_name,
+          durationDays: Number(plan.duration_days),
+          writingSimulatorAttempts: Number(plan.writing_simulator_attempts),
+          requestedProvider: provider,
+        }),
+      ]
+    );
+
+    return res.json({
+      ok: true,
+      checkoutSession: {
+        provider,
+        status: transaction.rows[0].status,
+        transactionId: transaction.rows[0].id,
+        planId: plan.id,
+        level: plan.level,
+        planKey: plan.plan_key,
+        planName: plan.plan_name,
+        amount: Number(plan.price_eur),
+        currency: plan.currency,
+        durationDays: Number(plan.duration_days),
+        writingSimulatorAttempts: Number(plan.writing_simulator_attempts),
+        certifications: normalizeStringArray(plan.certifications, SUBSCRIPTION_CERTIFICATIONS),
+        unlockedSections: normalizeStringArray(plan.unlocked_sections, SUBSCRIPTION_SECTIONS),
+        message: "Paiement bientôt disponible. Ce pack est prêt pour l’intégration du paiement.",
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.post("/api/writing-simulator/attempts/consume", requireAuth, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const level = normalizeSubscriptionLevel(req.body?.level);
+    if (!level) return res.status(400).json({ ok: false, error: "A valid B1 or B2 level is required" });
+    const active = await client.query(
+      `SELECT us.id, us.user_id, us.level, sp.writing_simulator_attempts
+       FROM user_subscriptions us
+       JOIN subscription_plans sp ON sp.id = us.plan_id
+       WHERE us.user_id = $1
+         AND us.level = $2
+         AND us.status = 'active'
+         AND us.starts_at <= NOW()
+         AND us.expires_at > NOW()
+         AND sp.is_active = TRUE
+       ORDER BY us.expires_at DESC
+       LIMIT 1`,
+      [req.user.id, level]
+    );
+    const subscription = active.rows[0];
+    if (!subscription && !(req.user.role === "admin" || req.user.has_full_access)) {
+      return res.status(403).json({ ok: false, error: "No active subscription for this level" });
+    }
+    if (!subscription && (req.user.role === "admin" || req.user.has_full_access)) {
+      return res.json({ ok: true, level, remainingWritingAttempts: null, unlimited: true });
+    }
+
+    await client.query("BEGIN");
+    await client.query(
+      `INSERT INTO writing_simulator_usage (user_id, subscription_id, level, attempts_allowed, attempts_used)
+       VALUES ($1, $2, $3, $4, 0)
+       ON CONFLICT (user_id, subscription_id, level)
+       DO UPDATE SET attempts_allowed = EXCLUDED.attempts_allowed, updated_at = NOW()`,
+      [req.user.id, subscription.id, level, Number(subscription.writing_simulator_attempts)]
+    );
+    const consumed = await client.query(
+      `UPDATE writing_simulator_usage
+       SET attempts_used = attempts_used + 1, updated_at = NOW()
+       WHERE user_id = $1
+         AND subscription_id = $2
+         AND level = $3
+         AND attempts_used < attempts_allowed
+       RETURNING attempts_allowed, attempts_used`,
+      [req.user.id, subscription.id, level]
+    );
+    if (!consumed.rows[0]) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ ok: false, error: "No writing simulator attempts remaining" });
+    }
+    await client.query("COMMIT");
+    const usage = consumed.rows[0];
+    return res.json({
+      ok: true,
+      level,
+      attemptsAllowed: Number(usage.attempts_allowed),
+      attemptsUsed: Number(usage.attempts_used),
+      remainingWritingAttempts: Math.max(0, Number(usage.attempts_allowed) - Number(usage.attempts_used)),
+    });
+  } catch (err) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {}
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  } finally {
+    client.release();
   }
 });
 

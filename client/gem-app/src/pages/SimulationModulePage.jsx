@@ -28,6 +28,7 @@ import {
   ShieldCheck,
   SkipForward,
   Square,
+  Timer,
   TimerReset,
   Trophy,
   Volume2,
@@ -51,6 +52,8 @@ import {
   getMicrophoneConstraints,
   getPreferredRecorderOptions,
 } from "../utils/audio";
+import { createListeningAmbienceMixer } from "../utils/listeningAmbience";
+import { createListeningSpeechFallback } from "../utils/listeningSpeechFallback";
 import NotFoundPage from "./NotFoundPage";
 import ComingSoonPage from "./ComingSoonPage";
 import { getModuleCountLabel, isTopicModule } from "../utils/moduleLabels";
@@ -59,6 +62,9 @@ import { stripQuestionMaterial } from "../utils/examText";
 
 const LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"];
 const PASS_SCORE = 70;
+const MOBILE_AUDIO_UNSUPPORTED_MESSAGE =
+  "Audio playback is not supported by this browser on this device. Please try Chrome, update your browser, or use another device. If an audio file is available for this test, it will be played instead.";
+const PART_TRANSITION_SECONDS = 10;
 
 const ImportedLoadingDots = ({ label = "Importierte Aufgaben werden geladen" }) => (
   <span className={styles.importedLoadingDots} role="status" aria-label={label}>
@@ -67,6 +73,74 @@ const ImportedLoadingDots = ({ label = "Importierte Aufgaben werden geladen" }) 
     <span />
   </span>
 );
+
+const cleanTeilTitle = (value = "") =>
+  String(value || "").replace(/^Teil\s+\d+\s*[-:]\s*/i, "").trim();
+
+const TeilTransitionScreen = ({
+  nextTeilTitle = "",
+  nextTeilNumber,
+  durationSeconds = PART_TRANSITION_SECONDS,
+  onComplete,
+}) => {
+  const [remaining, setRemaining] = useState(durationSeconds);
+  const onCompleteRef = useRef(onComplete);
+  const completedRef = useRef(false);
+
+  useEffect(() => {
+    onCompleteRef.current = onComplete;
+  }, [onComplete]);
+
+  useEffect(() => {
+    completedRef.current = false;
+    setRemaining(durationSeconds);
+    const startTime = Date.now();
+
+    const tick = () => {
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      const nextRemaining = Math.max(0, durationSeconds - elapsed);
+      setRemaining((value) => (value === nextRemaining ? value : nextRemaining));
+      if (nextRemaining <= 0 && !completedRef.current) {
+        completedRef.current = true;
+        window.clearInterval(interval);
+        window.setTimeout(() => onCompleteRef.current?.(), 180);
+      }
+    };
+
+    const interval = window.setInterval(tick, 200);
+    tick();
+    return () => window.clearInterval(interval);
+  }, [durationSeconds]);
+
+  const progress = durationSeconds > 0 ? ((durationSeconds - remaining) / durationSeconds) * 360 : 360;
+  const title = cleanTeilTitle(nextTeilTitle);
+
+  return (
+    <section className={styles.teilTransitionOverlay} aria-live="polite" aria-label="Der nächste Teil beginnt gleich">
+      <div className={styles.teilTransitionPanel}>
+        <div className={styles.teilTransitionIcon}>
+          <Timer size={34} />
+        </div>
+        <p className={styles.sectionLabel}>Teilwechsel</p>
+        <h2>Der nächste Teil beginnt gleich</h2>
+        <p className={styles.teilTransitionNext}>
+          Teil {nextTeilNumber || ""}
+          {title ? `: ${title}` : ""}
+        </p>
+        <p className={styles.teilTransitionText}>Der nächste Teil beginnt in</p>
+        <div
+          className={styles.teilTransitionRing}
+          style={{ "--transition-progress": `${progress}deg` }}
+          aria-label={`${remaining} Sekunden`}
+        >
+          <span>{remaining}</span>
+        </div>
+        <p className={styles.teilTransitionSeconds}>Sekunden</p>
+        <p className={styles.teilTransitionHint}>Bereite dich auf die nächste Aufgabe vor.</p>
+      </div>
+    </section>
+  );
+};
 
 const readingPassage = {
   title: "La bibliothèque universitaire devient plus flexible",
@@ -1213,11 +1287,21 @@ const GERMAN_HEADING_LABELS = {
   "read-9": ["Organisation der Raeume", "Paedagogische Angebote", "Praktische Einschraenkungen"],
 };
 
+const toPlainDisplayText = (value, fallback = "") => {
+  if (value == null || value === "") return fallback;
+  const raw = String(value);
+  const text = hasRichTextMarkup(raw) ? richTextToPlainText(raw) : raw;
+  return text.replace(/\s+/g, " ").trim() || fallback;
+};
+
 const getProtectedChoiceLabel = (task, option, index = 0) =>
-  GERMAN_CHOICE_LABELS[task.id]?.[option.value] ??
-  GERMAN_HEADING_LABELS[task.id]?.[index] ??
-  option.label ??
-  option;
+  toPlainDisplayText(
+    GERMAN_CHOICE_LABELS[task?.id]?.[option?.value] ??
+      GERMAN_HEADING_LABELS[task?.id]?.[index] ??
+      option?.label ??
+      option,
+    `Option ${index + 1}`
+  );
 
 const AUDIO_REPLAY_LIMIT = 5;
 const AUDIO_WORDS_PER_MINUTE = 132;
@@ -1266,6 +1350,7 @@ const toGermanStatus = (value) => {
   if (text.includes("Production audio has not been generated")) return "Das Produktionsaudio wurde noch nicht generiert. Bitte einen Administrator, die Hoeren-Audio-Datei zu erzeugen.";
   if (text.includes("Production audio cannot be played")) return "Die Produktionsaudio-Datei kann auf diesem Geraet gerade nicht abgespielt werden.";
   if (text.includes("Production audio is not available")) return "Das Produktionsaudio ist im Moment nicht verfuegbar.";
+  if (text.includes("Audio playback is not supported")) return "Die Audiowiedergabe wird von diesem Browser auf diesem Geraet nicht unterstuetzt. Bitte versuchen Sie Chrome, aktualisieren Sie den Browser oder nutzen Sie ein anderes Geraet. Wenn eine Audiodatei fuer diesen Test vorhanden ist, wird sie stattdessen abgespielt.";
   if (text.includes("synth")) return "Die Produktionsaudio-Datei ist in diesem Browser nicht verfuegbar.";
   if (text.includes("lecture audio")) return "Die Audiowiedergabe ist auf diesem Geraet fehlgeschlagen. Pruefen Sie die Lautstaerke.";
   if (text.includes("brouillon est vide")) return "Der Entwurf ist leer.";
@@ -1518,10 +1603,10 @@ const getWritingSuggestions = (task, text) => {
   if (words < task.minWords) {
     germanSuggestions.push(`Fuegen Sie etwa ${task.minWords - words} Wörter hinzu, um das erwartete Minimum zu erreichen.`);
   }
-  if (!/(weil|deshalb|auÃŸerdem|jedoch|trotzdem|zum beispiel|daher|einerseits|andererseits)/i.test(text)) {
+  if (!/(weil|deshalb|außerdem|jedoch|trotzdem|zum beispiel|daher|einerseits|andererseits)/i.test(text)) {
     germanSuggestions.push("Fuegen Sie mindestens einen deutschen Konnektor ein, damit der Text fluessiger wird.");
   }
-  if (task.register === "formell" && !/(Sehr geehrte|Mit freundlichen GrÃ¼ÃŸen|bitte|wÃ¼rde)/i.test(text)) {
+  if (task.register === "formell" && !/(Sehr geehrte|Mit freundlichen Grüßen|bitte|würde)/i.test(text)) {
     germanSuggestions.push("Staerken Sie das formelle Register mit einer passenden Anrede und Schlussformel.");
   }
   if ((text.match(/\bich\b/gi) ?? []).length > 6) {
@@ -1754,15 +1839,15 @@ const buildSeriesModule = (baseModule, content, series) => {
 
 const stringifyAnswer = (value) => {
   if (value == null || value === "") return "Keine Antwort";
-  if (Array.isArray(value)) return value.filter(Boolean).join(" > ") || "Keine Antwort";
-  if (value == null || value === "") return "Aucune réponse";
-  if (Array.isArray(value)) return value.filter(Boolean).join(" > ") || "Aucune réponse";
+  if (Array.isArray(value)) {
+    return value.map((item) => toPlainDisplayText(item)).filter(Boolean).join(" > ") || "Keine Antwort";
+  }
   if (typeof value === "object") {
     return Object.entries(value)
-      .map(([key, item]) => `${key}: ${item || "-"}`)
+      .map(([key, item]) => `${toPlainDisplayText(key, "-")}: ${toPlainDisplayText(item, "-")}`)
       .join(", ");
   }
-  return String(value);
+  return toPlainDisplayText(value, "Keine Antwort");
 };
 
 const getAnswerLabel = (task, answer) => {
@@ -1791,8 +1876,8 @@ const buildResultSummary = (module, answers) => {
       return {
         id: task.id,
         number: index + 1,
-        title: task.title ?? task.question,
-        typeLabel: task.typeLabel,
+        title: toPlainDisplayText(task.title ?? task.question, `Aufgabe ${index + 1}`),
+        typeLabel: toPlainDisplayText(task.typeLabel),
         isCorrect: null,
         userAnswer: `${countWords(answers[index])} Wörter`,
         correctAnswer: formatWritingRequirementGerman(task),
@@ -1805,8 +1890,8 @@ const buildResultSummary = (module, answers) => {
       return {
         id: task.id,
         number: index + 1,
-        title: task.title ?? task.question,
-        typeLabel: task.typeLabel,
+        title: toPlainDisplayText(task.title ?? task.question, `Aufgabe ${index + 1}`),
+        typeLabel: toPlainDisplayText(task.typeLabel),
         isCorrect: taskScore >= PASS_SCORE,
         userAnswer: answers[index]?.duration ? `${answers[index].duration}s` : "Keine Antwort",
         correctAnswer: `Ziel: ${task.responseSeconds}s`,
@@ -1818,8 +1903,8 @@ const buildResultSummary = (module, answers) => {
       return {
         id: task.id,
         number: index + 1,
-        title: task.title ?? task.question,
-        typeLabel: task.typeLabel,
+        title: toPlainDisplayText(task.title ?? task.question, `Aufgabe ${index + 1}`),
+        typeLabel: toPlainDisplayText(task.typeLabel),
         isCorrect: null,
         userAnswer: `${countWords(answers[index])} mots`,
         correctAnswer: formatWritingRequirementFrench(task),
@@ -1832,8 +1917,8 @@ const buildResultSummary = (module, answers) => {
       return {
         id: task.id,
         number: index + 1,
-        title: task.title ?? task.question,
-        typeLabel: task.typeLabel,
+        title: toPlainDisplayText(task.title ?? task.question, `Aufgabe ${index + 1}`),
+        typeLabel: toPlainDisplayText(task.typeLabel),
         isCorrect: taskScore >= PASS_SCORE,
         userAnswer: answers[index]?.duration ? `${answers[index].duration}s` : "Aucune réponse",
         correctAnswer: `Cible: ${task.responseSeconds}s`,
@@ -1845,12 +1930,12 @@ const buildResultSummary = (module, answers) => {
     return {
       id: task.id,
       number: index + 1,
-      title: task.question,
-      typeLabel: task.typeLabel,
+      title: toPlainDisplayText(task.question, `Aufgabe ${index + 1}`),
+      typeLabel: toPlainDisplayText(task.typeLabel),
       isCorrect,
       userAnswer: getAnswerLabel(task, answers[index]),
       correctAnswer: getCorrectLabel(task),
-      explanation: task.explanation,
+      explanation: toPlainDisplayText(task.explanation),
     };
   });
 
@@ -1979,6 +2064,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const [simulationMode, setSimulationMode] = useState(true);
   const [completed, setCompleted] = useState(false);
   const [partIntroVisible, setPartIntroVisible] = useState(true);
+  const [partTransition, setPartTransition] = useState(null);
   const [navPanelOpen, setNavPanelOpen] = useState(false);
   const [, setSaveStatus] = useState("");
   const [resultStatus, setResultStatus] = useState("");
@@ -2005,8 +2091,17 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const mediaStreamRef = useRef(null);
   const audioChunksRef = useRef([]);
   const listeningAudioRef = useRef(null);
+  const listeningAmbienceRef = useRef(null);
+  const listeningSpeechFallbackRef = useRef(null);
   const audioSessionRef = useRef(false);
   const audioTimestampRef = useRef(0);
+  const audioDebugRef = useRef(null);
+  const timerDeadlineRef = useRef(null);
+  const timerExpiredRef = useRef(false);
+  const timerSecondsRef = useRef(totalExamDuration);
+  const prepDeadlineRef = useRef(null);
+  const prepExpiredRef = useRef(false);
+  const prepRemainingRef = useRef(speakingTasks[0].prepSeconds);
   const recordingIntervalRef = useRef(null);
   const recordingSecondsRef = useRef(0);
   const recordingTaskIndexRef = useRef(0);
@@ -2029,6 +2124,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const currentAudioDuration = module.id === "listen"
     ? Math.round(Number(module.audio?.durationSeconds) || listeningAudioDuration || getEstimatedAudioDuration(module.audio))
     : 0;
+  const listeningAudioUrl = module.audio?.audioUrl || "";
   const answeredCount = module.tasks.filter((task, index) => getTaskAnswered(module, task, answers[index])).length;
   const remainingCount = Math.max(0, totalTasks - answeredCount);
   const completedPartCount = examParts.filter((part) =>
@@ -2054,6 +2150,117 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const audioReplayBlocked = module.id === "listen" && replaysUsed >= AUDIO_REPLAY_LIMIT && (!audioSessionActive || audioAtSessionEnd);
 
   useEffect(() => {
+    listeningAmbienceRef.current?.dispose();
+    listeningAmbienceRef.current = null;
+    listeningSpeechFallbackRef.current?.dispose();
+    listeningSpeechFallbackRef.current = null;
+    return () => {
+      listeningAmbienceRef.current?.dispose();
+      listeningAmbienceRef.current = null;
+      listeningSpeechFallbackRef.current?.dispose();
+      listeningSpeechFallbackRef.current = null;
+    };
+  }, [module.audio]);
+
+  const startListeningAmbience = useCallback(async () => {
+    if (module.id !== "listen" || !module.audio) return;
+    if (!listeningAmbienceRef.current) {
+      listeningAmbienceRef.current = createListeningAmbienceMixer(module.audio);
+    }
+    await listeningAmbienceRef.current?.start();
+  }, [module.audio, module.id]);
+
+  const stopListeningAmbience = useCallback((immediate = false) => {
+    listeningAmbienceRef.current?.stop(immediate);
+  }, []);
+
+  const playProductionAudioFallback = useCallback(async ({ resetTime = true } = {}) => {
+    const productionAudio = listeningAudioRef.current;
+    if (!productionAudio || !listeningAudioUrl) return false;
+    try {
+      if (resetTime) productionAudio.currentTime = 0;
+      await productionAudio.play();
+      void startListeningAmbience().catch(() => {
+        // Saved audio is the important fallback; ambience should never block it.
+      });
+      setAudioPlaying(true);
+      audioSessionRef.current = true;
+      setAudioSessionActive(true);
+      setAudioError("");
+      return true;
+    } catch (error) {
+      audioDebugRef.current = {
+        ...(audioDebugRef.current || {}),
+        type: "mp3-fallback-error",
+        error: error?.message || "production-audio-failed",
+      };
+      return false;
+    }
+  }, [listeningAudioUrl, startListeningAmbience]);
+
+  const getListeningSpeechFallback = useCallback(() => {
+    if (!module.audio) return null;
+    if (!listeningSpeechFallbackRef.current) {
+      listeningSpeechFallbackRef.current = createListeningSpeechFallback({
+        audio: module.audio,
+        onTime: (seconds) => {
+          audioTimestampRef.current = seconds;
+          setAudioTimestamp(seconds);
+        },
+        onEnd: () => {
+          const duration = listeningSpeechFallbackRef.current?.duration || currentAudioDuration || 0;
+          audioTimestampRef.current = duration;
+          setAudioTimestamp(duration);
+          setAudioPlaying(false);
+          stopListeningAmbience();
+          audioSessionRef.current = false;
+          setAudioSessionActive(false);
+        },
+        onError: (error) => {
+          setAudioPlaying(false);
+          stopListeningAmbience(true);
+          audioSessionRef.current = false;
+          setAudioSessionActive(false);
+          audioDebugRef.current = {
+            ...(audioDebugRef.current || {}),
+            type: "speech-error",
+            error,
+          };
+          void playProductionAudioFallback().then((playedFallback) => {
+            if (!playedFallback) setAudioError(MOBILE_AUDIO_UNSUPPORTED_MESSAGE);
+          });
+        },
+        onDebug: (event) => {
+          audioDebugRef.current = event;
+          if (import.meta.env.DEV && event?.type && event.type !== "voices-ready") {
+            console.debug("[listening-audio]", event);
+          }
+        },
+      });
+      if (listeningSpeechFallbackRef.current?.duration) {
+        setListeningAudioDuration(listeningSpeechFallbackRef.current.duration);
+      }
+    }
+    return listeningSpeechFallbackRef.current;
+  }, [currentAudioDuration, module.audio, playProductionAudioFallback, stopListeningAmbience]);
+
+  const armExamTimer = useCallback((seconds, { running = false } = {}) => {
+    const safeSeconds = Math.max(0, Math.round(Number(seconds) || 0));
+    timerSecondsRef.current = safeSeconds;
+    setTimerSeconds(safeSeconds);
+    timerExpiredRef.current = false;
+    timerDeadlineRef.current = running && safeSeconds > 0 ? Date.now() + safeSeconds * 1000 : null;
+  }, []);
+
+  const armPrepTimer = useCallback((seconds, { running = false } = {}) => {
+    const safeSeconds = Math.max(0, Math.round(Number(seconds) || 0));
+    prepRemainingRef.current = safeSeconds;
+    setPrepRemaining(safeSeconds);
+    prepExpiredRef.current = false;
+    prepDeadlineRef.current = running && safeSeconds > 0 ? Date.now() + safeSeconds * 1000 : null;
+  }, []);
+
+  useEffect(() => {
     if (!shouldPersistProgress) {
       setCurrentIndex(0);
       setAnswers({});
@@ -2061,7 +2268,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       setFlagged({});
       setNotes({});
       setElapsedSeconds(0);
-      setTimerSeconds(totalExamDuration);
+      armExamTimer(totalExamDuration, { running: false });
       setSimulationMode(true);
       setCompleted(false);
       setPartIntroVisible(true);
@@ -2088,21 +2295,28 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     const restoredPart = examParts.find((part) => part.taskIndexes.includes(restoredIndex)) ?? examParts[0];
     const restoredPartDuration = restoredPart ? getPartDurationSeconds(module, restoredPart) : totalExamDuration;
     const savedTimer = Number(stored?.timerSeconds);
-    setTimerSeconds(
+    const restoredTimerSeconds =
       stored?.currentPartId === restoredPart?.id && Number.isFinite(savedTimer) && savedTimer > 0
         ? savedTimer
-        : restoredPartDuration
-    );
+        : restoredPartDuration;
+    const restoredPartIntroVisible = stored?.completed ? false : stored?.partIntroVisible ?? restoredIndex === 0;
+    armExamTimer(restoredTimerSeconds, {
+      running: !stored?.completed && !restoredPartIntroVisible,
+    });
     setSimulationMode(stored?.completed ? Boolean(stored?.simulationMode) : true);
     setCompleted(Boolean(stored?.completed));
-    setPartIntroVisible(stored?.completed ? false : stored?.partIntroVisible ?? restoredIndex === 0);
+    setPartIntroVisible(restoredPartIntroVisible);
     setWritingVersions(stored?.writingVersions ?? []);
     const restoredAudioTimestamp = Number(stored?.audioTimestamp) || 0;
     setAudioTimestamp(restoredAudioTimestamp);
     audioTimestampRef.current = restoredAudioTimestamp;
     setReplaysUsed(Number(stored?.replaysUsed) || 0);
+    const restoredPrepActive = module.id === "speak" && !stored?.completed && !restoredPartIntroVisible && (stored?.prepActive ?? true);
     setSpeakingPhase(stored?.speakingPhase ?? "prep");
-    setPrepRemaining(Number(stored?.prepRemaining) || restoredTask?.prepSeconds || speakingTasks[0].prepSeconds);
+    setPrepActive(restoredPrepActive);
+    armPrepTimer(Number(stored?.prepRemaining) || restoredTask?.prepSeconds || speakingTasks[0].prepSeconds, {
+      running: restoredPrepActive,
+    });
     setAudioPlaying(false);
     setAudioSessionActive(false);
     setResultStatus("");
@@ -2112,7 +2326,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setWritingCorrectionError("");
     setSaveStatus(stored?.savedAt ? `Dernière sauvegarde ${formatClock(new Date(stored.savedAt))}` : "Sauvegarde locale prête");
     setRestoredKey(progressKey);
-  }, [examParts, module, progressKey, shouldPersistProgress, totalExamDuration, totalTasks]);
+  }, [armExamTimer, armPrepTimer, examParts, module, progressKey, shouldPersistProgress, totalExamDuration, totalTasks]);
 
   useEffect(() => {
     if (completed) return undefined;
@@ -2249,12 +2463,14 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setCompleted(true);
     setPartIntroVisible(false);
     setAudioPlaying(false);
+    stopListeningAmbience(true);
+    listeningSpeechFallbackRef.current?.reset();
     if (listeningAudioRef.current) {
       listeningAudioRef.current.pause();
       listeningAudioRef.current.currentTime = 0;
     }
     void saveResultToBackend(score);
-  }, [saveResultToBackend, score]);
+  }, [saveResultToBackend, score, stopListeningAmbience]);
 
   const buildProgressSnapshot = useCallback(
     () => ({
@@ -2284,6 +2500,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       audioTimestamp,
       replaysUsed,
       prepRemaining,
+      prepActive,
       speakingPhase,
       writingVersions,
       lastAccessedAt: new Date().toISOString(),
@@ -2306,6 +2523,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       notes,
       partIntroVisible,
       prepRemaining,
+      prepActive,
       progressPercent,
       remainingCount,
       progressScopeId,
@@ -2386,17 +2604,20 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
   useEffect(() => {
     if (module.id !== "speak") return;
-    setPrepRemaining(currentTask.prepSeconds);
+    const shouldRunPrep = simulationMode && !completed && !partIntroVisible;
+    armPrepTimer(currentTask.prepSeconds, { running: shouldRunPrep });
     setSpeakingPhase("prep");
-    setPrepActive(simulationMode && !completed);
+    setPrepActive(shouldRunPrep);
     setRecordingSeconds(0);
     recordingSecondsRef.current = 0;
     setRecordError("");
-  }, [completed, currentIndex, currentTask.prepSeconds, module.id, simulationMode]);
+  }, [armPrepTimer, completed, currentIndex, currentTask.prepSeconds, module.id, partIntroVisible, simulationMode]);
 
   useEffect(
     () => () => {
       listeningAudioRef.current?.pause();
+      listeningAmbienceRef.current?.dispose();
+      listeningSpeechFallbackRef.current?.dispose();
       if (recordingIntervalRef.current) {
         window.clearInterval(recordingIntervalRef.current);
       }
@@ -2425,10 +2646,11 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setFlagged({});
     setNotes({});
     setElapsedSeconds(0);
-    setTimerSeconds(examParts[0] ? getPartDurationSeconds(module, examParts[0]) : totalExamDuration);
+    armExamTimer(examParts[0] ? getPartDurationSeconds(module, examParts[0]) : totalExamDuration, { running: false });
     setSimulationMode(true);
     setCompleted(false);
     setPartIntroVisible(true);
+    setPartTransition(null);
     setWritingVersions([]);
     setSavedSimulationId(null);
     setWritingCorrection(null);
@@ -2442,17 +2664,60 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setReplaysUsed(0);
     setAudioPlaying(false);
     setSpeakingPhase("prep");
-    setPrepRemaining(module.tasks[0]?.prepSeconds ?? speakingTasks[0].prepSeconds);
-    setPrepActive(module.id === "speak");
+    armPrepTimer(module.tasks[0]?.prepSeconds ?? speakingTasks[0].prepSeconds, { running: false });
+    setPrepActive(false);
     setRecordingSeconds(0);
     recordingSecondsRef.current = 0;
     setResultStatus("");
     setSaveStatus("Simulation démarrée : navigation verrouillée.");
+    stopListeningAmbience(true);
+    listeningSpeechFallbackRef.current?.reset();
     if (listeningAudioRef.current) {
       listeningAudioRef.current.pause();
       listeningAudioRef.current.currentTime = 0;
     }
-  }, [examParts, module, totalExamDuration]);
+  }, [armExamTimer, armPrepTimer, examParts, module, stopListeningAmbience, totalExamDuration]);
+
+  const beginPart = useCallback((part, startIndex, { logStart = true } = {}) => {
+    const safeIndex = part?.firstIndex ?? startIndex ?? currentIndex;
+    setCurrentIndex(safeIndex);
+    setPartIntroVisible(false);
+    armExamTimer(part ? getPartDurationSeconds(module, part) : totalExamDuration, { running: true });
+    setSpeakingPhase("prep");
+    armPrepTimer(module.tasks[safeIndex]?.prepSeconds ?? speakingTasks[0].prepSeconds, {
+      running: module.id === "speak" && simulationMode,
+    });
+    setPrepActive(module.id === "speak" && simulationMode);
+    setRecordingSeconds(0);
+    recordingSecondsRef.current = 0;
+    if (logStart) {
+      persistProgress(`Teil ${part?.number ?? currentPartIndex + 1} demarree a ${formatClock()}`);
+    }
+  }, [armExamTimer, armPrepTimer, currentIndex, currentPartIndex, module, persistProgress, simulationMode, totalExamDuration]);
+
+  const startPartTransition = useCallback((nextPart, nextIndex, message = "") => {
+    if (!nextPart) return false;
+    timerDeadlineRef.current = null;
+    prepDeadlineRef.current = null;
+    setPrepActive(false);
+    setPartIntroVisible(false);
+    setNavPanelOpen(false);
+    setPartTransition({
+      id: `${nextPart.id || nextPart.number || nextIndex}-${Date.now()}`,
+      nextPart,
+      nextIndex,
+    });
+    if (message) setResultStatus(message);
+    return true;
+  }, []);
+
+  const completePartTransition = useCallback(() => {
+    if (!partTransition?.nextPart) return;
+    const { nextPart, nextIndex } = partTransition;
+    setPartTransition(null);
+    setResultStatus("");
+    beginPart(nextPart, nextIndex);
+  }, [beginPart, partTransition]);
 
   const goToNext = useCallback(() => {
     if (currentIndex >= totalTasks - 1) {
@@ -2461,15 +2726,17 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     }
     const nextPart = currentPart && currentIndex >= currentPart.lastIndex ? examParts[currentPartIndex + 1] : null;
     const nextIndex = nextPart ? nextPart.firstIndex : Math.min(totalTasks - 1, currentIndex + 1);
+    if (startPartTransition(nextPart, nextIndex)) return;
     setCurrentIndex(nextIndex);
-    setPartIntroVisible(Boolean(nextPart));
-    if (nextPart) setTimerSeconds(getPartDurationSeconds(module, nextPart));
+    setPartIntroVisible(false);
     setSpeakingPhase("prep");
-    setPrepRemaining(module.tasks[nextIndex]?.prepSeconds ?? speakingTasks[0].prepSeconds);
+    armPrepTimer(module.tasks[nextIndex]?.prepSeconds ?? speakingTasks[0].prepSeconds, {
+      running: module.id === "speak" && simulationMode,
+    });
     setPrepActive(module.id === "speak" && simulationMode);
     setRecordingSeconds(0);
     recordingSecondsRef.current = 0;
-  }, [currentIndex, currentPart, currentPartIndex, examParts, finishModule, module, simulationMode, totalTasks]);
+  }, [armPrepTimer, currentIndex, currentPart, currentPartIndex, examParts, finishModule, module, simulationMode, startPartTransition, totalTasks]);
 
   const goToPrevious = useCallback(() => {
     const previousIndex = Math.max(0, currentIndex - 1);
@@ -2477,9 +2744,9 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setCurrentIndex(previousIndex);
     setPartIntroVisible(false);
     if (previousPart?.id !== currentPart?.id) {
-      setTimerSeconds(getPartDurationSeconds(module, previousPart));
+      armExamTimer(getPartDurationSeconds(module, previousPart), { running: true });
     }
-  }, [currentIndex, currentPart?.id, examParts, module]);
+  }, [armExamTimer, currentIndex, currentPart?.id, examParts, module]);
 
   const jumpToQuestion = useCallback((targetIndex) => {
     if (isRecording) return;
@@ -2488,20 +2755,13 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setCurrentIndex(safeIndex);
     setPartIntroVisible(false);
     if (targetPart?.id !== currentPart?.id) {
-      setTimerSeconds(getPartDurationSeconds(module, targetPart));
+      armExamTimer(getPartDurationSeconds(module, targetPart), { running: true });
     }
     setNavPanelOpen(false);
-  }, [currentPart?.id, examParts, isRecording, module, totalTasks]);
+  }, [armExamTimer, currentPart?.id, examParts, isRecording, module, totalTasks]);
 
   const playListeningAudio = useCallback(async () => {
     if (module.id !== "listen") return;
-    if (!module.audio?.audioUrl) {
-      setAudioError("Production audio has not been generated yet. Ask an administrator to generate the Hoeren audio.");
-      return;
-    }
-    const audioElement = listeningAudioRef.current;
-    if (!audioElement) return;
-
     const replayLimit = AUDIO_REPLAY_LIMIT;
     const startingFresh = audioTimestamp <= 0 || audioTimestamp >= currentAudioDuration || !audioSessionActive;
 
@@ -2515,26 +2775,62 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       audioTimestampRef.current = 0;
       audioSessionRef.current = true;
       setAudioSessionActive(true);
+    }
+
+    const localSpeech = getListeningSpeechFallback();
+    if (localSpeech) {
+      try {
+        setAudioError("");
+        await localSpeech.play();
+        setAudioPlaying(true);
+        void startListeningAmbience().catch(() => {
+          // Ambience is decorative; speech playback should continue if mobile browsers block Web Audio.
+        });
+      } catch {
+        stopListeningAmbience(true);
+        localSpeech.reset();
+        setAudioPlaying(false);
+        audioSessionRef.current = false;
+        setAudioSessionActive(false);
+        const playedFallback = await playProductionAudioFallback();
+        if (!playedFallback) setAudioError(MOBILE_AUDIO_UNSUPPORTED_MESSAGE);
+      }
+      return;
+    }
+
+    if (!module.audio?.audioUrl) {
+      setAudioError(MOBILE_AUDIO_UNSUPPORTED_MESSAGE);
+      return;
+    }
+
+    const audioElement = listeningAudioRef.current;
+    if (!audioElement) return;
+
+    if (startingFresh) {
       audioElement.currentTime = 0;
     }
 
     try {
       setAudioError("");
       await audioElement.play();
+      await startListeningAmbience();
       setAudioPlaying(true);
     } catch {
+      stopListeningAmbience(true);
       setAudioPlaying(false);
       audioSessionRef.current = false;
       setAudioSessionActive(false);
       setAudioError("Production audio cannot be played on this device right now.");
     }
-  }, [audioSessionActive, audioTimestamp, currentAudioDuration, module.audio, module.id, replaysUsed]);
+  }, [audioSessionActive, audioTimestamp, currentAudioDuration, getListeningSpeechFallback, module.audio, module.id, playProductionAudioFallback, replaysUsed, startListeningAmbience, stopListeningAmbience]);
 
   const pauseListeningAudio = useCallback(() => {
     setAudioPlaying(false);
+    stopListeningAmbience();
     audioTimestampRef.current = listeningAudioRef.current?.currentTime || audioTimestampRef.current;
     listeningAudioRef.current?.pause();
-  }, []);
+    listeningSpeechFallbackRef.current?.pause();
+  }, [stopListeningAmbience]);
 
   const resetListeningAudio = useCallback(() => {
     const audioElement = listeningAudioRef.current;
@@ -2542,12 +2838,14 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       audioElement.pause();
       audioElement.currentTime = 0;
     }
+    listeningSpeechFallbackRef.current?.reset();
+    stopListeningAmbience(true);
     setAudioPlaying(false);
     setAudioTimestamp(0);
     audioTimestampRef.current = 0;
     audioSessionRef.current = false;
     setAudioSessionActive(false);
-  }, []);
+  }, [stopListeningAmbience]);
 
   const handleListeningAudioLoadedMetadata = useCallback((event) => {
     const duration = Math.round(Number(event.currentTarget.duration) || 0);
@@ -2565,16 +2863,18 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setAudioTimestamp(finalDuration);
     audioTimestampRef.current = finalDuration;
     setAudioPlaying(false);
+    stopListeningAmbience();
     audioSessionRef.current = false;
     setAudioSessionActive(false);
-  }, [currentAudioDuration]);
+  }, [currentAudioDuration, stopListeningAmbience]);
 
   const handleListeningAudioError = useCallback(() => {
     setAudioPlaying(false);
+    stopListeningAmbience(true);
     audioSessionRef.current = false;
     setAudioSessionActive(false);
     setAudioError("Production audio is not available yet.");
-  }, []);
+  }, [stopListeningAmbience]);
 
   const saveWritingVersion = useCallback(() => {
     if (module.id !== "write") return;
@@ -2600,9 +2900,9 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
   const beginPrep = useCallback(() => {
     setSpeakingPhase("prep");
-    setPrepRemaining(currentTask.prepSeconds);
+    armPrepTimer(currentTask.prepSeconds, { running: true });
     setPrepActive(true);
-  }, [currentTask.prepSeconds]);
+  }, [armPrepTimer, currentTask.prepSeconds]);
 
   const finishRecording = useCallback((blob, simulated = false) => {
     const duration = recordingSecondsRef.current;
@@ -2740,14 +3040,18 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
     const nextPart = currentPart && currentIndex >= currentPart.lastIndex ? examParts[currentPartIndex + 1] : null;
     const nextIndex = nextPart ? nextPart.firstIndex : Math.min(totalTasks - 1, currentIndex + 1);
+    if (startPartTransition(nextPart, nextIndex, `Zeit abgelaufen. Teil ${nextPart?.number ?? currentPartIndex + 2} beginnt gleich.`)) return;
     setCurrentIndex(nextIndex);
-    setPartIntroVisible(Boolean(nextPart));
+    setPartIntroVisible(false);
     setSpeakingPhase("prep");
-    setPrepRemaining(module.tasks[nextIndex]?.prepSeconds ?? speakingTasks[0].prepSeconds);
+    armPrepTimer(module.tasks[nextIndex]?.prepSeconds ?? speakingTasks[0].prepSeconds, {
+      running: module.id === "speak" && simulationMode,
+    });
     setPrepActive(module.id === "speak" && simulationMode);
     setRecordingSeconds(0);
     recordingSecondsRef.current = 0;
   }, [
+    armPrepTimer,
     currentIndex,
     currentPart,
     currentPartIndex,
@@ -2757,52 +3061,113 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     module,
     persistProgress,
     simulationMode,
+    startPartTransition,
     stopRecording,
     totalTasks,
   ]);
 
-  useEffect(() => {
-    if (!simulationMode || completed || partIntroVisible) return undefined;
+  const finishCurrentTimedSection = useCallback(() => {
+    if (isRecording) {
+      stopRecording();
+    }
+    if (audioPlaying) {
+      pauseListeningAudio();
+    }
+    persistProgress(`Temps termine a ${formatClock()}`);
 
-    if (timerSeconds <= 0) {
-      setResultStatus("Zeit abgelaufen. Die Antworten werden angezeigt.");
-      finishModule();
+    const nextPart = currentPart ? examParts[currentPartIndex + 1] : null;
+    if (nextPart) {
+      startPartTransition(nextPart, nextPart.firstIndex, `Zeit abgelaufen. Teil ${nextPart.number ?? currentPartIndex + 2} beginnt gleich.`);
+      return;
+    }
+
+    setResultStatus("Zeit abgelaufen. Die Antworten werden angezeigt.");
+    finishModule();
+  }, [
+    audioPlaying,
+    currentPart,
+    currentPartIndex,
+    examParts,
+    finishModule,
+    isRecording,
+    pauseListeningAudio,
+    persistProgress,
+    startPartTransition,
+    stopRecording,
+  ]);
+
+  useEffect(() => {
+    if (!simulationMode || completed || partIntroVisible || partTransition || module.unavailable) {
+      timerDeadlineRef.current = null;
+      timerExpiredRef.current = false;
       return undefined;
     }
 
+    if (!timerDeadlineRef.current) {
+      timerDeadlineRef.current = Date.now() + Math.max(0, timerSecondsRef.current) * 1000;
+    }
+
+    const tick = () => {
+      const remaining = Math.max(0, Math.ceil((timerDeadlineRef.current - Date.now()) / 1000));
+      timerSecondsRef.current = remaining;
+      setTimerSeconds((value) => (value === remaining ? value : remaining));
+      if (remaining <= 0 && !timerExpiredRef.current) {
+        timerExpiredRef.current = true;
+        timerDeadlineRef.current = null;
+        finishCurrentTimedSection();
+      }
+    };
+
+    tick();
     const interval = window.setInterval(() => {
-      setTimerSeconds((value) => Math.max(0, value - 1));
-    }, 1000);
+      tick();
+    }, 250);
 
     return () => window.clearInterval(interval);
-  }, [completed, finishModule, partIntroVisible, simulationMode, timerSeconds]);
+  }, [completed, currentPart?.id, finishCurrentTimedSection, module.unavailable, partIntroVisible, partTransition, simulationMode]);
 
   useEffect(() => {
-    if (module.id !== "speak" || !simulationMode || !prepActive || completed) return undefined;
+    if (module.id !== "speak" || !simulationMode || !prepActive || completed || partIntroVisible || partTransition) {
+      prepDeadlineRef.current = null;
+      prepExpiredRef.current = false;
+      return undefined;
+    }
 
-    if (prepRemaining <= 0) {
+    if (!prepDeadlineRef.current) {
+      prepDeadlineRef.current = Date.now() + Math.max(0, prepRemainingRef.current) * 1000;
+    }
+
+    const tick = () => {
+      const remaining = Math.max(0, Math.ceil((prepDeadlineRef.current - Date.now()) / 1000));
+      prepRemainingRef.current = remaining;
+      setPrepRemaining((value) => (value === remaining ? value : remaining));
+      if (remaining > 0 || prepExpiredRef.current) return;
+      prepExpiredRef.current = true;
+      prepDeadlineRef.current = null;
       if (speakingPhase === "prep") {
         setSpeakingPhase("response");
-        setPrepRemaining(currentTask.responseSeconds);
-        return undefined;
+        armPrepTimer(currentTask.responseSeconds, { running: true });
+        return;
       }
 
       advanceAfterTimer();
-      return undefined;
-    }
+    };
 
+    tick();
     const interval = window.setInterval(() => {
-      setPrepRemaining((value) => Math.max(0, value - 1));
-    }, 1000);
+      tick();
+    }, 250);
 
     return () => window.clearInterval(interval);
   }, [
     advanceAfterTimer,
+    armPrepTimer,
     completed,
     currentTask.responseSeconds,
     module.id,
+    partIntroVisible,
+    partTransition,
     prepActive,
-    prepRemaining,
     simulationMode,
     speakingPhase,
   ]);
@@ -2825,16 +3190,9 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
   const startCurrentPart = useCallback(() => {
     const startIndex = currentPart?.firstIndex ?? currentIndex;
-    setCurrentIndex(startIndex);
-    setPartIntroVisible(false);
-    setTimerSeconds(currentPart ? getPartDurationSeconds(module, currentPart) : totalExamDuration);
-    setSpeakingPhase("prep");
-    setPrepRemaining(module.tasks[startIndex]?.prepSeconds ?? speakingTasks[0].prepSeconds);
-    setPrepActive(module.id === "speak" && simulationMode);
-    setRecordingSeconds(0);
-    recordingSecondsRef.current = 0;
-    persistProgress(`Part ${currentPart?.number ?? currentPartIndex + 1} demarree a ${formatClock()}`);
-  }, [currentIndex, currentPart, currentPartIndex, module, persistProgress, simulationMode, totalExamDuration]);
+    setPartTransition(null);
+    beginPart(currentPart, startIndex);
+  }, [beginPart, currentIndex, currentPart]);
 
   const handleReadableWheel = useCallback((event) => {
     const target = event.currentTarget;
@@ -2880,7 +3238,15 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     if (hasRichTextMarkup(text)) {
       return renderRichExamText(text, keyPrefix, styles.questionText);
     }
-    return <h2 className={styles.questionText}>{text}</h2>;
+    const plainText = String(text ?? "").trim();
+    if (plainText.length > 180 || plainText.includes("\n")) {
+      return (
+        <div className={styles.questionTextBlock}>
+          {renderStructuredExamText(plainText, keyPrefix)}
+        </div>
+      );
+    }
+    return <h2 className={styles.questionText}>{plainText}</h2>;
   };
 
   const renderPartMaterial = (part, { compact = false } = {}) => {
@@ -3404,7 +3770,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     const audioProgressPercent = currentAudioDuration
       ? Math.min(100, (audioTimestamp / currentAudioDuration) * 100)
       : 0;
-    const productionAudioMissing = !module.audio?.audioUrl;
     const listeningAudioElement = (
       <audio
         ref={listeningAudioRef}
@@ -3466,13 +3831,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
             <div className={styles.lockedNote}>
               <Lock size={18} />
-              Transkript zum Schutz des Tests ausgeblendet.
+              Hören Sie den Audiotext und beantworten Sie die Aufgaben.
             </div>
-            {productionAudioMissing ? (
-              <p className={styles.warningText}>
-                <AlertCircle size={16} /> Produktionsaudio wurde noch nicht generiert. Ein Administrator muss die Hoeren-Audio-Datei erzeugen.
-              </p>
-            ) : null}
             {audioError ? (
               <p className={styles.warningText}>
                 <AlertCircle size={16} /> {toGermanStatus(audioError)}
@@ -3547,13 +3907,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
           <div className={styles.lockedNote}>
             <Lock size={18} />
-            Transcript hidden for test protection.
+            Hören Sie den Audiotext und beantworten Sie die Aufgaben.
           </div>
-          {productionAudioMissing ? (
-            <p className={styles.warningText}>
-              <AlertCircle size={16} /> Production audio has not been generated yet. Ask an administrator to generate it.
-            </p>
-          ) : null}
           {audioError ? (
             <p className={styles.warningText}>
               <AlertCircle size={16} /> {toGermanStatus(audioError)}
@@ -4319,7 +4674,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
     if (partIntroVisible && currentPart) return renderPartIntro();
 
-    if (module.id === "read") return renderReading();
+    if (module.id === "read" || module.id === "sprach") return renderReading();
     if (module.id === "listen") return renderListening();
     if (module.id === "write") return renderWriting();
     return renderSpeaking();
@@ -4360,6 +4715,15 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
   return (
     <div className={styles.page} style={{ "--module-accent": module.accent, "--module-soft": module.soft }}>
+      {partTransition ? (
+        <TeilTransitionScreen
+          key={partTransition.id}
+          nextTeilTitle={partTransition.nextPart?.displayTitle}
+          nextTeilNumber={partTransition.nextPart?.number}
+          durationSeconds={PART_TRANSITION_SECONDS}
+          onComplete={completePartTransition}
+        />
+      ) : null}
       <nav className={styles.nav}>
         <button
           type="button"
@@ -4450,7 +4814,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           {!completed && !module.unavailable ? renderExamSidebar() : null}
         </div>
 
-        {!completed && !module.unavailable && !partIntroVisible ? (
+        {!completed && !module.unavailable && !partIntroVisible && !partTransition ? (
           <section
             className={`${styles.actionPanel} ${styles.stepActionPanel}`}
             aria-label="Aufgabennavigation"

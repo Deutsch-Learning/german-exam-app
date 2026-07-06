@@ -44,6 +44,18 @@ const normalizeText = (value) =>
     .replace(/[ \t]{2,}/g, " ")
     .trim();
 
+const normalizeKey = (value) =>
+  normalizeText(value)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
+const parseTextNumbers = (value) =>
+  Array.from(String(value ?? "").matchAll(/\btexts?\s*([0-9,\s-]+)/gi))
+    .flatMap((match) => String(match[1]).split(/[^0-9]+/).filter(Boolean).map(Number));
+
 const parseSpeed = (value, fallback = 1) => {
   const match = String(value ?? "").match(/([0-9.]+)\s*x/i);
   const number = match ? Number(match[1]) : Number(value);
@@ -127,7 +139,7 @@ const parseSpeakerSegments = (audio = {}) => {
     const match = line.match(/^([^:\n]{2,48})\s*:\s*(.+)$/);
     segments.push({
       trackIndex: 0,
-      speaker: match ? match[1].trim() : index % 2 ? "Speaker B" : "Speaker A",
+      speaker: match ? match[1].trim() : "Narrator",
       text: normalizeText(match ? match[2] : line),
     });
   });
@@ -136,12 +148,15 @@ const parseSpeakerSegments = (audio = {}) => {
 
 const findSpeakerSettings = (audio, speakerName) => {
   const speakers = Array.isArray(audio.speakers) ? audio.speakers : [];
-  const folded = String(speakerName || "").trim().toLowerCase();
+  const folded = normalizeKey(speakerName);
+  const textNumber = Number((folded.match(/\btext\s*(\d+)\b/) || [])[1]);
   return speakers.find((speaker) => {
-    const labels = [speaker.speaker, speaker.voiceName, speaker.id]
-      .map((value) => String(value || "").trim().toLowerCase())
+    const labels = [speaker.speaker, speaker.voiceName, speaker.id, speaker.role]
+      .map(normalizeKey)
       .filter(Boolean);
-    return labels.some((label) => folded && (label === folded || folded.includes(label) || label.includes(folded)));
+    if (labels.some((label) => folded && (label === folded || folded.includes(label) || label.includes(folded)))) return true;
+    if (textNumber && labels.some((label) => parseTextNumbers(label).includes(textNumber))) return true;
+    return false;
   }) || speakers[0] || {};
 };
 
@@ -463,7 +478,12 @@ const findElevenLabsVoice = async (apiKey, speaker = {}) => {
   return voiceId;
 };
 
+let audioAssetSchemaPromise = null;
+
 const ensureAudioAssetSchema = async (pool) => {
+  if (audioAssetSchemaPromise) return audioAssetSchemaPromise;
+
+  audioAssetSchemaPromise = (async () => {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS exam_audio_assets (
       id SERIAL PRIMARY KEY,
@@ -498,6 +518,12 @@ const ensureAudioAssetSchema = async (pool) => {
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS exam_audio_assets_exam_idx ON exam_audio_assets(source_exam_id, updated_at DESC);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS exam_audio_assets_status_idx ON exam_audio_assets(status, updated_at DESC);`);
+  })().catch((err) => {
+    audioAssetSchemaPromise = null;
+    throw err;
+  });
+
+  return audioAssetSchemaPromise;
 };
 
 const buildAudioContentHash = (audio, provider = getConfiguredProvider()) =>

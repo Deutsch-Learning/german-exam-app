@@ -740,6 +740,17 @@
   line-height: 1.5;
 }
 
+.questionTextBlock {
+  margin: 12px 0 14px;
+  display: grid;
+  gap: 8px;
+  color: #111827;
+}
+
+.questionTextBlock p {
+  margin: 0;
+}
+
 .introText,
 .instructionText,
 .promptPanel p,
@@ -3001,9 +3012,128 @@
   cursor: pointer;
 }
 
+.teilTransitionOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 50% 12%, rgba(255, 217, 90, 0.24), transparent 32%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(247, 250, 252, 0.96));
+  animation: transitionFadeIn 0.22s ease both;
+}
+
+.teilTransitionPanel {
+  width: min(520px, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+  color: #101828;
+}
+
+.teilTransitionIcon {
+  width: 76px;
+  height: 76px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #2b2100;
+  background: linear-gradient(135deg, var(--exam-yellow), #ffe58f);
+  box-shadow: 0 18px 44px rgba(244, 180, 0, 0.24);
+}
+
+.teilTransitionPanel h2 {
+  margin: 0;
+  font-size: clamp(1.75rem, 4vw, 2.55rem);
+  line-height: 1.08;
+  letter-spacing: 0;
+}
+
+.teilTransitionNext {
+  margin: 0;
+  max-width: 440px;
+  color: #475467;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.teilTransitionText,
+.teilTransitionSeconds,
+.teilTransitionHint {
+  margin: 0;
+  color: #667085;
+}
+
+.teilTransitionRing {
+  --transition-progress: 0deg;
+  width: 150px;
+  height: 150px;
+  margin-top: 4px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, #ffffff 0 58%, transparent 59%),
+    conic-gradient(var(--module-accent, var(--exam-yellow)) var(--transition-progress), #e4e7ec 0deg);
+  box-shadow:
+    inset 0 0 0 1px rgba(16, 24, 40, 0.06),
+    0 18px 48px rgba(16, 24, 40, 0.12);
+}
+
+.teilTransitionRing span {
+  font-size: 4.25rem;
+  line-height: 1;
+  font-weight: 900;
+  color: #101828;
+}
+
+.teilTransitionSeconds {
+  font-weight: 800;
+  color: #344054;
+}
+
+.teilTransitionHint {
+  max-width: 360px;
+  font-size: 0.98rem;
+}
+
+@keyframes transitionFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 @media (max-width: 759px) {
   .shell {
     padding-bottom: calc(132px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .teilTransitionOverlay {
+    padding: 18px;
+  }
+
+  .teilTransitionIcon {
+    width: 66px;
+    height: 66px;
+  }
+
+  .teilTransitionRing {
+    width: 132px;
+    height: 132px;
+  }
+
+  .teilTransitionRing span {
+    font-size: 3.65rem;
   }
 
   .actionPanel {
