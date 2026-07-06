@@ -45,6 +45,15 @@ const {
   normalizeProvider,
   TtsConfigurationError,
 } = require("./services/ttsService");
+const {
+  getAppBaseUrl,
+  sendEmail,
+  renderVerificationEmail,
+  renderResetPasswordEmail,
+  renderWelcomeEmail,
+  renderPasswordChangedEmail,
+  renderPromotionalEmail,
+} = require("./services/emailService");
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -106,7 +115,11 @@ const REFRESH_DAYS = 7;
 const REFRESH_MAX_AGE_MS = REFRESH_DAYS * 24 * 60 * 60 * 1000;
 const COOKIE_SECURE = isProduction;
 const DEFAULT_TOTAL_AVAILABLE_EXAMS = Number(process.env.TOTAL_AVAILABLE_EXAMS || 20);
-const EMAIL_VERIFICATION_REQUIRED = process.env.EMAIL_VERIFICATION_REQUIRED === "true";
+const EMAIL_VERIFICATION_ENABLED = process.env.EMAIL_VERIFICATION_ENABLED !== "false";
+const EMAIL_VERIFICATION_MODE = String(process.env.EMAIL_VERIFICATION_MODE || "soft").toLowerCase();
+const EMAIL_VERIFICATION_REQUIRED =
+  EMAIL_VERIFICATION_ENABLED &&
+  (EMAIL_VERIFICATION_MODE === "strict" || process.env.EMAIL_VERIFICATION_REQUIRED === "true");
 const LEVEL_ORDER = ["A1", "A2", "B1", "B2", "C1", "C2"];
 const NOT_SPECIFIED_LEVEL = "Not specified";
 
@@ -149,6 +162,7 @@ const authRateLimiter = rateLimit({
 
 const TOKEN_BYTES = 32;
 const VERIFICATION_HOURS = 24;
+const VERIFICATION_CODE_MINUTES = 15;
 const RESET_MINUTES = 60;
 
 const isEmail = (value) =>
@@ -158,6 +172,8 @@ const normalizeEmail = (value) => String(value ?? "").trim().toLowerCase();
 const tokenHash = (token) =>
   crypto.createHash("sha256").update(token).digest("hex");
 const makeToken = () => crypto.randomBytes(TOKEN_BYTES).toString("hex");
+const makeVerificationCode = () => crypto.randomInt(0, 1_000_000).toString().padStart(6, "0");
+const verificationCodeHash = (email, code) => tokenHash(`${normalizeEmail(email)}:${String(code || "").trim()}`);
 const expiresFromNow = (amount, unit) => {
   const date = new Date();
   if (unit === "hours") date.setHours(date.getHours() + amount);
@@ -179,6 +195,7 @@ const sanitizeUser = (user) => ({
   partial_access: normalizePartialAccess(user.partial_access),
   current_level: user.current_level || NOT_SPECIFIED_LEVEL,
   target_level: user.target_level || null,
+  marketing_emails_enabled: Boolean(user.marketing_emails_enabled),
   created_at: user.created_at,
   last_login_at: user.last_login_at,
 });
@@ -398,6 +415,89 @@ const sendResetEmail = async (user, token) => {
   return link;
 };
 
+const buildFrontendUrl = (pathName, params = {}) => {
+  const url = new URL(pathName, `${getAppBaseUrl()}/`);
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") url.searchParams.set(key, value);
+  });
+  return url.toString();
+};
+
+const sendVerificationCodeEmail = async (user, token, code) => {
+  const verifyUrl = buildFrontendUrl("/verify-email", { email: user.email });
+  const legacyLink = buildFrontendUrl(`/verify-email/${token}`);
+  const email = renderVerificationEmail({ user, code, verifyUrl });
+  await sendEmail({
+    pool,
+    userId: user.id,
+    to: user.email,
+    type: "verification",
+    subject: email.subject,
+    text: `${email.text}\n\nLien de secours : ${legacyLink}`,
+    html: email.html,
+    idempotencyKey: `verify-${user.id}-${tokenHash(token).slice(0, 16)}`,
+    metadata: { verifyUrl, legacyLink, expiresMinutes: VERIFICATION_CODE_MINUTES },
+  });
+  return { verifyUrl, legacyLink };
+};
+
+const sendPasswordResetEmail = async (user, token) => {
+  const resetUrl = buildFrontendUrl(`/reset-password/${token}`);
+  const email = renderResetPasswordEmail({ user, resetUrl });
+  await sendEmail({
+    pool,
+    userId: user.id,
+    to: user.email,
+    type: "password_reset",
+    subject: email.subject,
+    text: email.text,
+    html: email.html,
+    idempotencyKey: `reset-${user.id}-${tokenHash(token).slice(0, 16)}`,
+    metadata: { resetUrl, expiresMinutes: RESET_MINUTES },
+  });
+  return resetUrl;
+};
+
+const sendWelcomeEmailOnce = async (user) => {
+  if (!user?.id || user.welcome_email_sent_at) return false;
+  const claimed = await pool.query(
+    `UPDATE users
+     SET welcome_email_sent_at = NOW()
+     WHERE id = $1
+       AND welcome_email_sent_at IS NULL
+     RETURNING id, email, username, first_name, welcome_email_sent_at`,
+    [user.id]
+  );
+  const row = claimed.rows[0];
+  if (!row) return false;
+  const email = renderWelcomeEmail({ user: row });
+  await sendEmail({
+    pool,
+    userId: row.id,
+    to: row.email,
+    type: "welcome",
+    subject: email.subject,
+    text: email.text,
+    html: email.html,
+    idempotencyKey: `welcome-${row.id}`,
+  });
+  return true;
+};
+
+const sendPasswordChangedNoticeEmail = async (user) => {
+  const email = renderPasswordChangedEmail({ user });
+  await sendEmail({
+    pool,
+    userId: user.id,
+    to: user.email,
+    type: "password_changed",
+    subject: email.subject,
+    text: email.text,
+    html: email.html,
+    idempotencyKey: `password-changed-${user.id}-${Date.now()}`,
+  });
+};
+
 async function ensureSchema() {
   await pool.query(`
     DO $$
@@ -437,6 +537,12 @@ async function ensureSchema() {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_token_hash TEXT;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_expires_at TIMESTAMPTZ;`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_code_hash TEXT;`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_code_expires_at TIMESTAMPTZ;`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_verification_email_sent_at TIMESTAMPTZ;`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS welcome_email_sent_at TIMESTAMPTZ;`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS marketing_emails_enabled BOOLEAN NOT NULL DEFAULT FALSE;`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS marketing_unsubscribed_at TIMESTAMPTZ;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_hash TEXT;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_expires_at TIMESTAMPTZ;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS has_full_access BOOLEAN NOT NULL DEFAULT FALSE;`);
@@ -467,6 +573,11 @@ async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS users_verification_token_idx
       ON users(verification_token_hash)
       WHERE verification_token_hash IS NOT NULL;
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS users_verification_code_idx
+      ON users(verification_code_hash)
+      WHERE verification_code_hash IS NOT NULL;
   `);
   await pool.query(`
     CREATE INDEX IF NOT EXISTS users_reset_token_idx
@@ -554,6 +665,33 @@ async function ensureSchema() {
   await pool.query(`
     CREATE INDEX IF NOT EXISTS api_usage_user_created_idx
       ON api_usage_logs(user_id, created_at DESC);
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS email_events (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      email_type TEXT NOT NULL,
+      recipient TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      provider TEXT NOT NULL DEFAULT 'disabled',
+      status TEXT NOT NULL DEFAULT 'logged',
+      provider_message_id TEXT,
+      error_message TEXT,
+      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`
+    ALTER TABLE email_events ENABLE ROW LEVEL SECURITY;
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS email_events_user_created_idx
+      ON email_events(user_id, created_at DESC);
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS email_events_type_status_idx
+      ON email_events(email_type, status, created_at DESC);
   `);
 
   await pool.query(`
@@ -919,8 +1057,15 @@ const parseSeriesNumber = (seriesId) => {
 
 const asJsonObject = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {};
 
-const cleanText = (value) =>
+const stripVisibleImportArtifacts = (value) =>
   String(value ?? "")
+    .replace(/---\s*PAGE\s+\d+\s*\/\s*\d+\s*---/gi, "")
+    .replace(/\bPAGE\s+\d+\s*\/\s*\d+\b/gi, "")
+    .replace(/\bCORRECTIONS?\b\s*$/gim, "")
+    .replace(/\bKORREKTUREN?\b\s*$/gim, "");
+
+const cleanText = (value) =>
+  stripVisibleImportArtifacts(value)
     .replace(/\r/g, "")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
@@ -962,6 +1107,15 @@ const foldPlain = (value) =>
     .toLowerCase();
 
 const isListeningSourceLine = (line = "") => {
+  const raw = String(line ?? "").trim();
+  const rawFolded = foldPlain(raw);
+  if (
+    /^(?:n\s+)?(?:stimme|figur|stimme\/figur|bruitage|bruitages|sprecher|sprecherin|voice|voix|sfx)\s*[:/]/i.test(rawFolded) ||
+    /^\s*n?\s*\[(?:anfang|ende|hintergrund|pause|jingle|signal|gerausch|geraeusch|sound|sfx)/i.test(rawFolded) ||
+    /^(?!multiple-choice|richtig\/falsch|aufgabe|aufgaben|frage|fragen|question|questions)\p{L}[\p{L}\s.'-]{1,54}:\s*$/u.test(raw)
+  ) {
+    return true;
+  }
   const folded = foldPlain(line).replace(/^[■•*\-\s]+/, "").trim();
   return (
     /^(type|type de document|voix|voice|sprecher|sprecherin|rolle|role|debit|tempo|style|registre|bruitages|sfx|transcription audio|transkription|transcript|script audio|skript|fiche de production|plan de production|profils? de voix)\b/.test(folded) ||
@@ -970,8 +1124,36 @@ const isListeningSourceLine = (line = "") => {
   );
 };
 
+const hasListeningProductionMarkers = (value = "") => {
+  const folded = foldPlain(value);
+  return /stimme\/figur|transcription audio|transkription|script audio|bruitage|bruitages|voix\s*:|sprecher\s*:|speaker\s*:|gehort\s*:|multiple-choice|richtig\/falsch/.test(folded);
+};
+
+const extractFirstListeningExercise = (value = "") => {
+  const text = cleanText(value);
+  const multiple = text.match(
+    /Multiple-Choice\s*:\s*([^\n]+)(?:\n\s*a\)\s*([^\n]+))?(?:\n\s*b\)\s*([^\n]+))?(?:\n\s*c\)\s*([^\n]+))?/i
+  );
+  if (multiple) {
+    return [
+      multiple[1],
+      multiple[2] ? `a) ${multiple[2]}` : null,
+      multiple[3] ? `b) ${multiple[3]}` : null,
+      multiple[4] ? `c) ${multiple[4]}` : null,
+    ].filter(Boolean).join("\n");
+  }
+
+  const trueFalse = text.match(/Richtig\s*\/\s*Falsch\s*:\s*([^\n]+)/i);
+  if (trueFalse) return trueFalse[1];
+
+  const numbered = text.match(/(?:^|\n)\s*(\d{1,2}[.)]\s+[^\n]+)/);
+  return numbered ? numbered[1].trim() : "";
+};
+
 const cleanListeningStudentText = (value) =>
   cleanText(value)
+    .replace(/\bSprecher\s*:/g, "Person:")
+    .replace(/\n\s*(?:FICHE DE CASTING|FICHE DE PRODUCTION|Casting requis|Bruitage de fond|Placement et dur[ée]e|Note\s*:\s*enregistrement)[\s\S]*$/i, "")
     .replace(/[■•]/g, "")
     .replace(/\[\s*_{2,}\s*\]/g, "")
     .replace(/\[\s*(?:\+|–|-|richtig|falsch)?\s*\]/gi, "")
@@ -983,6 +1165,15 @@ const cleanListeningStudentText = (value) =>
     .filter((line) => !/^(?:korrig|correction|loesung|losung|answer key)\b/i.test(foldPlain(line)))
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+const cleanListeningOptionLabel = (value) =>
+  cleanListeningStudentText(value)
+    .replace(/\s*\/\s*Sprecher(?:in)?(?:\s*\d+)?\b/gi, "")
+    .replace(/\(\s*Sprecher(?:in)?(?:\s*\d+)?\s*\)/gi, "")
+    .replace(/^Sprecherin(?:\s*(\d+))?$/i, (_, number) => `Person${number ? ` ${number}` : ""}`)
+    .replace(/^Sprecher(?:\s*(\d+))?$/i, (_, number) => `Person${number ? ` ${number}` : ""}`)
+    .replace(/\s{2,}/g, " ")
     .trim();
 
 const extractListeningStudentPrompt = (value, fallbackTitle = "") => {
@@ -1000,6 +1191,11 @@ const extractListeningStudentPrompt = (value, fallbackTitle = "") => {
   const taskOnly = starts.length ? raw.slice(Math.min(...starts)) : "";
   const cleaned = cleanListeningStudentText(taskOnly || raw);
   const safeTitle = cleanListeningStudentText(fallbackTitle);
+  if (hasListeningProductionMarkers(raw) && cleaned.length > 900) {
+    const exercise = cleanListeningStudentText(extractFirstListeningExercise(cleaned));
+    if (exercise) return `${LISTENING_STUDENT_INSTRUCTION}\n\n${clipText(exercise, 900)}`;
+    return safeTitle ? `${LISTENING_STUDENT_INSTRUCTION}\n\n${safeTitle}` : LISTENING_STUDENT_INSTRUCTION;
+  }
   if (!cleaned || cleaned.length < 12 || /transcription audio|transkription|script audio/i.test(cleaned.slice(0, 140))) {
     return safeTitle ? `${LISTENING_STUDENT_INSTRUCTION}\n\n${safeTitle}` : LISTENING_STUDENT_INSTRUCTION;
   }
@@ -1150,7 +1346,9 @@ const buildTaskPartMeta = (question, index = 0) => {
 const buildListeningTask = (question, index = 0) => {
   const questionType = String(question.question_type || "").toLowerCase();
   const correctValue = extractCorrectValue(question.correct_answer);
-  const options = normalizeChoiceOptions(question.options);
+  const options = normalizeChoiceOptions(question.options)
+    .map((option) => ({ ...option, label: cleanListeningOptionLabel(option.label) }))
+    .filter((option) => option.label);
   const metadata = asJsonObject(question.source_metadata);
   const base = {
     id: `db-question-${question.id}`,
@@ -1620,7 +1818,7 @@ app.get("/api/exams/:provider/series/:seriesId/:moduleId", async (req, res) => {
 
 const registerHandler = async (req, res) => {
   try {
-    const { email, password, username, firstName, lastName } = req.body ?? {};
+    const { email, password, username, firstName, lastName, marketingEmailsEnabled } = req.body ?? {};
 
     if (!isEmail(email) || typeof password !== "string") {
       return res.status(400).json({ ok: false, error: "A valid email and password are required" });
@@ -1638,35 +1836,43 @@ const registerHandler = async (req, res) => {
     const safeFirst = typeof firstName === "string" ? firstName.trim().slice(0, 80) : null;
     const safeLast = typeof lastName === "string" ? lastName.trim().slice(0, 80) : null;
     const passwordHash = await bcrypt.hash(password, 12);
-    const verificationToken = EMAIL_VERIFICATION_REQUIRED ? makeToken() : null;
+    const verificationToken = EMAIL_VERIFICATION_ENABLED ? makeToken() : null;
+    const verificationCode = EMAIL_VERIFICATION_ENABLED ? makeVerificationCode() : null;
+    const marketingOptIn = marketingEmailsEnabled === true;
 
     const insert = await pool.query(
       `INSERT INTO users (
          email, username, first_name, last_name, password_hash, role, status,
-         email_verified, verification_token_hash, verification_expires_at
+         email_verified, verification_token_hash, verification_expires_at,
+         verification_code_hash, verification_code_expires_at,
+         last_verification_email_sent_at, marketing_emails_enabled
        )
-       VALUES ($1, $2, $3, $4, $5, 'user', 'active', $6, $7, $8)
-       RETURNING id, email, username, first_name, last_name, email_verified`,
+       VALUES ($1, $2, $3, $4, $5, 'user', 'active', $6, $7, $8, $9, $10, CASE WHEN $7 IS NULL THEN NULL ELSE NOW() END, $11)
+       RETURNING id, email, username, first_name, last_name, email_verified, marketing_emails_enabled`,
       [
         normalizedEmail,
         safeUsername,
         safeFirst,
         safeLast,
         passwordHash,
-        !EMAIL_VERIFICATION_REQUIRED,
+        !EMAIL_VERIFICATION_ENABLED,
         verificationToken ? tokenHash(verificationToken) : null,
         verificationToken ? expiresFromNow(VERIFICATION_HOURS, "hours") : null,
+        verificationCode ? verificationCodeHash(normalizedEmail, verificationCode) : null,
+        verificationCode ? expiresFromNow(VERIFICATION_CODE_MINUTES, "minutes") : null,
+        marketingOptIn,
       ]
     );
     const verificationUrl = verificationToken
-      ? await sendVerificationEmail(insert.rows[0], verificationToken)
+      ? await sendVerificationCodeEmail(insert.rows[0], verificationToken, verificationCode)
       : null;
     return res.status(201).json({
       ok: true,
-      message: EMAIL_VERIFICATION_REQUIRED
-        ? "Account created. Please confirm your email before logging in."
+      requiresEmailVerification: EMAIL_VERIFICATION_ENABLED,
+      message: EMAIL_VERIFICATION_ENABLED
+        ? "Compte créé. Entrez le code de vérification envoyé par email."
         : "Account created. You can now log in.",
-      devVerificationUrl: process.env.NODE_ENV === "production" ? undefined : verificationUrl,
+      devVerificationUrl: process.env.NODE_ENV === "production" ? undefined : verificationUrl?.legacyLink,
     });
   } catch (err) {
     if (err && err.code === "23505") {
@@ -1685,7 +1891,7 @@ app.post("/api/auth/register", registerHandler);
 
 const resendVerificationHandler = async (req, res) => {
   try {
-    if (!EMAIL_VERIFICATION_REQUIRED) {
+    if (!EMAIL_VERIFICATION_ENABLED) {
       return res.json({ ok: true, message: "Email verification is currently disabled." });
     }
 
@@ -1695,7 +1901,7 @@ const resendVerificationHandler = async (req, res) => {
     }
 
     const r = await pool.query(
-      `SELECT id, email, username, first_name, email_verified FROM users WHERE email = $1`,
+      `SELECT id, email, username, first_name, email_verified, last_verification_email_sent_at FROM users WHERE email = $1`,
       [email]
     );
     const user = r.rows[0];
@@ -1703,18 +1909,37 @@ const resendVerificationHandler = async (req, res) => {
       return res.json({ ok: true, message: "If verification is needed, an email has been sent." });
     }
 
+    if (
+      user.last_verification_email_sent_at &&
+      Date.now() - new Date(user.last_verification_email_sent_at).getTime() < 60_000
+    ) {
+      return res.status(429).json({ ok: false, error: "Veuillez attendre une minute avant de demander un nouveau code." });
+    }
+
     const token = makeToken();
+    const code = makeVerificationCode();
     await pool.query(
       `UPDATE users
-       SET verification_token_hash = $1, verification_expires_at = $2
-       WHERE id = $3`,
-      [tokenHash(token), expiresFromNow(VERIFICATION_HOURS, "hours"), user.id]
+       SET verification_token_hash = $1,
+           verification_expires_at = $2,
+           verification_code_hash = $3,
+           verification_code_expires_at = $4,
+           last_verification_email_sent_at = NOW()
+       WHERE id = $5`,
+      [
+        tokenHash(token),
+        expiresFromNow(VERIFICATION_HOURS, "hours"),
+        verificationCodeHash(email, code),
+        expiresFromNow(VERIFICATION_CODE_MINUTES, "minutes"),
+        user.id,
+      ]
     );
-    const verificationUrl = await sendVerificationEmail(user, token);
+    const verificationUrl = await sendVerificationCodeEmail(user, token, code);
     return res.json({
       ok: true,
-      message: "If verification is needed, an email has been sent.",
-      devVerificationUrl: process.env.NODE_ENV === "production" ? undefined : verificationUrl,
+      message: "Si une vérification est nécessaire, un nouveau code a été envoyé.",
+      cooldownSeconds: 60,
+      devVerificationUrl: process.env.NODE_ENV === "production" ? undefined : verificationUrl?.legacyLink,
     });
   } catch (err) {
     console.error(err);
@@ -1732,13 +1957,39 @@ const verifyEmailToken = async (token) => {
      SET email_verified = TRUE,
          email_verified_at = NOW(),
          verification_token_hash = NULL,
-         verification_expires_at = NULL
+         verification_expires_at = NULL,
+         verification_code_hash = NULL,
+         verification_code_expires_at = NULL
      WHERE verification_token_hash = $1
        AND verification_expires_at > NOW()
      RETURNING id, email, username, first_name, last_name, date_of_birth, role, status,
                email_verified, has_full_access, partial_access, current_level, target_level,
-               created_at, last_login_at`,
+               marketing_emails_enabled, welcome_email_sent_at, created_at, last_login_at`,
     [tokenHash(token)]
+  );
+  return r.rows[0] ?? null;
+};
+
+const verifyEmailCode = async (email, code) => {
+  const normalizedEmail = normalizeEmail(email);
+  const normalizedCode = String(code || "").trim();
+  if (!isEmail(normalizedEmail) || !/^\d{6}$/.test(normalizedCode)) return null;
+
+  const r = await pool.query(
+    `UPDATE users
+     SET email_verified = TRUE,
+         email_verified_at = NOW(),
+         verification_token_hash = NULL,
+         verification_expires_at = NULL,
+         verification_code_hash = NULL,
+         verification_code_expires_at = NULL
+     WHERE email = $1
+       AND verification_code_hash = $2
+       AND verification_code_expires_at > NOW()
+     RETURNING id, email, username, first_name, last_name, date_of_birth, role, status,
+               email_verified, has_full_access, partial_access, current_level, target_level,
+               marketing_emails_enabled, welcome_email_sent_at, created_at, last_login_at`,
+    [normalizedEmail, verificationCodeHash(normalizedEmail, normalizedCode)]
   );
   return r.rows[0] ?? null;
 };
@@ -1747,6 +1998,7 @@ const verifyEmailGetHandler = async (req, res) => {
   try {
     const user = await verifyEmailToken(req.params.token);
     if (!user) return res.status(400).json({ ok: false, error: "Invalid or expired verification link" });
+    await sendWelcomeEmailOnce(user);
     return res.json({ ok: true, user: sanitizeUser(user) });
   } catch (err) {
     console.error(err);
@@ -1759,8 +2011,11 @@ if (!isProduction) app.get("/verify-email/:token", verifyEmailGetHandler);
 
 const verifyEmailPostHandler = async (req, res) => {
   try {
-    const user = await verifyEmailToken(req.body?.token);
-    if (!user) return res.status(400).json({ ok: false, error: "Invalid or expired verification link" });
+    const user = req.body?.token
+      ? await verifyEmailToken(req.body.token)
+      : await verifyEmailCode(req.body?.email, req.body?.code);
+    if (!user) return res.status(400).json({ ok: false, error: "Invalid or expired verification code" });
+    await sendWelcomeEmailOnce(user);
     return res.json({ ok: true, user: sanitizeUser(user) });
   } catch (err) {
     console.error(err);
@@ -1782,7 +2037,7 @@ const loginHandler = async (req, res) => {
     const userRes = await pool.query(
       `SELECT id, email, username, first_name, last_name, date_of_birth, password_hash, role, status,
               email_verified, has_full_access, partial_access, current_level, target_level,
-              created_at, last_login_at
+              marketing_emails_enabled, created_at, last_login_at
        FROM users
        WHERE email = $1`,
       [normalizeEmail(email)]
@@ -1813,6 +2068,7 @@ const loginHandler = async (req, res) => {
       accessToken: auth.token,
       expiresIn: auth.expiresIn,
       redirectTo: user.role === "admin" ? "/admin/dashboard" : "/dashboard",
+      requiresEmailVerification: EMAIL_VERIFICATION_ENABLED && !user.email_verified,
       user: sanitizeUser({ ...user, last_login_at: new Date().toISOString() }),
     });
   } catch (err) {
@@ -1836,7 +2092,7 @@ const refreshHandler = async (req, res) => {
       `SELECT rt.id AS refresh_token_id, rt.user_id, rt.expires_at, rt.revoked_at,
               u.email, u.username, u.first_name, u.last_name, u.date_of_birth,
               u.role, u.status, u.email_verified, u.has_full_access, u.partial_access,
-              u.current_level, u.target_level, u.created_at, u.last_login_at
+              u.current_level, u.target_level, u.marketing_emails_enabled, u.created_at, u.last_login_at
        FROM refresh_tokens rt
        JOIN users u ON u.id = rt.user_id
        WHERE rt.token_hash = $1
@@ -1896,6 +2152,7 @@ const refreshHandler = async (req, res) => {
       partial_access: row.partial_access,
       current_level: row.current_level,
       target_level: row.target_level,
+      marketing_emails_enabled: row.marketing_emails_enabled,
       created_at: row.created_at,
       last_login_at: row.last_login_at,
     };
@@ -1955,13 +2212,13 @@ const forgotPasswordHandler = async (req, res) => {
     const user = r.rows[0];
     let resetUrl;
 
-    if (user && user.status === "active" && user.email_verified) {
+    if (user && user.status === "active") {
       const token = makeToken();
       await pool.query(
         `UPDATE users SET reset_token_hash = $1, reset_expires_at = $2 WHERE id = $3`,
         [tokenHash(token), expiresFromNow(RESET_MINUTES, "minutes"), user.id]
       );
-      resetUrl = await sendResetEmail(user, token);
+      resetUrl = await sendPasswordResetEmail(user, token);
     }
 
     return res.json({
@@ -1997,7 +2254,7 @@ const resetPasswordHandler = async (req, res) => {
        WHERE reset_token_hash = $2
          AND reset_expires_at > NOW()
          AND status = 'active'
-       RETURNING id`,
+       RETURNING id, email, username, first_name`,
       [passwordHash, tokenHash(token)]
     );
 
@@ -2006,6 +2263,7 @@ const resetPasswordHandler = async (req, res) => {
     }
     await pool.query(`UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL`, [updated.rows[0].id]);
     await logUserAction(updated.rows[0].id, "auth.password_reset", req);
+    await sendPasswordChangedNoticeEmail(updated.rows[0]);
     return res.json({ ok: true, message: "Password updated. You can now log in." });
   } catch (err) {
     console.error(err);
@@ -2329,7 +2587,7 @@ if (!isProduction) app.get("/dashboard", requireAuth, dashboardHandler);
 
 const updateProfileHandler = async (req, res) => {
   try {
-    const { username, firstName, lastName, email, dateOfBirth } = req.body ?? {};
+    const { username, firstName, lastName, email, dateOfBirth, marketingEmailsEnabled } = req.body ?? {};
     if (
       typeof username !== "string" ||
       typeof firstName !== "string" ||
@@ -2362,9 +2620,14 @@ const updateProfileHandler = async (req, res) => {
     }
 
     const emailChanged = safeEmail !== req.user.email;
-    const shouldVerifyEmail = EMAIL_VERIFICATION_REQUIRED && emailChanged;
     const shouldTrustEmail = !EMAIL_VERIFICATION_REQUIRED && emailChanged;
-    const verificationToken = shouldVerifyEmail ? makeToken() : null;
+    const shouldSendVerification = EMAIL_VERIFICATION_ENABLED && emailChanged;
+    const verificationToken = shouldSendVerification ? makeToken() : null;
+    const verificationCode = shouldSendVerification ? makeVerificationCode() : null;
+    const marketingPreference =
+      typeof marketingEmailsEnabled === "boolean"
+        ? marketingEmailsEnabled
+        : Boolean(req.user.marketing_emails_enabled);
 
     const updated = await pool.query(
       `UPDATE users
@@ -2373,38 +2636,46 @@ const updateProfileHandler = async (req, res) => {
            last_name = $3,
            email = $4,
            date_of_birth = COALESCE($5::date, date_of_birth),
-           email_verified = CASE WHEN $6 THEN FALSE WHEN $10 THEN TRUE ELSE email_verified END,
-           email_verified_at = CASE WHEN $6 THEN NULL WHEN $10 THEN NOW() ELSE email_verified_at END,
+           email_verified = CASE WHEN $6 THEN FALSE WHEN $11 THEN TRUE ELSE email_verified END,
+           email_verified_at = CASE WHEN $6 THEN NULL WHEN $11 THEN NOW() ELSE email_verified_at END,
            verification_token_hash = CASE WHEN $6 THEN $7 ELSE verification_token_hash END,
-           verification_expires_at = CASE WHEN $6 THEN $8 ELSE verification_expires_at END
-       WHERE id = $9
+           verification_expires_at = CASE WHEN $6 THEN $8 ELSE verification_expires_at END,
+           verification_code_hash = CASE WHEN $6 THEN $9 ELSE verification_code_hash END,
+           verification_code_expires_at = CASE WHEN $6 THEN $10 ELSE verification_code_expires_at END,
+           last_verification_email_sent_at = CASE WHEN $6 THEN NOW() ELSE last_verification_email_sent_at END,
+           marketing_emails_enabled = $12,
+           marketing_unsubscribed_at = CASE WHEN $12 THEN NULL ELSE COALESCE(marketing_unsubscribed_at, NOW()) END
+       WHERE id = $13
        RETURNING id, email, username, first_name, last_name, date_of_birth, role, status,
                  email_verified, has_full_access, partial_access, current_level, target_level,
-                 created_at, last_login_at`,
+                 marketing_emails_enabled, welcome_email_sent_at, created_at, last_login_at`,
       [
         safeUsername,
         safeFirst,
         safeLast,
         safeEmail,
         safeDob || null,
-        shouldVerifyEmail,
+        shouldSendVerification,
         verificationToken ? tokenHash(verificationToken) : null,
         verificationToken ? expiresFromNow(VERIFICATION_HOURS, "hours") : null,
-        req.user.id,
+        verificationCode ? verificationCodeHash(safeEmail, verificationCode) : null,
+        verificationCode ? expiresFromNow(VERIFICATION_CODE_MINUTES, "minutes") : null,
         shouldTrustEmail,
+        marketingPreference,
+        req.user.id,
       ]
     );
 
     if (!updated.rows[0]) return res.status(404).json({ ok: false, error: "User not found" });
     let verificationUrl;
-    if (shouldVerifyEmail) {
-      verificationUrl = await sendVerificationEmail(updated.rows[0], verificationToken);
+    if (shouldSendVerification) {
+      verificationUrl = await sendVerificationCodeEmail(updated.rows[0], verificationToken, verificationCode);
     }
     return res.json({
       ok: true,
       user: sanitizeUser(updated.rows[0]),
-      requiresEmailVerification: emailChanged,
-      devVerificationUrl: process.env.NODE_ENV === "production" ? undefined : verificationUrl,
+      requiresEmailVerification: shouldSendVerification,
+      devVerificationUrl: process.env.NODE_ENV === "production" ? undefined : verificationUrl?.legacyLink,
     });
   } catch (err) {
     if (err && err.code === "23505") {
@@ -2417,6 +2688,28 @@ const updateProfileHandler = async (req, res) => {
 
 app.put("/me", requireAuth, updateProfileHandler);
 app.put("/api/user/profile", requireAuth, updateProfileHandler);
+
+const updateEmailPreferencesHandler = async (req, res) => {
+  try {
+    const marketingEnabled = req.body?.marketingEmailsEnabled === true;
+    const updated = await pool.query(
+      `UPDATE users
+       SET marketing_emails_enabled = $2,
+           marketing_unsubscribed_at = CASE WHEN $2 THEN NULL ELSE COALESCE(marketing_unsubscribed_at, NOW()) END
+       WHERE id = $1
+       RETURNING id, email, username, first_name, last_name, date_of_birth, role, status,
+                 email_verified, has_full_access, partial_access, current_level, target_level,
+                 marketing_emails_enabled, created_at, last_login_at`,
+      [req.user.id, marketingEnabled]
+    );
+    return res.json({ ok: true, user: sanitizeUser(updated.rows[0]) });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+};
+
+app.put("/api/user/email-preferences", requireAuth, updateEmailPreferencesHandler);
 
 const createSimulationHandler = async (req, res) => {
   try {
@@ -2549,8 +2842,10 @@ app.post("/contact", async (req, res) => {
       return res.status(400).json({ ok: false, error: "Please provide valid contact details" });
     }
 
-    await sendTransactionalEmail({
-      to: process.env.CONTACT_TO || "appgerman989@gmail.com",
+    await sendEmail({
+      pool,
+      to: process.env.CONTACT_TO || process.env.SUPPORT_EMAIL || "support@n-deutschprüfungen.com",
+      type: "contact",
       subject: `Nouveau message contact: ${safeFirst} ${safeLast}`,
       text: [
         `Nom: ${safeLast}`,

@@ -3821,7 +3821,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
             <div className={styles.lockedNote}>
               <Lock size={18} />
-              Das Transkript ist während der Prüfung ausgeblendet.
+              Hören Sie den Audiotext und beantworten Sie die Aufgaben.
             </div>
             {audioError ? (
               <p className={styles.warningText}>
@@ -3897,7 +3897,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
           <div className={styles.lockedNote}>
             <Lock size={18} />
-            Das Transkript ist während der Prüfung ausgeblendet.
+            Hören Sie den Audiotext und beantworten Sie die Aufgaben.
           </div>
           {audioError ? (
             <p className={styles.warningText}>

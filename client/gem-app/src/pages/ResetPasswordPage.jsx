@@ -1,11 +1,13 @@
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import API from "../services/api";
 import logo from "../assets/images/logo.png";
 import "./LoginPage.css";
 
 export default function ResetPasswordPage() {
   const { token } = useParams();
+  const [searchParams] = useSearchParams();
+  const resetToken = token || searchParams.get("token") || "";
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [status, setStatus] = useState("idle");
@@ -26,8 +28,14 @@ export default function ResetPasswordPage() {
     }
 
     setStatus("loading");
+    if (!resetToken) {
+      setStatus("error");
+      setMessage("Lien de réinitialisation manquant ou invalide.");
+      return;
+    }
+
     try {
-      const res = await API.post("/api/auth/reset-password", { token, password });
+      const res = await API.post("/api/auth/reset-password", { token: resetToken, password });
       setStatus("success");
       setMessage(res.data?.message ?? "Mot de passe mis à jour.");
     } catch (err) {

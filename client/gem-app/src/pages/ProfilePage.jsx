@@ -1,5 +1,6 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { Award, BarChart3, BookOpenCheck, CalendarClock, Clock3, Flame, History, MailCheck, ShieldCheck, Sparkles, Target, Trophy } from "lucide-react";
 import API from "../services/api";
 import { fetchDashboardData } from "../services/dashboard";
@@ -43,6 +44,7 @@ export default function ProfilePage() {
     lastName: "",
     email: "",
     dateOfBirth: "",
+    marketingEmailsEnabled: false,
   });
 
   const auth = useMemo(() => getAuthUser(), []);
@@ -81,6 +83,7 @@ export default function ProfilePage() {
         lastName: res.data.user.last_name ?? "",
         email: res.data.user.email ?? "",
         dateOfBirth: res.data.user.date_of_birth ? String(res.data.user.date_of_birth).slice(0, 10) : "",
+        marketingEmailsEnabled: Boolean(res.data.user.marketing_emails_enabled),
       });
     } catch {
       setError("Impossible de joindre le serveur.");
@@ -95,8 +98,8 @@ export default function ProfilePage() {
   }, [load]);
 
   const handleChange = (event) => {
-    const { name, value } = event.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    const { name, value, type, checked } = event.target;
+    setFormData((prev) => ({ ...prev, [name]: type === "checkbox" ? checked : value }));
   };
 
   const save = async (event) => {
@@ -115,6 +118,7 @@ export default function ProfilePage() {
         lastName: formData.lastName,
         email: formData.email,
         dateOfBirth: formData.dateOfBirth,
+        marketingEmailsEnabled: formData.marketingEmailsEnabled,
       });
       if (!res.data?.ok) {
         setError(res.data?.error ?? "Impossible de sauvegarder.");
@@ -295,6 +299,9 @@ export default function ProfilePage() {
                     {verificationNotice}
                   </p>
                 ) : null}
+                <Link className={styles.verifyLink} to={`/verify-email?email=${encodeURIComponent(user.email)}`}>
+                  Entrer le code de vérification
+                </Link>
               </div>
             ) : null}
           </section>
@@ -325,6 +332,18 @@ export default function ProfilePage() {
             <label className={styles.label}>
               {t.profilePage.birthDate}
               <input name="dateOfBirth" type="date" value={formData.dateOfBirth} onChange={handleChange} className={styles.input} />
+            </label>
+            <label className={styles.checkboxRow}>
+              <input
+                name="marketingEmailsEnabled"
+                type="checkbox"
+                checked={formData.marketingEmailsEnabled}
+                onChange={handleChange}
+              />
+              <span>
+                Recevoir les nouveautés, offres et conseils de préparation par email.
+                <small>Les emails de sécurité restent envoyés séparément.</small>
+              </span>
             </label>
             <button type="submit" disabled={saving} className={styles.submitBtn}>
               {saving ? t.profilePage.saving : t.profilePage.saveChanges}

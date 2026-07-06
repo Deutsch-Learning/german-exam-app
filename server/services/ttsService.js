@@ -478,7 +478,12 @@ const findElevenLabsVoice = async (apiKey, speaker = {}) => {
   return voiceId;
 };
 
+let audioAssetSchemaPromise = null;
+
 const ensureAudioAssetSchema = async (pool) => {
+  if (audioAssetSchemaPromise) return audioAssetSchemaPromise;
+
+  audioAssetSchemaPromise = (async () => {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS exam_audio_assets (
       id SERIAL PRIMARY KEY,
@@ -513,6 +518,12 @@ const ensureAudioAssetSchema = async (pool) => {
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS exam_audio_assets_exam_idx ON exam_audio_assets(source_exam_id, updated_at DESC);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS exam_audio_assets_status_idx ON exam_audio_assets(status, updated_at DESC);`);
+  })().catch((err) => {
+    audioAssetSchemaPromise = null;
+    throw err;
+  });
+
+  return audioAssetSchemaPromise;
 };
 
 const buildAudioContentHash = (audio, provider = getConfiguredProvider()) =>
