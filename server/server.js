@@ -589,14 +589,6 @@ async function ensureSchema() {
       WHERE reset_token_hash IS NOT NULL;
   `);
   await pool.query(`
-    UPDATE users
-    SET email_verified = TRUE,
-        email_verified_at = COALESCE(email_verified_at, NOW())
-    WHERE email_verified = FALSE
-      AND verification_token_hash IS NULL;
-  `);
-
-  await pool.query(`
     CREATE TABLE IF NOT EXISTS simulations (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
