@@ -40,10 +40,6 @@ import tunisiaFlag from "../assets/images/tunisia.png";
 import turkeyFlag from "../assets/images/turkey.png";
 import unitedKingdomFlag from "../assets/images/united-kingdom.png";
 import unitedStatesFlag from "../assets/images/united-states.png";
-import duolingoLogo from "../assets/images/Duolingo-logo.png";
-import goetheInstitutLogo from "../assets/images/goethe_institut.png";
-import tuBerlinLogo from "../assets/images/TU-Berlin.png";
-import bmflLogo from "../assets/images/BMFL.png";
 import Navbar from "../components/landing/Navbar";
 import Footer from "../components/landing/Footer";
 import StatCard from "../components/landing/StatCard";
@@ -380,10 +376,7 @@ export default function LandingPage() {
         <div className="container">
           <h2 className="section-title">{copy.partners}</h2>
           <div className="partners-grid">
-            <img src={duolingoLogo} alt="Duolingo" />
-            <img src={goetheInstitutLogo} alt="Goethe Institut" />
-            <img src={tuBerlinLogo} alt="TU Berlin" />
-            <img src={bmflLogo} alt="BMFL" />
+    
           </div>
         </div>
       </section>
