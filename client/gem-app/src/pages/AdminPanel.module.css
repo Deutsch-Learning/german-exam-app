@@ -1192,6 +1192,78 @@
   gap: 18px;
 }
 
+.hoerenFoundationForm {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(150px, 0.35fr) minmax(130px, 0.25fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.hoerenSummaryGrid,
+.hoerenMarkerGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.hoerenSummaryGrid span,
+.hoerenMarkerGrid span {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 12px;
+  color: #475569;
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.hoerenSummaryGrid strong,
+.hoerenMarkerGrid strong {
+  display: block;
+  color: #0f172a;
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+
+.hoerenMarkerGrid .markerOk {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.hoerenMarkerGrid .markerMissing {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.hoerenPreviewBox {
+  display: grid;
+  gap: 8px;
+}
+
+.hoerenPreviewBox strong {
+  color: #334155;
+  font-size: 0.9rem;
+}
+
+.hoerenPreviewBox pre {
+  max-height: 340px;
+  overflow: auto;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 14px;
+  font-size: 0.83rem;
+  line-height: 1.55;
+}
+
 .importHistory {
   display: grid;
   gap: 8px;
@@ -1815,7 +1887,10 @@
   .cmsToolbar,
   .cmsWorkspace,
   .cmsLoadingWorkspace,
-  .intakeGrid {
+  .intakeGrid,
+  .hoerenFoundationForm,
+  .hoerenSummaryGrid,
+  .hoerenMarkerGrid {
     grid-template-columns: 1fr;
   }
 
@@ -1861,7 +1936,9 @@
   }
 
   .cmsStatGrid,
-  .filterRow {
+  .filterRow,
+  .hoerenSummaryGrid,
+  .hoerenMarkerGrid {
     grid-template-columns: 1fr;
   }
 }

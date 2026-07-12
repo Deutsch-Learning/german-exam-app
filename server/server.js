@@ -15,11 +15,13 @@ const { createAuthMiddleware } = require("./middleware/auth");
 const adminMiddleware = require("./middleware/admin");
 const {
   analyzeExamDocument,
+  buildListeningImportFoundation,
   ensureDocumentImportSchema,
   getExamImportDraft,
   importParsedExamDocument,
   publishExamImportDraft,
   saveExamImportDraft,
+  saveListeningImportFoundationDraft,
   summarizeOutline,
   updateExamImportDraft,
   validateImportDraftContent,
@@ -4091,6 +4093,46 @@ app.post("/api/admin/exams/import-wizard/analyze", requireAdmin, documentUpload.
   } catch (err) {
     console.error("Import wizard analysis failed", err);
     return res.status(400).json({ ok: false, error: err.message || "Import wizard analysis failed" });
+  }
+});
+
+app.post("/api/admin/hoeren-import/foundation", requireAdmin, documentUpload.single("document"), async (req, res) => {
+  try {
+    if (!req.file?.buffer) {
+      return res.status(400).json({ ok: false, error: "DOCX document file is required" });
+    }
+    const filename = req.file.originalname || "";
+    if (!/\.docx$/i.test(filename)) {
+      return res.status(400).json({ ok: false, error: "Only DOCX files are supported in the Hören foundation step" });
+    }
+    const foundation = await buildListeningImportFoundation({
+      buffer: req.file.buffer,
+      filename,
+      mimetype: req.file.mimetype,
+      provider: req.body?.provider,
+      level: req.body?.level,
+    });
+    const saved = await saveListeningImportFoundationDraft({
+      pool,
+      foundation,
+      adminId: req.user.id,
+    });
+    await auditAdminAction(req, "hoeren_import.foundation_draft", "document_import", saved.import?.id || foundation.documentHash, {
+      duplicate: saved.duplicate,
+      filename,
+      provider: foundation.metadata.provider,
+      level: foundation.metadata.level,
+      markers: foundation.draft.markerCounts,
+    });
+    return res.status(saved.duplicate ? 200 : 201).json({
+      ok: true,
+      duplicate: saved.duplicate,
+      import: saved.import,
+      draft: saved.draft,
+    });
+  } catch (err) {
+    console.error("Hören import foundation failed", err);
+    return res.status(400).json({ ok: false, error: err.message || "Hören import foundation failed" });
   }
 });
 

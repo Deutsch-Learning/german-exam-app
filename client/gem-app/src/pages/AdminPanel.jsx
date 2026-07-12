@@ -370,6 +370,7 @@ function AdminShell({ children }) {
     { to: "/admin/dashboard", label: "Dashboard", icon: BarChart3 },
     { to: "/admin/users", label: "Users", icon: Users },
     { to: "/admin/exams", label: "Exams", icon: FileJson },
+    { to: "/admin/hoeren-studio", label: "Hören Studio", icon: Headphones },
     { to: "/admin/api-usage", label: "API usage", icon: Activity },
     { to: "/admin/exports", label: "Exports", icon: Download },
   ];
@@ -3853,6 +3854,145 @@ function QuestionForm({ draft, exam, sections, onChange, onSubmit, onCancel, bus
   );
 }
 
+function AdminHoerenStudio() {
+  const [file, setFile] = useState(null);
+  const [provider, setProvider] = useState("");
+  const [level, setLevel] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [result, setResult] = useState(null);
+
+  const submitFoundation = async (event) => {
+    event.preventDefault();
+    if (!file) return;
+    setBusy(true);
+    setError("");
+    setResult(null);
+    try {
+      const formData = new FormData();
+      formData.append("document", file);
+      if (provider) formData.append("provider", provider);
+      if (level) formData.append("level", level);
+      const res = await API.post("/api/admin/hoeren-import/foundation", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+        timeout: 120000,
+      });
+      setResult(res.data);
+    } catch (err) {
+      setError(err.response?.data?.error ?? "Hören foundation upload failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const draft = result?.draft;
+  const markerCounts = draft?.markerCounts ?? {};
+  const hierarchy = draft?.hierarchy ?? {};
+  const warnings = draft?.validation?.warnings ?? [];
+
+  return (
+    <>
+      <Header
+        title="Hören Import & Audio Studio"
+        subtitle="STEP 1 foundation: upload a DOCX, detect provider/level, validate required markers, and save a safe draft."
+      />
+      {error ? <p className={styles.error}>{error}</p> : null}
+      <section className={styles.panel}>
+        <div className={styles.panelHeader}>
+          <div>
+            <h2>DOCX foundation upload</h2>
+            <p className={styles.panelHint}>
+              This screen does not publish exams, generate audio, or expose transcripts to students. Full parsing begins in STEP 2.
+            </p>
+          </div>
+          <span className={styles.badge}>
+            <Headphones size={14} />
+            Admin only
+          </span>
+        </div>
+        <form className={styles.hoerenFoundationForm} onSubmit={submitFoundation}>
+          <label className={styles.field}>Hören DOCX
+            <input
+              type="file"
+              accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              onChange={(event) => {
+                setFile(event.target.files?.[0] ?? null);
+                setResult(null);
+                setError("");
+              }}
+            />
+          </label>
+          <label className={styles.field}>Provider override
+            <select value={provider} onChange={(event) => setProvider(event.target.value)}>
+              <option value="">Auto-detect</option>
+              <option value="goethe">Goethe</option>
+              <option value="osd">ÖSD</option>
+              <option value="telc">telc</option>
+              <option value="ecl">ECL</option>
+            </select>
+          </label>
+          <label className={styles.field}>Level override
+            <select value={level} onChange={(event) => setLevel(event.target.value)}>
+              <option value="">Auto-detect</option>
+              {LEVEL_OPTIONS.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+          </label>
+          <button className={styles.button} type="submit" disabled={!file || busy}>
+            <Upload size={16} />
+            {busy ? "Saving draft..." : "Create foundation draft"}
+          </button>
+        </form>
+      </section>
+
+      {draft ? (
+        <section className={styles.panel}>
+          <div className={styles.panelHeader}>
+            <div>
+              <h2>Foundation preview</h2>
+              <p className={styles.panelHint}>
+                Draft #{result.import?.id ?? "-"} · {result.duplicate ? "Existing draft reused" : "New draft saved"}
+              </p>
+            </div>
+            <span className={styles.badge}>{draft.metadata?.provider ?? "-"} {draft.metadata?.level ?? ""}</span>
+          </div>
+          <div className={styles.hoerenSummaryGrid}>
+            <span><strong>Provider</strong>{draft.metadata?.provider ?? "-"}</span>
+            <span><strong>Level</strong>{draft.metadata?.level ?? "-"}</span>
+            <span><strong>Series detected</strong>{hierarchy.seriesDetected ?? 0}</span>
+            <span><strong>Teile detected</strong>{hierarchy.teileDetected ?? 0}</span>
+            <span><strong>Audio text blocks</strong>{hierarchy.audioTextBlocksDetected ?? 0}</span>
+            <span><strong>Global duration</strong>{draft.metadata?.globalDurationMinutes ?? "-"} min</span>
+          </div>
+          <div className={styles.hoerenMarkerGrid}>
+            {[
+              ["ADMIN_ONLY_TRANSCRIPT", markerCounts.adminOnlyTranscript],
+              ["AUDIO_ENGINE_SETTINGS", markerCounts.audioEngineSettings],
+              ["STUDENT_VISIBLE_QUESTIONS", markerCounts.studentVisibleQuestions],
+              ["CORRECTION_VISIBLE_AFTER_SUBMIT", markerCounts.correctionVisibleAfterSubmit],
+            ].map(([label, count]) => (
+              <span key={label} className={Number(count) > 0 ? styles.markerOk : styles.markerMissing}>
+                <strong>{label}</strong>
+                {count ?? 0}
+              </span>
+            ))}
+          </div>
+          {warnings.length ? (
+            <ul className={styles.warningList}>
+              {warnings.map((warning) => <li key={warning}>{warning}</li>)}
+            </ul>
+          ) : (
+            <p className={styles.status}>No foundation warnings detected.</p>
+          )}
+          <div className={styles.hoerenPreviewBox}>
+            <strong>Raw text preview</strong>
+            <pre>{draft.rawTextPreview}</pre>
+          </div>
+        </section>
+      ) : null}
+    </>
+  );
+}
+
 // eslint-disable-next-line no-unused-vars
 function AdminExamsLegacy() {
   const loader = useCallback(async () => {
@@ -4206,6 +4346,7 @@ export default function AdminPanel() {
         <Route path="dashboard" element={<AdminDashboard />} />
         <Route path="users" element={<AdminUsers />} />
         <Route path="exams" element={<AdminExams />} />
+        <Route path="hoeren-studio" element={<AdminHoerenStudio />} />
         <Route path="api-usage" element={<AdminApiUsage />} />
         <Route path="exports" element={<AdminExports />} />
         <Route path="*" element={<AdminDashboard />} />

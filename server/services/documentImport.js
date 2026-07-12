@@ -155,6 +155,12 @@ const detectLevelFromFilename = (filename = "") => {
   return match ? match[1].toUpperCase() : null;
 };
 
+const normalizeListeningProvider = (value) => {
+  const provider = normalizeDetectedProvider(value);
+  if (["goethe", "telc", "ecl", "osd"].includes(provider)) return provider;
+  return provider || "custom";
+};
+
 const detectSectionTypeFromFilename = (filename = "") => {
   const normalized = slugify(filename);
   if (normalized.includes("sprachbausteine") || normalized.includes("sprachbaustein")) return "sprach";
@@ -214,6 +220,93 @@ const extractPoints = (value) => {
 };
 
 const trimForDb = (value, max = MAX_PROMPT_CHARS) => compactText(value).slice(0, max);
+
+const countMarker = (text, marker) => {
+  const regex = new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g");
+  return [...String(text ?? "").matchAll(regex)].length;
+};
+
+const buildListeningImportFoundation = async ({ buffer, filename, mimetype, provider, level }) => {
+  const raw = await mammoth.extractRawText({ buffer });
+  const text = normalizeText(raw.value || "");
+  const detectedProvider = normalizeListeningProvider(provider || detectProviderFromFilename(filename) || detectProvider(text));
+  const detectedLevel = String(level || detectLevelFromFilename(filename) || detectLevel(text) || "").toUpperCase() || null;
+  const validationWarnings = [];
+  const markers = {
+    adminOnlyTranscript: countMarker(text, "ADMIN_ONLY_TRANSCRIPT"),
+    audioEngineSettings: countMarker(text, "AUDIO_ENGINE_SETTINGS"),
+    studentVisibleQuestions: countMarker(text, "STUDENT_VISIBLE_QUESTIONS"),
+    correctionVisibleAfterSubmit: countMarker(text, "CORRECTION_VISIBLE_AFTER_SUBMIT"),
+  };
+
+  if (!text) validationWarnings.push("The uploaded DOCX did not produce readable text.");
+  if (!detectedProvider || detectedProvider === "custom") validationWarnings.push("Provider could not be confidently detected.");
+  if (!detectedLevel) validationWarnings.push("Level could not be confidently detected.");
+  if (!markers.adminOnlyTranscript) validationWarnings.push("ADMIN_ONLY_TRANSCRIPT marker was not detected.");
+  if (!markers.audioEngineSettings) validationWarnings.push("AUDIO_ENGINE_SETTINGS marker was not detected.");
+  if (!markers.studentVisibleQuestions) validationWarnings.push("STUDENT_VISIBLE_QUESTIONS marker was not detected.");
+  if (!markers.correctionVisibleAfterSubmit) validationWarnings.push("CORRECTION_VISIBLE_AFTER_SUBMIT marker was not detected.");
+
+  const teilMatches = [...text.matchAll(/\bTeil\s+(\d+)\b/gi)];
+  const textMatches = [...text.matchAll(/\bText\s+(\d+)\b/gi)];
+  const seriesMatches = [...text.matchAll(/\b(?:Sujet|Simulation|Modellpr.fung|Modellprüfung|Pr.fung|Prüfung)\s+(\d+)\b/gi)];
+  const duplicateCheck = new Set();
+  let duplicateIdentifiers = 0;
+  [...teilMatches, ...textMatches, ...seriesMatches].forEach((match) => {
+    const key = `${match[0].toLowerCase()}@${match.index}`;
+    if (duplicateCheck.has(key)) duplicateIdentifiers += 1;
+    duplicateCheck.add(key);
+  });
+
+  const draft = {
+    type: "listening_import_foundation",
+    parserVersion: `${IMPORT_ANALYZER_VERSION}.hoeren.foundation`,
+    filename,
+    mimetype,
+    metadata: {
+      provider: detectedProvider,
+      examType: detectExamType(text, detectedProvider, detectedLevel),
+      level: detectedLevel,
+      sectionType: "listen",
+      title: compactText(text).split("\n")[0] || filename,
+      globalDurationMinutes: extractDurationMinutes(text),
+    },
+    hierarchy: {
+      provider: detectedProvider,
+      level: detectedLevel,
+      seriesDetected: new Set(seriesMatches.map((match) => Number(match[1]))).size,
+      teileDetected: new Set(teilMatches.map((match) => Number(match[1]))).size,
+      audioTextBlocksDetected: new Set(textMatches.map((match) => Number(match[1]))).size,
+    },
+    markerCounts: markers,
+    validation: {
+      errors: [],
+      warnings: [
+        ...validationWarnings,
+        ...(duplicateIdentifiers ? [`${duplicateIdentifiers} duplicate marker identifiers need review.`] : []),
+      ],
+    },
+    rawTextPreview: text.slice(0, 1800),
+    sourceDocument: {
+      hash: hashBuffer(buffer),
+      filename,
+      sizeBytes: buffer.length,
+      mimetype,
+    },
+    note: "STEP 1 draft only. Full marker parsing starts in STEP 2.",
+  };
+
+  return {
+    documentHash: draft.sourceDocument.hash,
+    filename,
+    mimetype,
+    sizeBytes: buffer.length,
+    rawTextPreview: draft.rawTextPreview,
+    metadata: draft.metadata,
+    validation: draft.validation,
+    draft,
+  };
+};
 
 const buildFallbackQuestion = ({ sectionType, prompt, position, questionType = "compound" }) => ({
   questionType,
@@ -3496,6 +3589,55 @@ const ensureDocumentImportSchema = async (pool) => {
   await pool.query(`ALTER TABLE exam_questions ADD COLUMN IF NOT EXISTS audio JSONB NOT NULL DEFAULT '{}'::jsonb;`);
   await pool.query(`ALTER TABLE exam_questions ADD COLUMN IF NOT EXISTS scoring JSONB NOT NULL DEFAULT '{}'::jsonb;`);
   await pool.query(`ALTER TABLE exam_questions ADD COLUMN IF NOT EXISTS source_metadata JSONB NOT NULL DEFAULT '{}'::jsonb;`);
+  await pool.query(`ALTER TABLE exam_sections ADD COLUMN IF NOT EXISTS global_duration_minutes INTEGER;`);
+  await pool.query(`ALTER TABLE exam_sections ADD COLUMN IF NOT EXISTS listening_count INTEGER;`);
+  await pool.query(`ALTER TABLE exam_sections ADD COLUMN IF NOT EXISTS audio_generation_status TEXT NOT NULL DEFAULT 'draft';`);
+  await pool.query(`ALTER TABLE exam_sections ADD COLUMN IF NOT EXISTS source_metadata JSONB NOT NULL DEFAULT '{}'::jsonb;`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS exam_listening_audio_items (
+      id SERIAL PRIMARY KEY,
+      exam_id INTEGER NOT NULL REFERENCES exams(id) ON DELETE CASCADE,
+      section_id INTEGER REFERENCES exam_sections(id) ON DELETE CASCADE,
+      source_import_id INTEGER REFERENCES exam_document_imports(id) ON DELETE SET NULL,
+      provider TEXT NOT NULL,
+      level TEXT,
+      series_number INTEGER,
+      part_number INTEGER NOT NULL DEFAULT 1,
+      item_number INTEGER NOT NULL DEFAULT 1,
+      title TEXT NOT NULL,
+      instructions TEXT,
+      admin_transcript TEXT,
+      audio_engine_settings JSONB NOT NULL DEFAULT '{}'::jsonb,
+      listening_count INTEGER,
+      duration_seconds NUMERIC(10,2),
+      generated_audio_url TEXT,
+      generated_audio_asset_id INTEGER,
+      audio_generation_status TEXT NOT NULL DEFAULT 'draft'
+        CHECK (audio_generation_status IN ('draft', 'queued', 'generating', 'generated', 'approved', 'published', 'failed')),
+      validation_warnings JSONB NOT NULL DEFAULT '[]'::jsonb,
+      source_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      position INTEGER NOT NULL DEFAULT 0,
+      created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`ALTER TABLE exam_listening_audio_items ADD COLUMN IF NOT EXISTS source_import_id INTEGER REFERENCES exam_document_imports(id) ON DELETE SET NULL;`);
+  await pool.query(`ALTER TABLE exam_listening_audio_items ADD COLUMN IF NOT EXISTS generated_audio_asset_id INTEGER;`);
+  await pool.query(`ALTER TABLE exam_listening_audio_items ADD COLUMN IF NOT EXISTS validation_warnings JSONB NOT NULL DEFAULT '[]'::jsonb;`);
+  await pool.query(`ALTER TABLE exam_listening_audio_items ENABLE ROW LEVEL SECURITY;`);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS exam_listening_audio_items_lookup_idx
+      ON exam_listening_audio_items(exam_id, part_number, position, item_number);
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS exam_listening_audio_items_status_idx
+      ON exam_listening_audio_items(audio_generation_status, updated_at DESC);
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS exam_listening_audio_items_import_idx
+      ON exam_listening_audio_items(source_import_id);
+  `);
 };
 
 const summarizeOutline = (parsed = {}) => ({
@@ -3705,6 +3847,91 @@ const saveExamImportDraft = async ({ pool, parsed, adminId = null }) => {
   };
 };
 
+const saveListeningImportFoundationDraft = async ({ pool, foundation, adminId = null }) => {
+  await ensureDocumentImportSchema(pool);
+  const existing = await pool.query(`SELECT * FROM exam_document_imports WHERE document_hash = $1 LIMIT 1`, [
+    foundation.documentHash,
+  ]);
+  const existingRow = existing.rows[0];
+  if (existingRow && existingRow.section_type === "listen") {
+    return {
+      duplicate: true,
+      import: existingRow,
+      draft: existingRow.draft_content && Object.keys(existingRow.draft_content).length
+        ? existingRow.draft_content
+        : foundation.draft,
+    };
+  }
+
+  const params = [
+    foundation.documentHash,
+    foundation.filename,
+    foundation.mimetype || null,
+    foundation.sizeBytes,
+    foundation.metadata.provider,
+    foundation.metadata.examType,
+    foundation.metadata.level,
+    foundation.draft.hierarchy.seriesDetected || 0,
+    foundation.draft.hierarchy.teileDetected || 0,
+    JSON.stringify(foundation.validation.warnings || []),
+    JSON.stringify({
+      title: foundation.metadata.title,
+      hierarchy: foundation.draft.hierarchy,
+      markerCounts: foundation.draft.markerCounts,
+    }),
+    JSON.stringify(foundation.draft),
+    JSON.stringify({
+      providerDetected: foundation.metadata.provider !== "custom",
+      levelDetected: Boolean(foundation.metadata.level),
+      requiredMarkersDetected: foundation.draft.markerCounts,
+    }),
+    adminId,
+  ];
+
+  const result = existingRow
+    ? await pool.query(
+        `UPDATE exam_document_imports
+         SET filename = $2,
+             mime_type = $3,
+             size_bytes = $4,
+             provider = $5,
+             exam_type = $6,
+             level = $7,
+             section_type = 'listen',
+             total_series = $8,
+             total_sections = $9,
+             total_questions = 0,
+             extraction_method = 'docx-marker-foundation',
+             parse_status = 'draft',
+             validation_warnings = $10::jsonb,
+             raw_outline = $11::jsonb,
+             draft_content = $12::jsonb,
+             confidence = $13::jsonb,
+             error_message = NULL,
+             updated_at = NOW()
+         WHERE document_hash = $1
+         RETURNING *`,
+        params.slice(0, 13)
+      )
+    : await pool.query(
+        `INSERT INTO exam_document_imports (
+           document_hash, filename, mime_type, size_bytes, provider, exam_type, level,
+           section_type, total_series, total_sections, total_questions, extraction_method,
+           parse_status, validation_warnings, raw_outline, draft_content, confidence, created_by, updated_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'listen', $8, $9, 0, 'docx-marker-foundation',
+           'draft', $10::jsonb, $11::jsonb, $12::jsonb, $13::jsonb, $14, NOW())
+         RETURNING *`,
+        params
+      );
+
+  return {
+    duplicate: false,
+    import: result.rows[0],
+    draft: foundation.draft,
+  };
+};
+
 const getExamImportDraft = async ({ pool, importId }) => {
   await ensureDocumentImportSchema(pool);
   const result = await pool.query(`SELECT * FROM exam_document_imports WHERE id = $1`, [importId]);
@@ -3852,11 +4079,13 @@ const importParsedExamDocument = async ({ pool, parsed, adminId = null }) => {
 
 module.exports = {
   analyzeExamDocument,
+  buildListeningImportFoundation,
   ensureDocumentImportSchema,
   getExamImportDraft,
   importParsedExamDocument,
   publishExamImportDraft,
   saveExamImportDraft,
+  saveListeningImportFoundationDraft,
   summarizeOutline,
   updateExamImportDraft,
   validateImportDraftContent,
