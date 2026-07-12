@@ -8,6 +8,7 @@ import { getAuthUser } from "../utils/access";
 import {
   certificationOptions,
   enrichPricingPlan,
+  enterpriseOffers,
   formatEuro,
   pricingSections,
 } from "../data/pricingPlans";
@@ -122,6 +123,7 @@ const CheckoutModal = ({
 export default function OffersPage() {
   const navigate = useNavigate();
   const [selectedPlan, setSelectedPlan] = useState(null);
+  const [selectedEnterpriseOffer, setSelectedEnterpriseOffer] = useState(null);
   const [selectedCertifications, setSelectedCertifications] = useState([]);
   const [checkout, setCheckout] = useState(null);
   const [checkoutError, setCheckoutError] = useState("");
@@ -251,10 +253,74 @@ export default function OffersPage() {
           </section>
         ))}
 
+        <section className="enterprise-pricing-section" aria-labelledby="enterprise-pricing-title">
+          <div className="enterprise-pricing-heading">
+            <p className="pricing-kicker">OFFRES ÉCOLES & INSTITUTIONS</p>
+            <h2 id="enterprise-pricing-title">Paiement entreprise</h2>
+            <p>
+              Packs conçus pour les écoles, centres de langue et partenaires qui veulent préparer plusieurs apprenants B1 et B2.
+            </p>
+          </div>
+          <div className="enterprise-card-grid">
+            {enterpriseOffers.map((offer) => (
+              <article className="enterprise-card" key={offer.offerKey}>
+                <div className="enterprise-card-top">
+                  <span>{offer.subtitle}</span>
+                  <h3>{offer.label}</h3>
+                  <PriceText value={offer.displayPrice} />
+                </div>
+                <div className="enterprise-card-body">
+                  <p>{offer.description}</p>
+                  <dl>
+                    <div><dt>Accès</dt><dd>{offer.accessLabel}</dd></div>
+                    <div><dt>Facturation</dt><dd>{offer.billedLabel}</dd></div>
+                    <div><dt>Simulations orales</dt><dd>{offer.speakingSimulatorQuota}</dd></div>
+                    <div><dt>Modules</dt><dd>B1 + B2 · Goethe, ÖSD, TELC, ECL</dd></div>
+                  </dl>
+                  <button className="enterprise-button" type="button" onClick={() => setSelectedEnterpriseOffer(offer)}>
+                    <CreditCard size={17} />
+                    Préparer le paiement
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+
         <p className="pricing-footer-note">
           Tarifs valables pour les certifications ciblées : Goethe, ÖSD, TELC, ECL, à niveau et durée équivalents.
         </p>
       </main>
+
+      {selectedEnterpriseOffer ? (
+        <div className="pricing-modal-backdrop" role="presentation" onMouseDown={() => setSelectedEnterpriseOffer(null)}>
+          <section
+            className="pricing-modal enterprise-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="enterprise-modal-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <button className="pricing-modal-close" type="button" aria-label="Fermer" onClick={() => setSelectedEnterpriseOffer(null)}>
+              <X size={18} />
+            </button>
+            <p className="pricing-kicker">Paiement entreprise</p>
+            <h2 id="enterprise-modal-title">{selectedEnterpriseOffer.label}</h2>
+            <div className="pricing-modal-summary">
+              <span>Prix</span><strong>{formatEuro(selectedEnterpriseOffer.priceEur)}</strong>
+              <span>Accès</span><strong>{selectedEnterpriseOffer.accessLabel}</strong>
+              <span>Facturation</span><strong>{selectedEnterpriseOffer.billedLabel}</strong>
+              <span>Simulations orales</span><strong>{selectedEnterpriseOffer.speakingSimulatorQuota}</strong>
+            </div>
+            <p className="pricing-modal-message">
+              Le paiement automatique entreprise sera connecté au prestataire de paiement vérifié. Pour l’instant, ce pack est prêt pour activation manuelle par l’admin après validation du paiement.
+            </p>
+            <Link className="pricing-modal-button" to="/contact">
+              Demander l’activation
+            </Link>
+          </section>
+        </div>
+      ) : null}
 
       <CheckoutModal
         plan={selectedPlan}

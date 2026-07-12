@@ -2149,6 +2149,60 @@ const attachGeneratedListeningAudio = async ({ examId, audio, provider }) => {
   };
 };
 
+const stripPublicListeningTranscriptFields = (value) => {
+  if (Array.isArray(value)) {
+    return value.map(stripPublicListeningTranscriptFields);
+  }
+  if (!value || typeof value !== "object") return value;
+
+  const next = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (["transcript", "adminTranscript", "admin_transcript", "script", "prompt", "timing", "sfx", "ambience"].includes(key)) {
+      continue;
+    }
+    next[key] = stripPublicListeningTranscriptFields(child);
+  }
+  return next;
+};
+
+const buildPublicListeningAudioSummary = (listeningAudioItems = []) => {
+  const firstItem = Array.isArray(listeningAudioItems) ? listeningAudioItems[0] : null;
+  if (!firstItem) {
+    return {
+      title: "Hören",
+      speaker: "Standarddeutsch",
+      audioUrl: "",
+      productionStatus: "missing",
+      listeningCount: 2,
+    };
+  }
+
+  const metadata = asJsonObject(firstItem.source_metadata);
+  const isBrowserFallback = metadata.browserTtsFallback === true;
+  const speechText = isBrowserFallback ? stripProductionMarkers(firstItem.admin_transcript || "") : "";
+  return {
+    id: `audio-item-${firstItem.id}`,
+    title: firstItem.title || `Audio ${firstItem.item_number || 1}`,
+    speaker: "Standarddeutsch",
+    audioUrl: firstItem.asset_id ? `/api/audio/generated/${firstItem.asset_id}` : "",
+    fallbackEngine: isBrowserFallback ? "browser-speech" : "",
+    productionLabel: isBrowserFallback ? "Browser TTS (no MP3)" : "MP3",
+    transcript: speechText,
+    tracks: isBrowserFallback ? [{
+      id: `browser-tts-${firstItem.id}`,
+      title: firstItem.title || `Audio ${firstItem.item_number || 1}`,
+      transcript: speechText,
+      audio: { transcript: speechText },
+    }] : [],
+    speakers: Array.isArray(firstItem.voice_profile_map) ? firstItem.voice_profile_map : [],
+    productionStatus: "ready",
+    listeningCount: Number(firstItem.listening_count) || 2,
+    durationSeconds: Number(firstItem.duration_seconds) || null,
+    partNumber: Number(firstItem.part_number) || 1,
+    itemNumber: Number(firstItem.item_number) || 1,
+  };
+};
+
 const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {}, listeningAudioItems = [] }) => {
   const moduleId = exam.section_type;
   const moduleMeta = PUBLIC_MODULE_META[moduleId] ?? PUBLIC_MODULE_META.read;
@@ -2247,12 +2301,12 @@ const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {},
           }
         : undefined,
     audio: moduleId === "listen"
-      ? {
-          ...buildImportedListeningAudio({ title, sourceLabel, sections, questions }),
-          audioUrl: listeningAudioItems[0]?.asset_id ? `/api/audio/generated/${listeningAudioItems[0].asset_id}` : "",
-          productionStatus: listeningAudioItems.length ? "ready" : "missing",
-          listeningCount: Number(listeningAudioItems[0]?.listening_count) || 2,
-        }
+      ? (() => {
+          const audioSummary = buildPublicListeningAudioSummary(listeningAudioItems);
+          return audioSummary.fallbackEngine === "browser-speech"
+            ? audioSummary
+            : stripPublicListeningTranscriptFields(audioSummary);
+        })()
       : undefined,
     tasks,
     sourceExamId: exam.id,

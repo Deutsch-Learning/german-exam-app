@@ -85,6 +85,42 @@ export const pricingSections = [
   },
 ];
 
+export const enterpriseOffers = [
+  {
+    offerKey: "industrial_1_month",
+    label: "Établissement 1 mois",
+    subtitle: "Accès école intensif",
+    priceEur: 450.99,
+    displayPrice: "€450,99",
+    accessLabel: "1 mois",
+    billedLabel: "1 mois facturé",
+    speakingSimulatorQuota: 240,
+    description: "Pour classes, centres de langue et groupes de préparation.",
+  },
+  {
+    offerKey: "industrial_6_months",
+    label: "Établissement 6 mois",
+    subtitle: "Programme semestriel",
+    priceEur: 2500.99,
+    displayPrice: "€2500,99",
+    accessLabel: "6 mois",
+    billedLabel: "6 mois facturés",
+    speakingSimulatorQuota: 600,
+    description: "Pour un suivi long avec plusieurs cohortes B1 et B2.",
+  },
+  {
+    offerKey: "industrial_12_plus_2",
+    label: "Établissement annuel",
+    subtitle: "12 mois payés + 2 mois offerts",
+    priceEur: 5000.99,
+    displayPrice: "€5000,99",
+    accessLabel: "14 mois",
+    billedLabel: "12 mois facturés",
+    speakingSimulatorQuota: 1000,
+    description: "Pour écoles et institutions avec un volume élevé de simulations.",
+  },
+];
+
 export const buildPlanId = (level, planKey) =>
   `${String(level || "").toLowerCase()}-${String(planKey || "").toLowerCase()}`;
 

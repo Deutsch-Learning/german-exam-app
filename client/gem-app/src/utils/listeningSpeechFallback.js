@@ -2,8 +2,8 @@ const WORDS_PER_MINUTE = 132;
 const MAX_UTTERANCE_CHARS = 220;
 const VOICE_LOAD_TIMEOUT_MS = 2600;
 const VOICE_LOAD_RETRY_MS = 180;
-const DEFAULT_TURN_PAUSE_MS = 220;
-const DEFAULT_SEGMENT_PAUSE_MS = 120;
+const DEFAULT_TURN_PAUSE_MS = 280;
+const DEFAULT_SEGMENT_PAUSE_MS = 130;
 
 const NAME_GENDER_HINTS = {
   female: [
@@ -248,9 +248,15 @@ const normalizeSpeechRate = (...values) => {
 };
 
 const getGenderPitch = (gender) => {
-  if (gender === "male") return 0.9;
-  if (gender === "female") return 1.06;
+  if (gender === "male") return 0.76;
+  if (gender === "female") return 1.18;
   return 1;
+};
+
+const getGenderRateOffset = (gender) => {
+  if (gender === "male") return -0.04;
+  if (gender === "female") return 0.03;
+  return 0;
 };
 
 const isProbablyMobile = () => {
@@ -320,7 +326,7 @@ export const buildListeningVoicePlan = ({ audio = {}, voices = [] } = {}) => {
       voice,
       voiceName: voice?.name || "Browser default German voice",
       lang: voice?.lang || "de-DE",
-      rate: normalizeSpeechRate(setting.speed, setting.rate, audio.rate),
+      rate: Math.max(0.76, Math.min(1.03, normalizeSpeechRate(setting.speed, setting.rate, audio.rate) + getGenderRateOffset(gender))),
       pitch: getGenderPitch(gender),
     });
   });
