@@ -111,6 +111,11 @@ const handleItem = async (item, profiles, { force = false, provider = "elevenlab
               generated_audio_url = $3,
               audio_generation_status = 'published',
               voice_profile_map = $4::jsonb,
+              source_metadata = (COALESCE(source_metadata, '{}'::jsonb)
+                - 'browserTtsFallback'
+                - 'fallbackEngine'
+                - 'fallbackReason'
+                - 'fallbackMarkedAt') || jsonb_build_object('mp3GeneratedAt', NOW()),
               approved_at = COALESCE(approved_at, NOW()),
               published_at = NOW(),
               generation_log = COALESCE(generation_log, '[]'::jsonb) || $5::jsonb,

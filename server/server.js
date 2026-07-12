@@ -4205,6 +4205,11 @@ app.post("/api/admin/listening-audio/items/:itemId/generate", requireAdmin, asyn
               generated_audio_url = $3,
               audio_generation_status = 'generated',
               voice_profile_map = $4::jsonb,
+              source_metadata = (COALESCE(source_metadata, '{}'::jsonb)
+                - 'browserTtsFallback'
+                - 'fallbackEngine'
+                - 'fallbackReason'
+                - 'fallbackMarkedAt') || jsonb_build_object('mp3GeneratedAt', NOW()),
               validation_warnings = COALESCE(validation_warnings, '[]'::jsonb) || $5::jsonb,
               updated_at = NOW()
         WHERE id = $1`,
@@ -4322,6 +4327,11 @@ app.post("/api/admin/listening-audio/generate-batch", requireAdmin, async (req, 
                   generated_audio_url = $3,
                   audio_generation_status = $4,
                   voice_profile_map = $5::jsonb,
+                  source_metadata = (COALESCE(source_metadata, '{}'::jsonb)
+                    - 'browserTtsFallback'
+                    - 'fallbackEngine'
+                    - 'fallbackReason'
+                    - 'fallbackMarkedAt') || jsonb_build_object('mp3GeneratedAt', NOW()),
                   approved_at = CASE WHEN $4 IN ('approved','published') THEN COALESCE(approved_at, NOW()) ELSE approved_at END,
                   published_at = CASE WHEN $4 = 'published' THEN NOW() ELSE published_at END,
                   validation_warnings = COALESCE(validation_warnings, '[]'::jsonb) || $6::jsonb,
