@@ -40,12 +40,15 @@ const {
 const {
   buildAudioContentHash,
   ensureAudioAssetSchema,
+  ensureVoiceProfileSchema,
   generateAndStoreExamAudio,
   getAudioAssetById,
   getAudioAssetForExam,
   getConfiguredProvider,
   getProviderStatus,
+  getVoiceProfiles,
   normalizeProvider,
+  stripProductionMarkers,
   TtsConfigurationError,
 } = require("./services/ttsService");
 const {
@@ -1620,7 +1623,14 @@ const buildTaskPartMeta = (question, index = 0) => {
   };
 };
 
-const buildListeningTask = (question, index = 0) => {
+const resolveListeningAudioForQuestion = (question, listeningAudioMap = new Map()) => {
+  const metadata = asJsonObject(question.source_metadata);
+  const partNumber = Number(question.part_number) || Number(question.section_position) || Number(metadata.partNumber) || 1;
+  const itemNumber = Number(metadata.textNumber || metadata.audioItemNumber || metadata.itemNumber) || 1;
+  return listeningAudioMap.get(`${partNumber}:${itemNumber}`) || listeningAudioMap.get(`${partNumber}:1`) || null;
+};
+
+const buildListeningTask = (question, index = 0, listeningAudioMap = new Map()) => {
   const questionType = String(question.question_type || "").toLowerCase();
   const correctValue = extractCorrectValue(question.correct_answer);
   const options = normalizeChoiceOptions(question.options)
@@ -1635,6 +1645,7 @@ const buildListeningTask = (question, index = 0) => {
     hint: "Hören Sie den Audiotext aufmerksam und beantworten Sie die Aufgaben.",
     explanation: question.explanation || "Antwort aus dem importierten Hörverstehen-Modul.",
     sourceQuestionId: question.id,
+    audio: resolveListeningAudioForQuestion(question, listeningAudioMap),
     contentStyle: asJsonObject(metadata.contentStyle),
     ...buildTaskPartMeta(question, index),
     partInstructions: LISTENING_STUDENT_INSTRUCTION,
@@ -1923,7 +1934,7 @@ const attachGeneratedListeningAudio = async ({ examId, audio, provider }) => {
   };
 };
 
-const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {} }) => {
+const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {}, listeningAudioItems = [] }) => {
   const moduleId = exam.section_type;
   const moduleMeta = PUBLIC_MODULE_META[moduleId] ?? PUBLIC_MODULE_META.read;
   const metadata = asJsonObject(exam.metadata);
@@ -1949,12 +1960,43 @@ const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {} 
   }));
 
   let tasks;
+  const listeningAudioMap = new Map(
+    (Array.isArray(listeningAudioItems) ? listeningAudioItems : []).map((item) => {
+      const isBrowserFallback = asJsonObject(item.source_metadata).browserTtsFallback === true;
+      const speechText = isBrowserFallback ? stripProductionMarkers(item.admin_transcript || "") : "";
+      return [
+        `${Number(item.part_number) || 1}:${Number(item.item_number) || 1}`,
+        {
+        id: `audio-item-${item.id}`,
+        title: item.title || `Audio ${item.item_number || 1}`,
+        speaker: "Standarddeutsch",
+        audioUrl: item.asset_id ? `/api/audio/generated/${item.asset_id}` : "",
+        fallbackEngine: isBrowserFallback ? "browser-speech" : "",
+        productionLabel: isBrowserFallback ? "Browser TTS (no MP3)" : "MP3",
+        transcript: speechText,
+        tracks: isBrowserFallback ? [{
+          id: `browser-tts-${item.id}`,
+          title: item.title || `Audio ${item.item_number || 1}`,
+          transcript: speechText,
+          audio: { transcript: speechText },
+        }] : [],
+        speakers: Array.isArray(item.voice_profile_map) ? item.voice_profile_map : [],
+        productionStatus: "ready",
+        listeningCount: Number(item.listening_count) || 2,
+        durationSeconds: Number(item.duration_seconds) || null,
+        partNumber: Number(item.part_number) || 1,
+        itemNumber: Number(item.item_number) || 1,
+        },
+      ];
+    })
+  );
+
   if (moduleId === "write") {
     tasks = questions.map((question, index) => buildWritingTask(question, index));
   } else if (moduleId === "speak") {
     tasks = questions.map((question, index) => buildSpeakingTask(question, index));
   } else if (moduleId === "listen") {
-    tasks = questions.map((question, index) => buildListeningTask(question, index));
+    tasks = questions.map((question, index) => buildListeningTask(question, index, listeningAudioMap));
   } else {
     tasks = questions.map((question, index) => buildReadingTask(question, index));
   }
@@ -1989,7 +2031,14 @@ const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {} 
               : [{ id: "A", text: "Texte importé depuis le document source." }],
           }
         : undefined,
-    audio: moduleId === "listen" ? buildImportedListeningAudio({ title, sourceLabel, sections, questions }) : undefined,
+    audio: moduleId === "listen"
+      ? {
+          ...buildImportedListeningAudio({ title, sourceLabel, sections, questions }),
+          audioUrl: listeningAudioItems[0]?.asset_id ? `/api/audio/generated/${listeningAudioItems[0].asset_id}` : "",
+          productionStatus: listeningAudioItems.length ? "ready" : "missing",
+          listeningCount: Number(listeningAudioItems[0]?.listening_count) || 2,
+        }
+      : undefined,
     tasks,
     sourceExamId: exam.id,
   };
@@ -2074,18 +2123,14 @@ app.get("/api/exams/:provider/series/:seriesId/:moduleId", async (req, res) => {
       [exam.id]
     );
 
+    const listeningAudioItems = moduleId === "listen" ? await getPublishedAudioItemsForExam(exam.id) : [];
     const content = buildImportedModuleContent({
       exam,
       sections: sections.rows,
       questions: questions.rows,
       routeMeta,
+      listeningAudioItems,
     });
-    if (moduleId === "listen") {
-      content.audio = await attachGeneratedListeningAudio({
-        examId: exam.id,
-        audio: content.audio,
-      });
-    }
     return res.json({ ok: true, source: "database", series, content });
   } catch (err) {
     console.error("Imported module lookup failed", err);
@@ -3428,6 +3473,331 @@ const loadListeningExamAudioContext = async (examId) => {
   };
 };
 
+const ensureListeningAudioProductionSchema = async () => {
+  await ensureDocumentImportSchema(pool);
+  await ensureAudioAssetSchema(pool);
+  await ensureVoiceProfileSchema(pool);
+  await pool.query(`
+    ALTER TABLE exam_listening_audio_items
+      ADD COLUMN IF NOT EXISTS voice_profile_map JSONB NOT NULL DEFAULT '{}'::jsonb,
+      ADD COLUMN IF NOT EXISTS admin_notes TEXT,
+      ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS generation_log JSONB NOT NULL DEFAULT '[]'::jsonb;
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS exam_listening_audio_items_exam_status_idx ON exam_listening_audio_items(exam_id, audio_generation_status, part_number, item_number);`);
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS exam_listening_audio_items_exam_part_item_uidx ON exam_listening_audio_items(exam_id, part_number, item_number);`);
+};
+
+const inferListeningVoiceSettings = ({ transcript, itemNumber, audioSettings = {}, profiles = [] }) => {
+  const text = `${transcript || ""}\n${JSON.stringify(audioSettings || {})}`;
+  const dialogueLabels = Array.from(String(transcript || "").matchAll(/^\s*([^:\n]{2,48})\s*:/gm))
+    .map((match) => match[1].trim())
+    .filter((label) => !/^(?:text|track|audio|teil)\s*\d+$/i.test(label));
+  const hasDialogue = dialogueLabels.length > 0;
+  const femaleProfiles = profiles.filter((profile) => profile.gender === "female");
+  const maleProfiles = profiles.filter((profile) => profile.gender === "male");
+  const pick = (list, index = 0) => list[index % Math.max(1, list.length)] || {};
+  if (!hasDialogue) {
+    const prefersMale = /\b(?:homme|male|mann|maennlich|sprecher\s*b|speaker\s*b)\b/i.test(text) && Number(itemNumber) % 2 === 0;
+    const profile = prefersMale ? pick(maleProfiles) : pick(femaleProfiles);
+    return [{
+      speaker: "Narrator",
+      gender: profile.gender || (prefersMale ? "male" : "female"),
+      suggestedGender: profile.gender || (prefersMale ? "male" : "female"),
+      voiceId: profile.voice_id || undefined,
+      voiceName: profile.label || undefined,
+      role: "narration",
+      style: profile.style || "Deutsch, klar, pruefungsgerecht",
+      ...(asJsonObject(profile.settings)),
+    }];
+  }
+
+  const speakers = [];
+  const seen = new Set();
+  String(transcript || "").split("\n").forEach((line) => {
+    const match = line.match(/^\s*([^:\n]{2,48})\s*:/);
+    if (!match) return;
+    const name = match[1].trim();
+    const key = foldPlain(name);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    const looksFemale = /\b(?:frau|mutter|tochter|freundin|anna|julia|julie|maria|sara|clara|eva|gabi|moderatorin|sprecherin)\b/i.test(name);
+    const looksMale = /\b(?:herr|vater|sohn|freund|ben|daniel|frank|mike|moderator|sprecher)\b/i.test(name);
+    const gender = looksMale && !looksFemale ? "male" : "female";
+    const list = gender === "male" ? maleProfiles : femaleProfiles;
+    const profile = pick(list, speakers.filter((speaker) => speaker.gender === gender).length);
+    speakers.push({
+      speaker: name,
+      gender,
+      suggestedGender: gender,
+      voiceId: profile.voice_id || undefined,
+      voiceName: profile.label || undefined,
+      role: "dialogue",
+      style: profile.style || "natuerlich, klar, dialogisch",
+      ...(asJsonObject(profile.settings)),
+    });
+  });
+  return speakers.length ? speakers : inferListeningVoiceSettings({ transcript: "", itemNumber, audioSettings, profiles });
+};
+
+const buildAudioFromListeningItem = (item, profiles = []) => {
+  const transcript = stripProductionMarkers(item.admin_transcript || "");
+  const settings = asJsonObject(item.audio_engine_settings);
+  const speakers = inferListeningVoiceSettings({
+    transcript,
+    itemNumber: item.item_number,
+    audioSettings: settings,
+    profiles,
+  });
+  return {
+    title: item.title || `Hoeren Teil ${item.part_number || 1}`,
+    speaker: speakers.map((speaker) => speaker.speaker).join(" / ") || "Standarddeutsch",
+    scene: settings.scene || settings.situation || "",
+    situation: settings.situation || "",
+    transcript,
+    speakers,
+    tracks: [{
+      id: `listening-item-${item.id}`,
+      partNumber: Number(item.part_number) || 1,
+      title: item.title || `Text ${item.item_number || 1}`,
+      transcript,
+      audio: { transcript, speakers },
+    }],
+    ambience: [],
+    sfx: "",
+    rate: settings.rate || 0.92,
+  };
+};
+
+const appendAudioItemLog = async (itemId, entry) => {
+  await pool.query(
+    `UPDATE exam_listening_audio_items
+        SET generation_log = COALESCE(generation_log, '[]'::jsonb) || $2::jsonb,
+            updated_at = NOW()
+      WHERE id = $1`,
+    [itemId, JSON.stringify([{ at: new Date().toISOString(), ...entry }])]
+  );
+};
+
+const getLatestListeningPreviewDraft = async (exam) => {
+  const result = await pool.query(
+    `SELECT id, draft_content
+       FROM exam_document_imports
+      WHERE LOWER(provider) = LOWER($1)
+        AND UPPER(level) = UPPER($2)
+        AND section_type = 'listen'
+        AND draft_content <> '{}'::jsonb
+      ORDER BY updated_at DESC, id DESC
+      LIMIT 1`,
+    [exam.provider || exam.exam_type || "", exam.level || "B1"]
+  );
+  return result.rows[0] || null;
+};
+
+const splitTranscriptByTextNumber = (transcript = "", itemNumber = 1) => {
+  const text = stripProductionMarkers(transcript || "");
+  const number = Number(itemNumber) || 1;
+  const escaped = String(number).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const next = String(number + 1).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const patterns = [
+    new RegExp(`(?:^|\\s)(?:Text|Track|Audio)\\s*${escaped}\\s*[:.-]\\s*([\\s\\S]*?)(?=(?:\\s(?:Text|Track|Audio)\\s*${next}\\s*[:.-])|$)`, "i"),
+    new RegExp(`(?:^|\\s)${escaped}\\s*[.)-]\\s*([\\s\\S]*?)(?=(?:\\s${next}\\s*[.)-]\\s)|$)`, "i"),
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1] && match[1].trim().length > 20) return stripProductionMarkers(match[1]);
+  }
+  return text;
+};
+
+const syncListeningAudioItemsFromExamContent = async (examId) => {
+  await ensureListeningAudioProductionSchema();
+  const examResult = await pool.query(`SELECT * FROM exams WHERE id = $1`, [examId]);
+  const exam = examResult.rows[0];
+  if (!exam) return { error: "Exam not found", status: 404 };
+  if (exam.section_type !== "listen") return { error: "Audio item sync is only available for Hoeren exams.", status: 400 };
+  const sections = await pool.query(`SELECT * FROM exam_sections WHERE exam_id = $1 ORDER BY position, id`, [examId]);
+  const questions = await pool.query(
+    `SELECT id, section_id, position, prompt, transcript, audio, source_metadata
+       FROM exam_questions
+      WHERE exam_id = $1
+      ORDER BY position, id`,
+    [examId]
+  );
+  const questionsBySection = new Map();
+  questions.rows.forEach((question) => {
+    const key = question.section_id || "unassigned";
+    if (!questionsBySection.has(key)) questionsBySection.set(key, []);
+    questionsBySection.get(key).push(question);
+  });
+  const upserted = [];
+  for (const section of sections.rows) {
+    const partNumber = Number(section.part_number) || Number(section.position) || upserted.length + 1;
+    const sectionMetadata = asJsonObject(section.metadata);
+    const sectionQuestions = questionsBySection.get(section.id) || [];
+    const textNumbers = Array.from(new Set(sectionQuestions
+      .map((question) => Number(asJsonObject(question.source_metadata).textNumber || asJsonObject(question.source_metadata).audioItemNumber || asJsonObject(question.source_metadata).itemNumber))
+      .filter(Boolean)))
+      .sort((a, b) => a - b);
+    const itemNumbers = textNumbers.length ? textNumbers : [1];
+    const sectionAudio = {
+      ...asJsonObject(sectionMetadata.audio),
+      ...asJsonObject(sectionQuestions.find((question) => Object.keys(asJsonObject(question.audio)).length)?.audio),
+    };
+    const fullTranscript = cleanPlainText(
+      sectionMetadata.transcript ||
+      sectionQuestions.find((question) => question.transcript)?.transcript ||
+      sectionAudio.transcript ||
+      section.instructions ||
+      ""
+    );
+    if (!fullTranscript || fullTranscript.length < 20) continue;
+    for (const itemNumber of itemNumbers) {
+      const transcript = splitTranscriptByTextNumber(fullTranscript, itemNumber);
+      if (!transcript || transcript.length < 20) continue;
+      const result = await pool.query(
+        `INSERT INTO exam_listening_audio_items (
+           exam_id, section_id, source_import_id, provider, level, series_number,
+           part_number, item_number, title, instructions, admin_transcript,
+           audio_engine_settings, listening_count, audio_generation_status,
+           validation_warnings, source_metadata, position, updated_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, 'draft', $14::jsonb, $15::jsonb, $16, NOW())
+         ON CONFLICT (exam_id, part_number, item_number)
+         DO UPDATE SET
+           section_id = EXCLUDED.section_id,
+           title = EXCLUDED.title,
+           instructions = EXCLUDED.instructions,
+           admin_transcript = CASE
+             WHEN exam_listening_audio_items.audio_generation_status IN ('published', 'approved', 'generated')
+               THEN exam_listening_audio_items.admin_transcript
+             ELSE EXCLUDED.admin_transcript
+           END,
+           audio_engine_settings = EXCLUDED.audio_engine_settings,
+           validation_warnings = EXCLUDED.validation_warnings,
+           source_metadata = EXCLUDED.source_metadata,
+           position = EXCLUDED.position,
+           updated_at = NOW()
+         RETURNING *`,
+        [
+          examId,
+          section.id,
+          exam.source_import_id || null,
+          exam.provider || exam.exam_type || null,
+          exam.level || null,
+          Number(exam.series_number) || null,
+          partNumber,
+          itemNumber,
+          itemNumbers.length > 1 ? `Teil ${partNumber} - Text ${itemNumber}` : (section.title || `Teil ${partNumber}`),
+          LISTENING_STUDENT_INSTRUCTION,
+          transcript,
+          JSON.stringify(sectionAudio),
+          Number(sectionAudio.listeningCount || sectionMetadata.listeningCount || 2),
+          JSON.stringify(["Background/SFX mixing is not enabled in this deployment; generated audio is clean voice-only."]),
+          JSON.stringify({ source: "published-exam-content", sectionId: section.id, partNumber, itemNumber }),
+          (partNumber * 100) + itemNumber,
+        ]
+      );
+      upserted.push(result.rows[0]);
+    }
+  }
+  return { exam, items: upserted };
+};
+
+const syncListeningAudioItemsFromDraft = async (examId) => {
+  await ensureListeningAudioProductionSchema();
+  const examResult = await pool.query(`SELECT * FROM exams WHERE id = $1`, [examId]);
+  const exam = examResult.rows[0];
+  if (!exam) return { error: "Exam not found", status: 404 };
+  if (exam.section_type !== "listen") return { error: "Audio item sync is only available for Hoeren exams.", status: 400 };
+  const draft = await getLatestListeningPreviewDraft(exam);
+  if (!draft) return { error: "No Hoeren preview draft found for this provider/level.", status: 404 };
+  const sections = await pool.query(`SELECT * FROM exam_sections WHERE exam_id = $1 ORDER BY position, id`, [examId]);
+  const sectionsByPart = new Map(sections.rows.map((section) => [Number(section.part_number) || Number(section.position), section]));
+  const content = asJsonObject(draft.draft_content);
+  const series = Array.isArray(content.series) ? content.series[0] : null;
+  const draftSections = Array.isArray(series?.sections) ? series.sections : [];
+  const upserted = [];
+
+  for (const draftSection of draftSections) {
+    const partNumber = Number(draftSection.partNumber || draftSection.part || draftSection.position) || upserted.length + 1;
+    const section = sectionsByPart.get(partNumber) || null;
+    const audioItems = Array.isArray(draftSection.audioItems) && draftSection.audioItems.length
+      ? draftSection.audioItems
+      : [{ itemNumber: 1, title: draftSection.title || `Teil ${partNumber}`, transcript: draftSection.transcript || draftSection.instructions || "", audioSettings: draftSection.audioSettings || {} }];
+    for (const audioItem of audioItems) {
+      const itemNumber = Number(audioItem.itemNumber || audioItem.number || audioItems.indexOf(audioItem) + 1) || 1;
+      const transcript = stripProductionMarkers(audioItem.adminTranscript || audioItem.transcript || audioItem.script || audioItem.audioText || "");
+      if (!transcript) continue;
+      const result = await pool.query(
+        `INSERT INTO exam_listening_audio_items (
+           exam_id, section_id, source_import_id, provider, level, series_number,
+           part_number, item_number, title, instructions, admin_transcript,
+           audio_engine_settings, listening_count, audio_generation_status,
+           validation_warnings, source_metadata, position, updated_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, 'draft', $14::jsonb, $15::jsonb, $16, NOW())
+         ON CONFLICT (exam_id, part_number, item_number)
+         DO UPDATE SET
+           section_id = EXCLUDED.section_id,
+           title = EXCLUDED.title,
+           instructions = EXCLUDED.instructions,
+           admin_transcript = EXCLUDED.admin_transcript,
+           audio_engine_settings = EXCLUDED.audio_engine_settings,
+           validation_warnings = EXCLUDED.validation_warnings,
+           source_metadata = EXCLUDED.source_metadata,
+           position = EXCLUDED.position,
+           updated_at = NOW()
+         RETURNING *`,
+        [
+          examId,
+          section?.id || null,
+          draft.id,
+          exam.provider || exam.exam_type || null,
+          exam.level || null,
+          Number(exam.series_number) || 1,
+          partNumber,
+          itemNumber,
+          audioItem.title || draftSection.title || `Teil ${partNumber} - Text ${itemNumber}`,
+          LISTENING_STUDENT_INSTRUCTION,
+          transcript,
+          JSON.stringify(audioItem.audioEngineSettings || audioItem.audioSettings || draftSection.audioEngineSettings || draftSection.audioSettings || {}),
+          Number(audioItem.listeningCount || draftSection.listeningCount || 2),
+          JSON.stringify([
+            "Background/SFX mixing is not enabled in this deployment; generated audio is clean voice-only.",
+          ]),
+          JSON.stringify({ previewImportId: draft.id, draftPartNumber: partNumber, draftItemNumber: itemNumber }),
+          (partNumber * 100) + itemNumber,
+        ]
+      );
+      upserted.push(result.rows[0]);
+    }
+  }
+  return { exam, draftId: draft.id, items: upserted };
+};
+
+const getPublishedAudioItemsForExam = async (examId) => {
+  await ensureListeningAudioProductionSchema();
+  const result = await pool.query(
+    `SELECT i.id, i.exam_id, i.section_id, i.part_number, i.item_number, i.title,
+            i.listening_count, i.audio_generation_status, i.generated_audio_asset_id,
+            i.admin_transcript, i.voice_profile_map, i.source_metadata,
+            a.id AS asset_id, a.status AS asset_status, a.byte_size, a.duration_seconds, a.updated_at AS asset_updated_at
+       FROM exam_listening_audio_items i
+       LEFT JOIN exam_audio_assets a ON a.id = i.generated_audio_asset_id
+      WHERE i.exam_id = $1
+        AND i.audio_generation_status = 'published'
+        AND (
+          a.status = 'ready'
+          OR COALESCE(i.source_metadata->>'browserTtsFallback', 'false') = 'true'
+        )
+      ORDER BY i.part_number, i.item_number, i.id`,
+    [examId]
+  );
+  return result.rows;
+};
+
 const generateListeningAudioForPublishedExams = async ({ exams = [], adminId = null }) => {
   const results = [];
   for (const exam of exams) {
@@ -3706,9 +4076,350 @@ app.post("/api/writing-simulator/attempts/consume", requireAuth, async (req, res
 
 app.get("/api/admin/tts/status", requireAdmin, async (req, res) => {
   try {
-    return res.json({ ok: true, ...getProviderStatus() });
+    await ensureListeningAudioProductionSchema();
+    return res.json({ ok: true, ...getProviderStatus(), voiceProfiles: await getVoiceProfiles(pool) });
   } catch (err) {
     console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.post("/api/admin/listening-audio/:examId/sync", requireAdmin, async (req, res) => {
+  try {
+    const examId = Number(req.params.examId);
+    const mode = String(req.body?.mode || req.query.mode || "auto").toLowerCase();
+    let result = mode === "content"
+      ? await syncListeningAudioItemsFromExamContent(examId)
+      : await syncListeningAudioItemsFromDraft(examId);
+    if (result.error && mode === "auto") {
+      result = await syncListeningAudioItemsFromExamContent(examId);
+    }
+    if (result.error) return res.status(result.status || 400).json({ ok: false, error: result.error });
+    await auditAdminAction(req, "listening_audio.sync", "exam", examId, {
+      draftId: result.draftId,
+      itemCount: result.items.length,
+    });
+    return res.json({ ok: true, draftId: result.draftId, items: result.items });
+  } catch (err) {
+    console.error("Listening audio sync failed", err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.post("/api/admin/listening-audio/sync-all", requireAdmin, async (req, res) => {
+  try {
+    await ensureListeningAudioProductionSchema();
+    const provider = req.body?.provider ? String(req.body.provider).trim().toLowerCase() : "";
+    const level = req.body?.level ? String(req.body.level).trim().toUpperCase() : "";
+    const params = [];
+    let where = "WHERE section_type = 'listen' AND is_active = TRUE";
+    if (provider) {
+      params.push(provider);
+      where += ` AND LOWER(provider) = $${params.length}`;
+    }
+    if (level) {
+      params.push(level);
+      where += ` AND UPPER(level) = $${params.length}`;
+    }
+    const exams = await pool.query(`SELECT id FROM exams ${where} ORDER BY provider, level, series_number, id`, params);
+    const results = [];
+    for (const exam of exams.rows) {
+      const result = await syncListeningAudioItemsFromExamContent(exam.id);
+      results.push({
+        examId: exam.id,
+        ok: !result.error,
+        itemCount: result.items?.length || 0,
+        error: result.error || null,
+      });
+    }
+    await auditAdminAction(req, "listening_audio.sync_all", "exam", null, {
+      provider: provider || null,
+      level: level || null,
+      examCount: results.length,
+      itemCount: results.reduce((sum, row) => sum + Number(row.itemCount || 0), 0),
+    });
+    return res.json({ ok: true, results });
+  } catch (err) {
+    console.error("Listening audio sync-all failed", err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.get("/api/admin/listening-audio/:examId/items", requireAdmin, async (req, res) => {
+  try {
+    await ensureListeningAudioProductionSchema();
+    const examId = Number(req.params.examId);
+    const items = await pool.query(
+      `SELECT i.*, a.status AS asset_status, a.byte_size, a.provider_model, a.voice_summary, a.updated_at AS asset_updated_at
+         FROM exam_listening_audio_items i
+         LEFT JOIN exam_audio_assets a ON a.id = i.generated_audio_asset_id
+        WHERE i.exam_id = $1
+        ORDER BY i.part_number, i.item_number, i.id`,
+      [examId]
+    );
+    return res.json({
+      ok: true,
+      providerStatus: getProviderStatus(),
+      voiceProfiles: await getVoiceProfiles(pool),
+      items: items.rows.map((item) => ({
+        ...item,
+        preview_url: item.generated_audio_asset_id ? `/api/audio/generated/${item.generated_audio_asset_id}` : "",
+        admin_transcript_preview: clipPlainText(item.admin_transcript, 900),
+      })),
+    });
+  } catch (err) {
+    console.error("Listening audio item lookup failed", err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.post("/api/admin/listening-audio/items/:itemId/generate", requireAdmin, async (req, res) => {
+  try {
+    await ensureListeningAudioProductionSchema();
+    const itemId = Number(req.params.itemId);
+    const itemResult = await pool.query(`SELECT * FROM exam_listening_audio_items WHERE id = $1`, [itemId]);
+    const item = itemResult.rows[0];
+    if (!item) return res.status(404).json({ ok: false, error: "Audio item not found" });
+    const profiles = await getVoiceProfiles(pool);
+    const audio = buildAudioFromListeningItem(item, profiles);
+    const provider = normalizeProvider(req.body?.provider || "elevenlabs");
+    await pool.query(
+      `UPDATE exam_listening_audio_items
+          SET audio_generation_status = 'generating',
+              admin_notes = NULL,
+              updated_at = NOW()
+        WHERE id = $1`,
+      [itemId]
+    );
+    const result = await generateAndStoreExamAudio({
+      pool,
+      examId: item.exam_id,
+      audio,
+      adminId: req.user.id,
+      provider,
+      force: Boolean(req.body?.force),
+    });
+    await pool.query(
+      `UPDATE exam_listening_audio_items
+          SET generated_audio_asset_id = $2,
+              generated_audio_url = $3,
+              audio_generation_status = 'generated',
+              voice_profile_map = $4::jsonb,
+              validation_warnings = COALESCE(validation_warnings, '[]'::jsonb) || $5::jsonb,
+              updated_at = NOW()
+        WHERE id = $1`,
+      [
+        itemId,
+        result.asset?.id || null,
+        result.asset?.id ? `/api/audio/generated/${result.asset.id}` : "",
+        JSON.stringify(audio.speakers || []),
+        JSON.stringify([
+          {
+            at: new Date().toISOString(),
+            warning: "Clean voice audio generated. Background/SFX mixing is not enabled in this server runtime.",
+          },
+        ]),
+      ]
+    );
+    await appendAudioItemLog(itemId, {
+      action: "generate",
+      provider,
+      cached: Boolean(result.cached),
+      assetId: result.asset?.id || null,
+    });
+    await auditAdminAction(req, "listening_audio.generate", "exam_listening_audio_item", itemId, {
+      provider,
+      cached: Boolean(result.cached),
+      assetId: result.asset?.id,
+    });
+    return res.status(result.cached ? 200 : 201).json({
+      ok: true,
+      cached: Boolean(result.cached),
+      provider,
+      asset: result.asset,
+      previewUrl: result.asset?.id ? `/api/audio/generated/${result.asset.id}` : "",
+      warnings: ["Background/SFX mixing skipped; clean voice audio is ready for admin review."],
+    });
+  } catch (err) {
+    const status = err instanceof TtsConfigurationError ? 400 : 502;
+    const itemId = Number(req.params.itemId);
+    await pool.query(
+      `UPDATE exam_listening_audio_items
+          SET audio_generation_status = 'failed',
+              admin_notes = $2,
+              updated_at = NOW()
+        WHERE id = $1`,
+      [itemId, err.publicMessage || "Audio generation failed."]
+    ).catch(() => {});
+    await appendAudioItemLog(itemId, { action: "generate_failed", error: err.publicMessage || err.message }).catch(() => {});
+    console.error("Listening audio item generation failed", err.message);
+    return res.status(status).json({
+      ok: false,
+      setupRequired: err instanceof TtsConfigurationError,
+      error: err.publicMessage || "Audio generation failed.",
+    });
+  }
+});
+
+app.post("/api/admin/listening-audio/generate-batch", requireAdmin, async (req, res) => {
+  try {
+    await ensureListeningAudioProductionSchema();
+    const providerFilter = req.body?.examProvider ? String(req.body.examProvider).trim().toLowerCase() : "";
+    const levelFilter = req.body?.level ? String(req.body.level).trim().toUpperCase() : "";
+    const limit = Math.max(1, Math.min(100, Number(req.body?.limit) || 10));
+    const force = Boolean(req.body?.force);
+    const publish = req.body?.publish !== false;
+    const params = [];
+    let where = `
+      WHERE i.admin_transcript IS NOT NULL
+        AND LENGTH(TRIM(i.admin_transcript)) >= 20
+        AND (i.generated_audio_asset_id IS NULL OR i.audio_generation_status IN ('draft', 'failed', 'queued', 'generating') OR $1::boolean = TRUE)
+    `;
+    params.push(force);
+    if (providerFilter) {
+      params.push(providerFilter);
+      where += ` AND LOWER(i.provider) = $${params.length}`;
+    }
+    if (levelFilter) {
+      params.push(levelFilter);
+      where += ` AND UPPER(i.level) = $${params.length}`;
+    }
+    params.push(limit);
+    const items = await pool.query(
+      `SELECT i.*
+         FROM exam_listening_audio_items i
+        ${where}
+        ORDER BY i.provider, i.level, i.series_number, i.part_number, i.item_number, i.id
+        LIMIT $${params.length}`,
+      params
+    );
+    const profiles = await getVoiceProfiles(pool);
+    const results = [];
+    for (const item of items.rows) {
+      try {
+        const audio = buildAudioFromListeningItem(item, profiles);
+        const provider = normalizeProvider(req.body?.provider || "elevenlabs");
+        await pool.query(
+          `UPDATE exam_listening_audio_items
+              SET audio_generation_status = 'generating',
+                  admin_notes = NULL,
+                  updated_at = NOW()
+            WHERE id = $1`,
+          [item.id]
+        );
+        const generated = await generateAndStoreExamAudio({
+          pool,
+          examId: item.exam_id,
+          audio,
+          adminId: req.user.id,
+          provider,
+          force,
+        });
+        const nextStatus = publish ? "published" : "generated";
+        await pool.query(
+          `UPDATE exam_listening_audio_items
+              SET generated_audio_asset_id = $2,
+                  generated_audio_url = $3,
+                  audio_generation_status = $4,
+                  voice_profile_map = $5::jsonb,
+                  approved_at = CASE WHEN $4 IN ('approved','published') THEN COALESCE(approved_at, NOW()) ELSE approved_at END,
+                  published_at = CASE WHEN $4 = 'published' THEN NOW() ELSE published_at END,
+                  validation_warnings = COALESCE(validation_warnings, '[]'::jsonb) || $6::jsonb,
+                  updated_at = NOW()
+            WHERE id = $1`,
+          [
+            item.id,
+            generated.asset?.id || null,
+            generated.asset?.id ? `/api/audio/generated/${generated.asset.id}` : "",
+            nextStatus,
+            JSON.stringify(audio.speakers || []),
+            JSON.stringify([{ at: new Date().toISOString(), warning: "Clean voice MP3 generated; background/SFX mixing skipped on this runtime." }]),
+          ]
+        );
+        await appendAudioItemLog(item.id, {
+          action: "batch_generate",
+          provider,
+          cached: Boolean(generated.cached),
+          assetId: generated.asset?.id || null,
+          status: nextStatus,
+        });
+        results.push({ itemId: item.id, examId: item.exam_id, ok: true, assetId: generated.asset?.id || null, cached: Boolean(generated.cached), status: nextStatus });
+      } catch (err) {
+        await pool.query(
+          `UPDATE exam_listening_audio_items
+              SET audio_generation_status = 'failed',
+                  admin_notes = $2,
+                  updated_at = NOW()
+            WHERE id = $1`,
+          [item.id, err.publicMessage || err.message || "Audio generation failed."]
+        ).catch(() => {});
+        await appendAudioItemLog(item.id, { action: "batch_generate_failed", error: err.publicMessage || err.message }).catch(() => {});
+        results.push({ itemId: item.id, examId: item.exam_id, ok: false, setupRequired: err instanceof TtsConfigurationError, error: err.publicMessage || "Audio generation failed." });
+        if (err instanceof TtsConfigurationError || Number(err.status) === 401 || Number(err.status) === 402 || Number(err.status) === 429) {
+          break;
+        }
+      }
+    }
+    await auditAdminAction(req, "listening_audio.generate_batch", "exam_listening_audio_item", null, {
+      provider: req.body?.provider || "elevenlabs",
+      limit,
+      force,
+      publish,
+      generated: results.filter((row) => row.ok).length,
+      failed: results.filter((row) => !row.ok).length,
+    });
+    return res.json({ ok: true, requestedLimit: limit, processed: results.length, results });
+  } catch (err) {
+    console.error("Listening audio batch generation failed", err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.post("/api/admin/listening-audio/items/:itemId/approve", requireAdmin, async (req, res) => {
+  try {
+    const itemId = Number(req.params.itemId);
+    const result = await pool.query(
+      `UPDATE exam_listening_audio_items
+          SET audio_generation_status = 'approved',
+              approved_at = NOW(),
+              updated_at = NOW()
+        WHERE id = $1
+          AND generated_audio_asset_id IS NOT NULL
+          AND audio_generation_status IN ('generated', 'approved', 'published')
+        RETURNING *`,
+      [itemId]
+    );
+    if (!result.rows[0]) return res.status(400).json({ ok: false, error: "Generate audio before approving this item." });
+    await appendAudioItemLog(itemId, { action: "approve", adminId: req.user.id });
+    await auditAdminAction(req, "listening_audio.approve", "exam_listening_audio_item", itemId, {});
+    return res.json({ ok: true, item: result.rows[0] });
+  } catch (err) {
+    console.error("Listening audio approve failed", err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.post("/api/admin/listening-audio/items/:itemId/publish", requireAdmin, async (req, res) => {
+  try {
+    const itemId = Number(req.params.itemId);
+    const result = await pool.query(
+      `UPDATE exam_listening_audio_items
+          SET audio_generation_status = 'published',
+              approved_at = COALESCE(approved_at, NOW()),
+              published_at = NOW(),
+              updated_at = NOW()
+        WHERE id = $1
+          AND generated_audio_asset_id IS NOT NULL
+          AND audio_generation_status IN ('generated', 'approved', 'published')
+        RETURNING *`,
+      [itemId]
+    );
+    if (!result.rows[0]) return res.status(400).json({ ok: false, error: "Generate audio before publishing this item." });
+    await appendAudioItemLog(itemId, { action: "publish", adminId: req.user.id });
+    await auditAdminAction(req, "listening_audio.publish", "exam_listening_audio_item", itemId, {});
+    return res.json({ ok: true, item: result.rows[0] });
+  } catch (err) {
+    console.error("Listening audio publish failed", err);
     return res.status(500).json({ ok: false, error: "Server error" });
   }
 });

@@ -1,6 +1,6 @@
 const crypto = require("crypto");
 
-const DEFAULT_PROVIDER = "openai";
+const DEFAULT_PROVIDER = "elevenlabs";
 const DEFAULT_MIME_TYPE = "audio/mpeg";
 const MAX_TTS_CHARS = 3800;
 const TTS_MAX_ATTEMPTS = Math.max(1, Number(process.env.TTS_MAX_ATTEMPTS) || 3);
@@ -42,6 +42,17 @@ const normalizeText = (value) =>
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .replace(/[ \t]{2,}/g, " ")
+    .trim();
+
+const stripProductionMarkers = (value) =>
+  normalizeText(value)
+    .replace(/\[(?:pause|stille|silence)\s*[0-9.,]*\s*(?:s|sec|secondes|sekunden)?\]/gi, " ")
+    .replace(/\((?:pause|stille|silence)\s*[0-9.,]*\s*(?:s|sec|secondes|sekunden)?\)/gi, " ")
+    .replace(/\b(?:pause|stille|silence)\s*[0-9.,]+\s*(?:s|sec|secondes|sekunden)\b/gi, " ")
+    .replace(/\b(?:wiederholung|repeat|repetition)\s*:?.*$/gim, " ")
+    .replace(/[•*#_`~|<>]+/g, " ")
+    .replace(/\s+([,.;:!?])/g, "$1")
+    .replace(/\s{2,}/g, " ")
     .trim();
 
 const normalizeKey = (value) =>
@@ -119,12 +130,12 @@ const parseSpeakerSegments = (audio = {}) => {
         trackSegments.push({
           trackIndex,
           speaker: match[1].trim(),
-          text: normalizeText(match[2]),
+          text: stripProductionMarkers(match[2]),
         });
       } else if (trackSegments.length) {
-        trackSegments[trackSegments.length - 1].text = normalizeText(`${trackSegments[trackSegments.length - 1].text} ${line}`);
+        trackSegments[trackSegments.length - 1].text = stripProductionMarkers(`${trackSegments[trackSegments.length - 1].text} ${line}`);
       } else {
-        trackSegments.push({ trackIndex, speaker: "Narrator", text: line });
+        trackSegments.push({ trackIndex, speaker: "Narrator", text: stripProductionMarkers(line) });
       }
     });
   });
@@ -140,7 +151,7 @@ const parseSpeakerSegments = (audio = {}) => {
     segments.push({
       trackIndex: 0,
       speaker: match ? match[1].trim() : "Narrator",
-      text: normalizeText(match ? match[2] : line),
+      text: stripProductionMarkers(match ? match[2] : line),
     });
   });
   return segments.filter((segment) => segment.text);
@@ -158,6 +169,74 @@ const findSpeakerSettings = (audio, speakerName) => {
     if (textNumber && labels.some((label) => parseTextNumbers(label).includes(textNumber))) return true;
     return false;
   }) || speakers[0] || {};
+};
+
+let voiceProfileSchemaPromise = null;
+
+const ensureVoiceProfileSchema = async (pool) => {
+  if (voiceProfileSchemaPromise) return voiceProfileSchemaPromise;
+  voiceProfileSchemaPromise = (async () => {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS tts_voice_profiles (
+        id SERIAL PRIMARY KEY,
+        profile_key TEXT NOT NULL UNIQUE,
+        label TEXT NOT NULL,
+        provider TEXT NOT NULL DEFAULT 'elevenlabs',
+        voice_id TEXT,
+        gender TEXT NOT NULL CHECK (gender IN ('female', 'male', 'neutral')),
+        role TEXT NOT NULL DEFAULT 'speaker',
+        style TEXT,
+        settings JSONB NOT NULL DEFAULT '{}'::jsonb,
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    await pool.query(`ALTER TABLE tts_voice_profiles ENABLE ROW LEVEL SECURITY;`);
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+          REVOKE ALL ON TABLE tts_voice_profiles FROM anon;
+        END IF;
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+          REVOKE ALL ON TABLE tts_voice_profiles FROM authenticated;
+        END IF;
+      END $$;
+    `);
+    await pool.query(`
+      INSERT INTO tts_voice_profiles (profile_key, label, provider, gender, role, style, settings)
+      VALUES
+        ('de_female_1', 'Deutsch weiblich 1', 'elevenlabs', 'female', 'speaker', 'klar, freundlich', '{"stability":0.62,"similarity":0.78}'::jsonb),
+        ('de_female_2', 'Deutsch weiblich 2', 'elevenlabs', 'female', 'speaker', 'natuerlich, ruhig', '{"stability":0.58,"similarity":0.76}'::jsonb),
+        ('de_male_1', 'Deutsch maennlich 1', 'elevenlabs', 'male', 'speaker', 'klar, neutral', '{"stability":0.62,"similarity":0.78}'::jsonb),
+        ('de_male_2', 'Deutsch maennlich 2', 'elevenlabs', 'male', 'speaker', 'natuerlich, warm', '{"stability":0.58,"similarity":0.76}'::jsonb)
+      ON CONFLICT (profile_key) DO UPDATE SET
+        label = EXCLUDED.label,
+        provider = EXCLUDED.provider,
+        gender = EXCLUDED.gender,
+        role = EXCLUDED.role,
+        style = EXCLUDED.style,
+        settings = tts_voice_profiles.settings || EXCLUDED.settings,
+        updated_at = NOW();
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS tts_voice_profiles_active_idx ON tts_voice_profiles(provider, gender, is_active);`);
+  })().catch((err) => {
+    voiceProfileSchemaPromise = null;
+    throw err;
+  });
+  return voiceProfileSchemaPromise;
+};
+
+const getVoiceProfiles = async (pool) => {
+  await ensureVoiceProfileSchema(pool);
+  const result = await pool.query(
+    `SELECT profile_key, label, provider, voice_id, gender, role, style, settings, is_active
+       FROM tts_voice_profiles
+      WHERE is_active = TRUE
+      ORDER BY CASE gender WHEN 'female' THEN 1 WHEN 'male' THEN 2 ELSE 3 END, profile_key`
+  );
+  return result.rows;
 };
 
 const buildPromptedText = (segment, audio, speaker) => {
@@ -556,7 +635,7 @@ const synthesizeAudio = async ({ audio, provider = getConfiguredProvider() }) =>
   for (const segment of segments) {
     const speaker = findSpeakerSettings(audio, segment.speaker);
     const { text, instructions } = buildPromptedText(segment, audio, speaker);
-    const chunks = splitLongText(text);
+    const chunks = splitLongText(stripProductionMarkers(text));
     for (const chunk of chunks) {
       const result = await synthesizeWithRetry({
         adapter,
@@ -717,13 +796,16 @@ const getProviderStatus = () => {
 module.exports = {
   buildAudioContentHash,
   ensureAudioAssetSchema,
+  ensureVoiceProfileSchema,
   generateAndStoreExamAudio,
   getAudioAssetById,
   getAudioAssetForExam,
   getConfiguredProvider,
   getProviderStatus,
+  getVoiceProfiles,
   normalizeProvider,
   parseSpeakerSegments,
+  stripProductionMarkers,
   TtsConfigurationError,
   TtsProviderError,
 };
