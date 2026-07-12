@@ -15,6 +15,7 @@ const { createAuthMiddleware } = require("./middleware/auth");
 const adminMiddleware = require("./middleware/admin");
 const {
   analyzeExamDocument,
+  buildHoerenParsedPreview,
   buildListeningImportFoundation,
   ensureDocumentImportSchema,
   getExamImportDraft,
@@ -4105,12 +4106,13 @@ app.post("/api/admin/hoeren-import/foundation", requireAdmin, documentUpload.sin
     if (!/\.docx$/i.test(filename)) {
       return res.status(400).json({ ok: false, error: "Only DOCX files are supported in the Hören foundation step" });
     }
-    const foundation = await buildListeningImportFoundation({
+    const foundation = await buildHoerenParsedPreview({
       buffer: req.file.buffer,
       filename,
       mimetype: req.file.mimetype,
       provider: req.body?.provider,
       level: req.body?.level,
+      maxSeries: req.body?.maxSeries ? Number(req.body.maxSeries) : null,
     });
     const saved = await saveListeningImportFoundationDraft({
       pool,

@@ -1244,6 +1244,55 @@
   gap: 8px;
 }
 
+.hoerenPreviewTree {
+  display: grid;
+  gap: 10px;
+}
+
+.hoerenPreviewTree article {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.hoerenPreviewTree header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #334155;
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.hoerenPreviewTree header span {
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.hoerenPreviewTree article > div {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 8px;
+}
+
+.hoerenPreviewTree p {
+  margin: 0;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 9px 10px;
+  color: #475569;
+  font-size: 0.83rem;
+  font-weight: 800;
+}
+
+.hoerenPreviewTree p strong {
+  display: block;
+  color: #0f172a;
+}
+
 .hoerenPreviewBox strong {
   color: #334155;
   font-size: 0.9rem;

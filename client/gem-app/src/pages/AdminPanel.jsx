@@ -3888,13 +3888,15 @@ function AdminHoerenStudio() {
   const draft = result?.draft;
   const markerCounts = draft?.markerCounts ?? {};
   const hierarchy = draft?.hierarchy ?? {};
+  const comparison = draft?.comparisonSummary?.detected ?? {};
+  const series = Array.isArray(draft?.series) ? draft.series : [];
   const warnings = draft?.validation?.warnings ?? [];
 
   return (
     <>
       <Header
         title="Hören Import & Audio Studio"
-        subtitle="STEP 1 foundation: upload a DOCX, detect provider/level, validate required markers, and save a safe draft."
+        subtitle="STEP 2 preview: upload a DOCX, parse the Hören hierarchy, validate marker counts, and save a safe draft."
       />
       {error ? <p className={styles.error}>{error}</p> : null}
       <section className={styles.panel}>
@@ -3902,7 +3904,7 @@ function AdminHoerenStudio() {
           <div>
             <h2>DOCX foundation upload</h2>
             <p className={styles.panelHint}>
-              This screen does not publish exams, generate audio, or expose transcripts to students. Full parsing begins in STEP 2.
+              This screen does not publish exams, generate audio, or expose transcripts to students. Audio work begins in STEP 3.
             </p>
           </div>
           <span className={styles.badge}>
@@ -3939,7 +3941,7 @@ function AdminHoerenStudio() {
           </label>
           <button className={styles.button} type="submit" disabled={!file || busy}>
             <Upload size={16} />
-            {busy ? "Saving draft..." : "Create foundation draft"}
+            {busy ? "Saving draft..." : "Create preview draft"}
           </button>
         </form>
       </section>
@@ -3948,7 +3950,7 @@ function AdminHoerenStudio() {
         <section className={styles.panel}>
           <div className={styles.panelHeader}>
             <div>
-              <h2>Foundation preview</h2>
+              <h2>Marker preview</h2>
               <p className={styles.panelHint}>
                 Draft #{result.import?.id ?? "-"} · {result.duplicate ? "Existing draft reused" : "New draft saved"}
               </p>
@@ -3958,9 +3960,11 @@ function AdminHoerenStudio() {
           <div className={styles.hoerenSummaryGrid}>
             <span><strong>Provider</strong>{draft.metadata?.provider ?? "-"}</span>
             <span><strong>Level</strong>{draft.metadata?.level ?? "-"}</span>
-            <span><strong>Series detected</strong>{hierarchy.seriesDetected ?? 0}</span>
-            <span><strong>Teile detected</strong>{hierarchy.teileDetected ?? 0}</span>
-            <span><strong>Audio text blocks</strong>{hierarchy.audioTextBlocksDetected ?? 0}</span>
+            <span><strong>Series detected</strong>{comparison.series ?? hierarchy.seriesDetected ?? 0}</span>
+            <span><strong>Teile detected</strong>{comparison.sections ?? hierarchy.teileDetected ?? 0}</span>
+            <span><strong>Audio items</strong>{comparison.audioItems ?? hierarchy.audioTextBlocksDetected ?? 0}</span>
+            <span><strong>Questions</strong>{comparison.questions ?? 0}</span>
+            <span><strong>Corrections</strong>{comparison.corrections ?? 0}</span>
             <span><strong>Global duration</strong>{draft.metadata?.globalDurationMinutes ?? "-"} min</span>
           </div>
           <div className={styles.hoerenMarkerGrid}>
@@ -3981,8 +3985,28 @@ function AdminHoerenStudio() {
               {warnings.map((warning) => <li key={warning}>{warning}</li>)}
             </ul>
           ) : (
-            <p className={styles.status}>No foundation warnings detected.</p>
+            <p className={styles.status}>No preview warnings detected.</p>
           )}
+          <div className={styles.hoerenPreviewTree}>
+            {series.slice(0, 4).map((item) => (
+              <article key={`${item.seriesNumber}-${item.title}`}>
+                <header>
+                  <strong>Series {item.seriesNumber}: {item.title}</strong>
+                  <span>
+                    {item.counts?.sections ?? 0} Teile · {item.counts?.audioItems ?? 0} audio items · {item.counts?.questions ?? 0} questions
+                  </span>
+                </header>
+                <div>
+                  {(item.sections ?? []).map((section) => (
+                    <p key={`${item.seriesNumber}-${section.partNumber}`}>
+                      <strong>Teil {section.partNumber}</strong>
+                      {section.counts?.audioItems ?? 0} audio · {section.counts?.questions ?? 0} questions · {section.counts?.corrections ?? 0} corrections
+                    </p>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
           <div className={styles.hoerenPreviewBox}>
             <strong>Raw text preview</strong>
             <pre>{draft.rawTextPreview}</pre>

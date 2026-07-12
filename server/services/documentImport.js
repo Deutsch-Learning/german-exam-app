@@ -308,6 +308,371 @@ const buildListeningImportFoundation = async ({ buffer, filename, mimetype, prov
   };
 };
 
+const normalizeHoerenLineText = (value) =>
+  String(value ?? "")
+    .replace(/\r/g, "\n")
+    .replace(/\u00a0/g, " ")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+const getLineMatches = (text, regex) => {
+  const matches = [];
+  const pattern = new RegExp(regex.source, regex.flags.includes("g") ? regex.flags : `${regex.flags}g`);
+  let match;
+  while ((match = pattern.exec(text))) {
+    matches.push(match);
+  }
+  return matches;
+};
+
+const sliceBetween = (text, start, end) => text.slice(Math.max(0, start), end == null ? text.length : Math.max(start, end));
+
+const makeBlockSlices = (text, matches) =>
+  matches.map((match, index) => ({
+    match,
+    start: match.index,
+    end: matches[index + 1]?.index ?? text.length,
+    text: sliceBetween(text, match.index, matches[index + 1]?.index ?? text.length).trim(),
+  }));
+
+const getFirstMatchIndex = (text, regexes) => {
+  const indexes = regexes
+    .map((regex) => {
+      const found = text.search(regex);
+      return found >= 0 ? found : null;
+    })
+    .filter((value) => value !== null);
+  return indexes.length ? Math.min(...indexes) : -1;
+};
+
+const getBlockAfterMarker = (text, markerRegex, endRegexes = []) => {
+  const match = text.match(markerRegex);
+  if (!match || match.index == null) return "";
+  const start = match.index + match[0].length;
+  const rest = text.slice(start);
+  const end = getFirstMatchIndex(rest, endRegexes);
+  return normalizeHoerenLineText(end >= 0 ? rest.slice(0, end) : rest);
+};
+
+const extractHoerenQuestions = (raw = "") => {
+  const lines = normalizeHoerenLineText(raw).split("\n").map((line) => line.trim()).filter(Boolean);
+  const questions = [];
+  lines.forEach((line) => {
+    const numbered = line.match(/^(\d{1,2})[\.)]\s+(.+)/);
+    if (numbered) {
+      questions.push({
+        number: Number(numbered[1]),
+        prompt: numbered[2].trim(),
+        type: /richtig|falsch/i.test(line) ? "true_false" : "question",
+      });
+      return;
+    }
+    const tableStatement = line.match(/^(\d{1,2})\s+(.+?)\s+(?:■|□|[A-Z]\s*\/)/u);
+    if (tableStatement && !/Lösung|LÖSUNG|Corrig/i.test(line)) {
+      questions.push({
+        number: Number(tableStatement[1]),
+        prompt: tableStatement[2].trim(),
+        type: "matching",
+      });
+      return;
+    }
+    const aufgabe = line.match(/^Aufgabe\s+(\d{1,2})(?:\s*\([^)]*\))?\s*:\s*(.+)/i);
+    if (aufgabe) {
+      questions.push({
+        number: Number(aufgabe[1]),
+        prompt: aufgabe[2].trim(),
+        type: /richtig|falsch/i.test(line) ? "true_false" : "question",
+      });
+      return;
+    }
+    const rf = line.match(/^Richtig\/Falsch\s*:\s*(.+)/i);
+    if (rf) {
+      questions.push({ number: questions.length + 1, prompt: rf[1].trim(), type: "true_false" });
+      return;
+    }
+    const mc = line.match(/^Multiple Choice\s*:\s*(.+)/i);
+    if (mc) {
+      questions.push({ number: questions.length + 1, prompt: mc[1].trim(), type: "multiple_choice" });
+    }
+  });
+  return questions;
+};
+
+const countHoerenCorrections = (raw = "", expectedCount = null) => {
+  const text = normalizeHoerenLineText(raw);
+  const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
+  const directRows = lines.filter((line) =>
+    /^\d{1,2}[\.)]?\s+(?:[A-C]\b|RICHTIG\b|FALSCH\b|Richtig\b|Falsch\b|[A-ZÄÖÜ][\p{L}.-]{1,40}\b)/u.test(line)
+  ).length;
+  if (directRows) return expectedCount ? Math.min(directRows, expectedCount) : directRows;
+  const splitRows = lines.filter((line, index) =>
+    /^\d{1,2}$/.test(line) && /^(?:[A-C]\b|Richtig\b|Falsch\b|[A-ZÄÖÜ][\p{L}.-]{1,40}\b)/u.test(lines[index + 1] || "")
+  ).length;
+  if (splitRows) return expectedCount ? Math.min(splitRows, expectedCount) : splitRows;
+  const rf = /\bRichtig\b|\bFalsch\b/i.test(text) ? 1 : 0;
+  const mc = /\bMC\s*:/i.test(text) ? 1 : 0;
+  const total = Math.max(rf, 0) + Math.max(mc, 0);
+  return expectedCount ? Math.min(total, expectedCount) : total;
+};
+
+const parseHoerenTeilNumber = (value, fallback = 1) => {
+  const match = String(value ?? "").match(/Teil\s*[_\s/-]*(\d+)/i);
+  return match ? Number(match[1]) : fallback;
+};
+
+const getHoerenSeriesMatches = (text, provider) => {
+  if (provider === "goethe") {
+    return getLineMatches(text, /^SUJET\s+(\d+)\s*\/\s*MODELLPRÜFUNG\s+\d+\s*$/gm);
+  }
+  if (provider === "telc") {
+    return getLineMatches(text, /^SIMULATION\s+(\d+)\s*[-–]\s*(.+)$/gim);
+  }
+  if (provider === "ecl") {
+    return getLineMatches(text, /^SUJET\s+0?(\d+)\s*\/\s*ECL\s+B1\s*[-–]\s*(.+)$/gim);
+  }
+  if (provider === "osd") {
+    const introEnd = text.search(/Each Prüfung contains four listening parts/i);
+    const body = introEnd >= 0 ? text.slice(introEnd) : text;
+    const offset = introEnd >= 0 ? introEnd : 0;
+    return getLineMatches(body, /^TEIL\s+1\s*$/gim).map((match, index) => {
+      match.index += offset;
+      match[1] = String(index + 1);
+      match[2] = `ÖSD Prüfung ${String(index + 1).padStart(2, "0")}`;
+      return match;
+    });
+  }
+  return [];
+};
+
+const buildHoerenAudioItems = ({ sectionBlock, sectionNumber }) => {
+  const textMatches = getLineMatches(sectionBlock, /^TEIL\s+\d+\s*\/\s*TEXT\s+(\d+)\s*$/gim);
+  const blocks = textMatches.length ? makeBlockSlices(sectionBlock, textMatches) : [{
+    match: [`Teil ${sectionNumber}`, String(sectionNumber)],
+    start: 0,
+    end: sectionBlock.length,
+    text: sectionBlock,
+  }];
+  const sectionQuestions = getBlockAfterMarker(sectionBlock, /STUDENT_VISIBLE_QUESTIONS[^\n]*/i, [
+    /CORRECTION_VISIBLE_AFTER_SUBMIT/i,
+    /^TEIL\s+\d+\s*\/\s*TEXT\s+\d+/im,
+  ]);
+  const sectionCorrection = getBlockAfterMarker(sectionBlock, /CORRECTION_VISIBLE_AFTER_SUBMIT[^\n]*/i, [
+    /^TEIL\s+\d+\b/im,
+  ]);
+  const sectionAudioSettings = getBlockAfterMarker(sectionBlock, /AUDIO_ENGINE_SETTINGS[^\n]*/i, [
+    /^TEIL\s+\d+\s*\/\s*TEXT\s+\d+/im,
+    /STUDENT_VISIBLE_QUESTIONS/i,
+    /CORRECTION_VISIBLE_AFTER_SUBMIT/i,
+  ]);
+
+  return blocks.map((block, index) => {
+    const itemNumber = Number(block.match?.[1]) || index + 1;
+    const adminTranscript = getBlockAfterMarker(block.text, /ADMIN_ONLY_TRANSCRIPT[^\n]*/i, [
+      /AUDIO_ENGINE_SETTINGS/i,
+      /STUDENT_VISIBLE_QUESTIONS/i,
+      /CORRECTION_VISIBLE_AFTER_SUBMIT/i,
+      /^TEIL\s+\d+\s*\/\s*TEXT\s+\d+/im,
+    ]) || getBlockAfterMarker(block.text, /ADMIN_ONLY_TRANSCRIPT_AND_AUDIO_ENGINE_SETTINGS[^\n]*/i, [
+      /STUDENT_VISIBLE_QUESTIONS/i,
+      /CORRECTION_VISIBLE_AFTER_SUBMIT/i,
+      /^TEIL\s+\d+\s*\/\s*TEXT\s+\d+/im,
+    ]);
+    const audioSettingsRaw = getBlockAfterMarker(block.text, /AUDIO_ENGINE_SETTINGS[^\n]*/i, [
+      /STUDENT_VISIBLE_QUESTIONS/i,
+      /CORRECTION_VISIBLE_AFTER_SUBMIT/i,
+      /^TEIL\s+\d+\s*\/\s*TEXT\s+\d+/im,
+    ]) || (/ADMIN_ONLY_TRANSCRIPT_AND_AUDIO_ENGINE_SETTINGS/i.test(block.text) ? adminTranscript : "") || sectionAudioSettings;
+    const itemQuestions = getBlockAfterMarker(block.text, /STUDENT_VISIBLE_QUESTIONS[^\n]*/i, [
+      /CORRECTION_VISIBLE_AFTER_SUBMIT/i,
+      /^TEIL\s+\d+\s*\/\s*TEXT\s+\d+/im,
+    ]);
+    const studentQuestions = itemQuestions || (textMatches.length ? "" : sectionQuestions);
+    const itemCorrection = getBlockAfterMarker(block.text, /CORRECTION_VISIBLE_AFTER_SUBMIT[^\n]*/i, [
+      /^TEIL\s+\d+\s*\/\s*TEXT\s+\d+/im,
+    ]);
+    const correction = itemCorrection || (textMatches.length ? "" : sectionCorrection);
+    const questions = extractHoerenQuestions(studentQuestions);
+    const correctionCount = countHoerenCorrections(correction, questions.length || null);
+    return {
+      itemNumber,
+      title: textMatches.length ? `Text ${itemNumber}` : `Teil ${sectionNumber}`,
+      adminTranscript,
+      audioEngineSettings: {
+        raw: audioSettingsRaw,
+      },
+      studentVisibleQuestions: studentQuestions,
+      correctionVisibleAfterSubmit: correction,
+      questions,
+      counts: {
+        questions: questions.length,
+        corrections: correctionCount,
+      },
+      validationWarnings: [
+        ...(!adminTranscript ? ["Missing admin transcript."] : []),
+        ...(!audioSettingsRaw ? ["Missing audio engine settings."] : []),
+        ...(!studentQuestions && !sectionQuestions ? ["Missing student-visible questions."] : []),
+        ...(!correction && !sectionCorrection ? ["Missing correction block."] : []),
+      ],
+    };
+  });
+};
+
+const buildHoerenSections = (seriesBlock) => {
+  const rawMatches = getLineMatches(
+    seriesBlock,
+    /^(?:TEIL_(\d+)_METADATA_AND_STUDENT_INSTRUCTIONS|(?:TEIL|Teil)\s+(\d+)(?:\s*[—–-][^\n]*)?)\s*$/gm
+  ).filter((match) => !/\/\s*TEXT/i.test(match[0]));
+  const sectionMatches = [];
+  rawMatches.forEach((match) => {
+    const partNumber = match[1] || match[2];
+    if (sectionMatches[sectionMatches.length - 1]?.partNumber === partNumber) return;
+    match[1] = partNumber;
+    match.partNumber = partNumber;
+    sectionMatches.push(match);
+  });
+  const sectionBlocks = makeBlockSlices(seriesBlock, sectionMatches);
+  return sectionBlocks.map((block, index) => {
+    const partNumber = Number(block.match?.[1]) || index + 1;
+    const instructions = getBlockAfterMarker(block.text, new RegExp(`TEIL_${partNumber}_METADATA_AND_STUDENT_INSTRUCTIONS[^\\n]*`, "i"), [
+      /ADMIN_ONLY_TRANSCRIPT/i,
+      /AUDIO_ENGINE_SETTINGS/i,
+      /^TEIL\s+\d+\s*\/\s*TEXT\s+\d+/im,
+    ]);
+    const audioItems = buildHoerenAudioItems({ sectionBlock: block.text, sectionNumber: partNumber });
+    const sectionQuestions = getBlockAfterMarker(block.text, /STUDENT_VISIBLE_QUESTIONS[^\n]*/i, [
+      /CORRECTION_VISIBLE_AFTER_SUBMIT/i,
+      /^TEIL\s+\d+\b/im,
+    ]);
+    const sectionCorrection = getBlockAfterMarker(block.text, /CORRECTION_VISIBLE_AFTER_SUBMIT[^\n]*/i, [
+      /^TEIL\s+\d+\b/im,
+    ]);
+    const itemQuestionCount = audioItems.reduce((sum, item) => sum + item.counts.questions, 0);
+    const itemCorrectionCount = audioItems.reduce((sum, item) => sum + item.counts.corrections, 0);
+    const questionCount = itemQuestionCount || extractHoerenQuestions(sectionQuestions).length;
+    const correctionCount = itemCorrectionCount || countHoerenCorrections(sectionCorrection, questionCount || null);
+    return {
+      partNumber,
+      title: `Teil ${partNumber}`,
+      instructions,
+      audioItems,
+      counts: {
+        audioItems: audioItems.length,
+        questions: questionCount,
+        corrections: correctionCount,
+      },
+      validationWarnings: [
+        ...(!audioItems.length ? ["No audio items detected."] : []),
+        ...(questionCount !== correctionCount ? [`Question/correction count mismatch (${questionCount}/${correctionCount}).`] : []),
+        ...audioItems.flatMap((item) => item.validationWarnings.map((warning) => `${item.title}: ${warning}`)),
+      ],
+    };
+  });
+};
+
+const buildHoerenParsedPreview = async ({ buffer, filename, mimetype, provider, level, maxSeries = null }) => {
+  const foundation = await buildListeningImportFoundation({ buffer, filename, mimetype, provider, level });
+  const raw = await mammoth.extractRawText({ buffer });
+  const text = normalizeText(raw.value || "");
+  const detectedProvider = foundation.metadata.provider;
+  const seriesMatches = getHoerenSeriesMatches(text, detectedProvider);
+  const seriesBlocks = makeBlockSlices(text, seriesMatches).slice(0, maxSeries || undefined);
+  const expectedByProvider = {
+    goethe: { sections: 4, audioItems: 8, questions: 30, corrections: 30 },
+    telc: { sections: 3, audioItems: 7, questions: 20, corrections: 20 },
+    ecl: { sections: 2, audioItems: 2, questions: 20, corrections: 20 },
+    osd: { sections: 4, audioItems: 8, questions: 30, corrections: 30 },
+  };
+  const series = seriesBlocks.map((block, index) => {
+    const seriesNumber = Number(block.match?.[1]) || index + 1;
+    const title = normalizeHoerenLineText(block.match?.[2] || block.match?.[0] || `Series ${seriesNumber}`);
+    const sections = buildHoerenSections(block.text);
+    const audioItemCount = sections.reduce((sum, section) => sum + section.counts.audioItems, 0);
+    const questionCount = sections.reduce((sum, section) => sum + section.counts.questions, 0);
+    const correctionCount = sections.reduce((sum, section) => sum + section.counts.corrections, 0);
+    const expected = expectedByProvider[detectedProvider] || null;
+    const expectationWarnings = expected
+      ? Object.entries(expected)
+          .filter(([key, value]) => Number(value) !== Number({
+            sections: sections.length,
+            audioItems: audioItemCount,
+            questions: questionCount,
+            corrections: correctionCount,
+          }[key]))
+          .map(([key, value]) => `Expected ${value} ${key}, detected ${{
+            sections: sections.length,
+            audioItems: audioItemCount,
+            questions: questionCount,
+            corrections: correctionCount,
+          }[key]}.`)
+      : [];
+    return {
+      seriesNumber,
+      title,
+      sourceLabel: `${detectedProvider.toUpperCase()} ${foundation.metadata.level || ""} Hören ${seriesNumber}`,
+      sections,
+      counts: {
+        sections: sections.length,
+        audioItems: audioItemCount,
+        questions: questionCount,
+        corrections: correctionCount,
+      },
+      validationWarnings: [
+        ...expectationWarnings,
+        ...(!sections.length ? ["No Teile detected."] : []),
+        ...(questionCount !== correctionCount ? [`Series question/correction count mismatch (${questionCount}/${correctionCount}).`] : []),
+        ...sections.flatMap((section) => section.validationWarnings.map((warning) => `Teil ${section.partNumber}: ${warning}`)),
+      ],
+    };
+  });
+  const validationWarnings = [
+    ...(foundation.validation.warnings || []),
+    ...(!series.length ? ["No Hören series detected."] : []),
+    ...series.flatMap((item) => item.validationWarnings.map((warning) => `Series ${item.seriesNumber}: ${warning}`)),
+  ];
+  const comparisonSummary = {
+    provider: detectedProvider,
+    level: foundation.metadata.level,
+    expectedStructure: {
+      goethe: "4 Teile; Teil 1 has 5 audio items; Teile 2-4 have one audio item each.",
+      telc: "3 Teile; Teil 1 has 5 audio items; Teile 2-3 have one audio item each.",
+      ecl: "2 Teile; each Teil has one audio item.",
+      osd: "4 Teile; Teil 1 has 5 audio items; Teile 2-4 have one audio item each.",
+    }[detectedProvider] || "Provider-specific structure.",
+    detected: {
+      series: series.length,
+      sections: series.reduce((sum, item) => sum + item.counts.sections, 0),
+      audioItems: series.reduce((sum, item) => sum + item.counts.audioItems, 0),
+      questions: series.reduce((sum, item) => sum + item.counts.questions, 0),
+      corrections: series.reduce((sum, item) => sum + item.counts.corrections, 0),
+      warnings: validationWarnings.length,
+    },
+  };
+  return {
+    ...foundation,
+    metadata: {
+      ...foundation.metadata,
+      parserMode: "hoeren_marker_preview",
+    },
+    draft: {
+      ...foundation.draft,
+      type: "listening_marker_preview",
+      parserVersion: `${IMPORT_ANALYZER_VERSION}.hoeren.marker-preview`,
+      series,
+      comparisonSummary,
+      validation: {
+        errors: [],
+        warnings: validationWarnings,
+      },
+      note: "STEP 2 draft preview only. Audio generation starts in STEP 3.",
+    },
+    validation: {
+      errors: [],
+      warnings: validationWarnings,
+    },
+  };
+};
+
 const buildFallbackQuestion = ({ sectionType, prompt, position, questionType = "compound" }) => ({
   questionType,
   prompt: trimForDb(prompt),
@@ -3853,7 +4218,7 @@ const saveListeningImportFoundationDraft = async ({ pool, foundation, adminId = 
     foundation.documentHash,
   ]);
   const existingRow = existing.rows[0];
-  if (existingRow && existingRow.section_type === "listen") {
+  if (existingRow && Array.isArray(existingRow.imported_exam_ids) && existingRow.imported_exam_ids.length) {
     return {
       duplicate: true,
       import: existingRow,
@@ -3871,8 +4236,13 @@ const saveListeningImportFoundationDraft = async ({ pool, foundation, adminId = 
     foundation.metadata.provider,
     foundation.metadata.examType,
     foundation.metadata.level,
-    foundation.draft.hierarchy.seriesDetected || 0,
-    foundation.draft.hierarchy.teileDetected || 0,
+    Array.isArray(foundation.draft.series) ? foundation.draft.series.length : foundation.draft.hierarchy.seriesDetected || 0,
+    Array.isArray(foundation.draft.series)
+      ? foundation.draft.series.reduce((sum, series) => sum + (series.counts?.sections || 0), 0)
+      : foundation.draft.hierarchy.teileDetected || 0,
+    Array.isArray(foundation.draft.series)
+      ? foundation.draft.series.reduce((sum, series) => sum + (series.counts?.questions || 0), 0)
+      : 0,
     JSON.stringify(foundation.validation.warnings || []),
     JSON.stringify({
       title: foundation.metadata.title,
@@ -3900,18 +4270,18 @@ const saveListeningImportFoundationDraft = async ({ pool, foundation, adminId = 
              section_type = 'listen',
              total_series = $8,
              total_sections = $9,
-             total_questions = 0,
-             extraction_method = 'docx-marker-foundation',
+             total_questions = $10,
+             extraction_method = 'docx-marker-preview',
              parse_status = 'draft',
-             validation_warnings = $10::jsonb,
-             raw_outline = $11::jsonb,
-             draft_content = $12::jsonb,
-             confidence = $13::jsonb,
+             validation_warnings = $11::jsonb,
+             raw_outline = $12::jsonb,
+             draft_content = $13::jsonb,
+             confidence = $14::jsonb,
              error_message = NULL,
              updated_at = NOW()
          WHERE document_hash = $1
          RETURNING *`,
-        params.slice(0, 13)
+        params.slice(0, 14)
       )
     : await pool.query(
         `INSERT INTO exam_document_imports (
@@ -3919,8 +4289,8 @@ const saveListeningImportFoundationDraft = async ({ pool, foundation, adminId = 
            section_type, total_series, total_sections, total_questions, extraction_method,
            parse_status, validation_warnings, raw_outline, draft_content, confidence, created_by, updated_at
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'listen', $8, $9, 0, 'docx-marker-foundation',
-           'draft', $10::jsonb, $11::jsonb, $12::jsonb, $13::jsonb, $14, NOW())
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'listen', $8, $9, $10, 'docx-marker-preview',
+           'draft', $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15, NOW())
          RETURNING *`,
         params
       );
@@ -4079,6 +4449,7 @@ const importParsedExamDocument = async ({ pool, parsed, adminId = null }) => {
 
 module.exports = {
   analyzeExamDocument,
+  buildHoerenParsedPreview,
   buildListeningImportFoundation,
   ensureDocumentImportSchema,
   getExamImportDraft,
