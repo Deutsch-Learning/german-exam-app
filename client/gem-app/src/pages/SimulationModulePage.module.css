@@ -1089,6 +1089,34 @@
   font-size: 1rem;
 }
 
+.germanCharacterToolbar {
+  border-top: 1px solid #e5e7eb;
+  padding: 10px 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  background: #f8fafc;
+}
+
+.germanCharacterToolbar button {
+  width: 38px;
+  height: 36px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #111827;
+  font: inherit;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.germanCharacterToolbar button:hover,
+.germanCharacterToolbar button:focus-visible {
+  border-color: var(--module-accent);
+  color: var(--module-accent);
+  outline: none;
+}
+
 .writingSupportGrid {
   display: grid;
   grid-template-columns: 1fr;

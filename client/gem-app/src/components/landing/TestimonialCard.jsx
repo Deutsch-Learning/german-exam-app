@@ -1,6 +1,6 @@
 import { Star } from "lucide-react";
 
-export default function TestimonialCard({ avatar, text, rating = 5 }) {
+export default function TestimonialCard({ avatar, text, rating = 5, name, role }) {
   const safeRating = Math.max(0, Math.min(5, Number(rating) || 0));
 
   return (
@@ -18,6 +18,11 @@ export default function TestimonialCard({ avatar, text, rating = 5 }) {
           ))}
         </div>
         <p className="testimonial-text">"{text}"</p>
+        {name ? (
+          <p className="testimonial-author">
+            <strong>{name}</strong>{role ? <span>{role}</span> : null}
+          </p>
+        ) : null}
       </div>
     </div>
   );

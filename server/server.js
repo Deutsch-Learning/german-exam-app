@@ -131,6 +131,11 @@ const LEVEL_ORDER = ["A1", "A2", "B1", "B2", "C1", "C2"];
 const NOT_SPECIFIED_LEVEL = "Not specified";
 const SUBSCRIPTION_CERTIFICATIONS = ["goethe", "osd", "telc", "ecl"];
 const SUBSCRIPTION_SECTIONS = ["read", "listen", "speak", "write"];
+const SUBSCRIPTION_SPEAKING_QUOTAS = {
+  starter: 20,
+  standard: 45,
+  intensif: 65,
+};
 const SUBSCRIPTION_PLAN_SEEDS = [
   { level: "B1", planKey: "starter", planName: "Starter", durationDays: 5, priceEur: 14.99, writingSimulatorAttempts: 3 },
   { level: "B1", planKey: "standard", planName: "Standard", durationDays: 15, priceEur: 29.99, writingSimulatorAttempts: 6 },
@@ -138,6 +143,11 @@ const SUBSCRIPTION_PLAN_SEEDS = [
   { level: "B2", planKey: "starter", planName: "Starter", durationDays: 5, priceEur: 19.99, writingSimulatorAttempts: 3 },
   { level: "B2", planKey: "standard", planName: "Standard", durationDays: 15, priceEur: 34.99, writingSimulatorAttempts: 6 },
   { level: "B2", planKey: "intensif", planName: "Intensif", durationDays: 30, priceEur: 64.99, writingSimulatorAttempts: 10 },
+];
+const INDUSTRIAL_OFFERS = [
+  { offerKey: "industrial_1_month", label: "Industrial 1 month", accessMonths: 1, billedMonths: 1, durationDays: 30, priceEur: 450.99, speakingSimulatorQuota: 240 },
+  { offerKey: "industrial_6_months", label: "Industrial 6 months", accessMonths: 6, billedMonths: 6, durationDays: 180, priceEur: 2500.99, speakingSimulatorQuota: 600 },
+  { offerKey: "industrial_12_plus_2", label: "Industrial 1 year + 2 free months", accessMonths: 14, billedMonths: 12, durationDays: 420, priceEur: 5000.99, speakingSimulatorQuota: 1000 },
 ];
 
 if (!process.env.JWT_SECRET && isProduction) {
@@ -173,6 +183,13 @@ const documentUpload = multer({
 const authRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const testimonialRateLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 6,
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -305,6 +322,8 @@ const mapSubscriptionRow = (row) => ({
     0,
     Number(row.writing_simulator_attempts ?? 0) - Number(row.writing_attempts_used ?? 0)
   ),
+  speakingSimulatorQuota: Number(row.speaking_simulator_quota_override ?? row.speaking_simulator_quota ?? 0),
+  planCategory: row.plan_category || "standard",
 });
 
 const getActiveSubscriptionsForUser = async (userId) => {
@@ -312,7 +331,9 @@ const getActiveSubscriptionsForUser = async (userId) => {
   const result = await pool.query(
     `SELECT us.id, us.plan_id, us.level, us.plan_key, us.status, us.starts_at, us.expires_at,
             us.amount_paid, us.currency, us.selected_certifications,
+            us.speaking_simulator_quota_override,
             sp.plan_name, sp.duration_days, sp.price_eur, sp.writing_simulator_attempts,
+            sp.speaking_simulator_quota, sp.plan_category,
             sp.unlocked_sections,
             COALESCE(wsu.attempts_used, 0) AS writing_attempts_used
      FROM user_subscriptions us
@@ -358,6 +379,98 @@ const userHasSubscriptionAccess = (user, subscription, certification, section) =
     (!cert || subscription.certifications.includes(cert)) &&
     (!unlockedSection || subscription.unlockedSections.includes(unlockedSection))
   );
+};
+
+const cleanPublicText = (value, max = 1000) =>
+  String(value ?? "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, max);
+
+const stripHtmlForValidation = (value) =>
+  String(value ?? "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const pushValidationFlag = (flags, severity, code, message, entityType, entityId = null) => {
+  flags.push({ severity, code, message, entityType, entityId });
+};
+
+const buildExamContentValidation = async (examId) => {
+  const [examResult, sectionResult, questionResult, audioResult] = await Promise.all([
+    pool.query(`SELECT id, code, name, section_type, level, provider FROM exams WHERE id = $1`, [examId]),
+    pool.query(`SELECT id, title, instructions, section_type, part_number FROM exam_sections WHERE exam_id = $1 ORDER BY position, id`, [examId]),
+    pool.query(`SELECT id, section_id, prompt, question_type, options, correct_answer, transcript, position FROM exam_questions WHERE exam_id = $1 ORDER BY position, id`, [examId]),
+    pool.query(
+      `SELECT id, title, admin_transcript, audio_generation_status, validation_warnings
+         FROM exam_listening_audio_items
+        WHERE exam_id = $1
+        ORDER BY part_number, item_number, id`,
+      [examId]
+    ).catch(() => ({ rows: [] })),
+  ]);
+  const exam = examResult.rows[0];
+  if (!exam) return null;
+  const flags = [];
+  if (!sectionResult.rows.length) {
+    pushValidationFlag(flags, "error", "missing_sections", "No sections are attached to this exam.", "exam", exam.id);
+  }
+  if (!questionResult.rows.length) {
+    pushValidationFlag(flags, "error", "missing_questions", "No questions are attached to this exam.", "exam", exam.id);
+  }
+  sectionResult.rows.forEach((section) => {
+    if (!stripHtmlForValidation(section.title)) {
+      pushValidationFlag(flags, "warning", "empty_section_title", "A section has no title.", "section", section.id);
+    }
+    if (!stripHtmlForValidation(section.instructions)) {
+      pushValidationFlag(flags, "warning", "empty_section_instructions", "A section has no visible instructions.", "section", section.id);
+    }
+    if (String(section.instructions || "").split("\n").filter((line) => line.trim().length <= 2).length >= 5) {
+      pushValidationFlag(flags, "warning", "unusual_line_breaks", "Section instructions contain unusual short line breaks.", "section", section.id);
+    }
+  });
+  questionResult.rows.forEach((question) => {
+    const prompt = stripHtmlForValidation(question.prompt);
+    const options = Array.isArray(question.options) ? question.options : [];
+    const answer = question.correct_answer && typeof question.correct_answer === "object" ? question.correct_answer : {};
+    if (!prompt) pushValidationFlag(flags, "error", "empty_question_prompt", "A question has no prompt.", "question", question.id);
+    if (["multiple_choice", "matching", "true_false", "yes_no"].includes(question.question_type) && options.length < 2) {
+      pushValidationFlag(flags, "warning", "missing_options", "A question appears to need answer options but has fewer than two.", "question", question.id);
+    }
+    const optionValues = new Set(options.map((option) => String(option?.value ?? option?.id ?? option?.key ?? "").trim()).filter(Boolean));
+    const answerValue = String(answer.value ?? answer.answer ?? answer.correct ?? "").trim();
+    if (answerValue && optionValues.size && !optionValues.has(answerValue)) {
+      pushValidationFlag(flags, "warning", "answer_option_mismatch", "A correction value does not match any visible option value.", "question", question.id);
+    }
+  });
+  if (String(exam.section_type).toLowerCase() === "listen") {
+    audioResult.rows.forEach((item) => {
+      if (!stripHtmlForValidation(item.admin_transcript)) {
+        pushValidationFlag(flags, "error", "missing_audio_transcript", "A listening audio item has no transcript for playback generation.", "audio_item", item.id);
+      }
+      if (item.audio_generation_status !== "published") {
+        pushValidationFlag(flags, "warning", "audio_not_published", "A listening audio item is not published yet.", "audio_item", item.id);
+      }
+      const warnings = Array.isArray(item.validation_warnings) ? item.validation_warnings : [];
+      warnings.forEach((warning, index) => {
+        pushValidationFlag(flags, "warning", `audio_warning_${index + 1}`, String(warning), "audio_item", item.id);
+      });
+    });
+  }
+  return {
+    exam,
+    flags,
+    counts: {
+      errors: flags.filter((flag) => flag.severity === "error").length,
+      warnings: flags.filter((flag) => flag.severity !== "error").length,
+      sections: sectionResult.rows.length,
+      questions: questionResult.rows.length,
+      audioItems: audioResult.rows.length,
+    },
+  };
 };
 
 const getClientIp = (req) =>
@@ -809,6 +922,44 @@ async function ensureSchema() {
   `);
   await pool.query(`ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS selected_certifications JSONB NOT NULL DEFAULT '[]'::jsonb;`);
   await pool.query(`ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS selected_certifications JSONB NOT NULL DEFAULT '[]'::jsonb;`);
+  await pool.query(`ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS speaking_simulator_quota INTEGER NOT NULL DEFAULT 0;`);
+  await pool.query(`ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS plan_category TEXT NOT NULL DEFAULT 'standard';`);
+  await pool.query(`ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS access_months INTEGER;`);
+  await pool.query(`ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS billed_months INTEGER;`);
+  await pool.query(`ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb;`);
+  await pool.query(`ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS speaking_simulator_quota_override INTEGER;`);
+  await pool.query(`ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMPTZ;`);
+  await pool.query(`ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS revoked_by INTEGER REFERENCES users(id) ON DELETE SET NULL;`);
+  await pool.query(`ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS grant_reason TEXT;`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS industrial_subscription_offers (
+      id SERIAL PRIMARY KEY,
+      offer_key TEXT NOT NULL UNIQUE,
+      label TEXT NOT NULL,
+      duration_days INTEGER NOT NULL CHECK (duration_days > 0),
+      access_months INTEGER NOT NULL CHECK (access_months > 0),
+      billed_months INTEGER NOT NULL CHECK (billed_months > 0),
+      price_eur NUMERIC(10,2) NOT NULL CHECK (price_eur >= 0),
+      currency TEXT NOT NULL DEFAULT 'EUR',
+      speaking_simulator_quota INTEGER NOT NULL CHECK (speaking_simulator_quota >= 0),
+      certifications JSONB NOT NULL DEFAULT '["goethe","osd","telc","ecl"]'::jsonb,
+      unlocked_sections JSONB NOT NULL DEFAULT '["read","listen","speak","write"]'::jsonb,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS subscription_admin_events (
+      id SERIAL PRIMARY KEY,
+      subscription_id INTEGER REFERENCES user_subscriptions(id) ON DELETE SET NULL,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      admin_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      action TEXT NOT NULL,
+      details JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
   await pool.query(`
     CREATE INDEX IF NOT EXISTS user_subscriptions_user_level_status_idx
       ON user_subscriptions(user_id, level, status, expires_at DESC);
@@ -829,6 +980,8 @@ async function ensureSchema() {
   await pool.query(`ALTER TABLE user_subscriptions ENABLE ROW LEVEL SECURITY;`);
   await pool.query(`ALTER TABLE writing_simulator_usage ENABLE ROW LEVEL SECURITY;`);
   await pool.query(`ALTER TABLE payment_transactions ENABLE ROW LEVEL SECURITY;`);
+  await pool.query(`ALTER TABLE industrial_subscription_offers ENABLE ROW LEVEL SECURITY;`);
+  await pool.query(`ALTER TABLE subscription_admin_events ENABLE ROW LEVEL SECURITY;`);
   await pool.query(`
     DO $$
     BEGIN
@@ -843,9 +996,11 @@ async function ensureSchema() {
     await pool.query(
       `INSERT INTO subscription_plans (
          level, plan_key, plan_name, duration_days, price_eur, currency,
-         writing_simulator_attempts, certifications, unlocked_sections, is_active, updated_at
+         writing_simulator_attempts, speaking_simulator_quota, certifications, unlocked_sections,
+         plan_category, access_months, billed_months, metadata, is_active, updated_at
        )
-       VALUES ($1, $2, $3, $4, $5, 'EUR', $6, $7::jsonb, $8::jsonb, TRUE, NOW())
+       VALUES ($1, $2, $3, $4, $5, 'EUR', $6, $7, $8::jsonb, $9::jsonb,
+               'standard', NULL, NULL, $10::jsonb, TRUE, NOW())
        ON CONFLICT (level, plan_key)
        DO UPDATE SET
          plan_name = EXCLUDED.plan_name,
@@ -853,8 +1008,13 @@ async function ensureSchema() {
          price_eur = EXCLUDED.price_eur,
          currency = EXCLUDED.currency,
          writing_simulator_attempts = EXCLUDED.writing_simulator_attempts,
+         speaking_simulator_quota = EXCLUDED.speaking_simulator_quota,
          certifications = EXCLUDED.certifications,
          unlocked_sections = EXCLUDED.unlocked_sections,
+         plan_category = EXCLUDED.plan_category,
+         access_months = EXCLUDED.access_months,
+         billed_months = EXCLUDED.billed_months,
+         metadata = EXCLUDED.metadata,
          is_active = TRUE,
          updated_at = NOW()`,
       [
@@ -864,6 +1024,42 @@ async function ensureSchema() {
         plan.durationDays,
         plan.priceEur,
         plan.writingSimulatorAttempts,
+        SUBSCRIPTION_SPEAKING_QUOTAS[plan.planKey] ?? 0,
+        JSON.stringify(SUBSCRIPTION_CERTIFICATIONS),
+        JSON.stringify(SUBSCRIPTION_SECTIONS),
+        JSON.stringify({
+          speakingSimulatorQuota: SUBSCRIPTION_SPEAKING_QUOTAS[plan.planKey] ?? 0,
+        }),
+      ]
+    );
+  }
+  for (const offer of INDUSTRIAL_OFFERS) {
+    await pool.query(
+      `INSERT INTO industrial_subscription_offers (
+         offer_key, label, duration_days, access_months, billed_months, price_eur,
+         speaking_simulator_quota, certifications, unlocked_sections, is_active, updated_at
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, TRUE, NOW())
+       ON CONFLICT (offer_key)
+       DO UPDATE SET
+         label = EXCLUDED.label,
+         duration_days = EXCLUDED.duration_days,
+         access_months = EXCLUDED.access_months,
+         billed_months = EXCLUDED.billed_months,
+         price_eur = EXCLUDED.price_eur,
+         speaking_simulator_quota = EXCLUDED.speaking_simulator_quota,
+         certifications = EXCLUDED.certifications,
+         unlocked_sections = EXCLUDED.unlocked_sections,
+         is_active = TRUE,
+         updated_at = NOW()`,
+      [
+        offer.offerKey,
+        offer.label,
+        offer.durationDays,
+        offer.accessMonths,
+        offer.billedMonths,
+        offer.priceEur,
+        offer.speakingSimulatorQuota,
         JSON.stringify(SUBSCRIPTION_CERTIFICATIONS),
         JSON.stringify(SUBSCRIPTION_SECTIONS),
       ]
@@ -919,6 +1115,25 @@ async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS api_usage_user_created_idx
       ON api_usage_logs(user_id, created_at DESC);
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS testimonials (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      display_name TEXT NOT NULL,
+      role_label TEXT,
+      rating INTEGER NOT NULL DEFAULT 5 CHECK (rating >= 1 AND rating <= 5),
+      comment TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+      admin_note TEXT,
+      reviewed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      reviewed_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS testimonials_status_created_idx ON testimonials(status, created_at DESC);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS testimonials_user_created_idx ON testimonials(user_id, created_at DESC);`);
+  await pool.query(`ALTER TABLE testimonials ENABLE ROW LEVEL SECURITY;`);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS email_events (
@@ -3221,6 +3436,70 @@ app.post("/contact", async (req, res) => {
   }
 });
 
+app.get("/api/testimonials", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, display_name, role_label, rating, comment, created_at
+         FROM testimonials
+        WHERE status = 'approved'
+        ORDER BY created_at DESC
+        LIMIT 12`
+    );
+    return res.json({
+      ok: true,
+      testimonials: result.rows.map((row) => ({
+        id: row.id,
+        displayName: row.display_name,
+        roleLabel: row.role_label,
+        rating: Number(row.rating),
+        comment: row.comment,
+        createdAt: row.created_at,
+      })),
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.post("/api/testimonials", testimonialRateLimiter, requireAuth, async (req, res) => {
+  try {
+    const comment = cleanPublicText(req.body?.comment, 1000);
+    const rating = Math.max(1, Math.min(5, Math.round(Number(req.body?.rating || 5))));
+    const displayName = cleanPublicText(
+      req.body?.displayName || req.user.first_name || req.user.username || req.user.email,
+      80
+    );
+    const roleLabel = cleanPublicText(req.body?.roleLabel || "Candidat", 80);
+    if (comment.length < 20) {
+      return res.status(400).json({ ok: false, error: "Le commentaire doit contenir au moins 20 caractères." });
+    }
+    const recent = await pool.query(
+      `SELECT COUNT(*)::int AS count
+         FROM testimonials
+        WHERE user_id = $1 AND created_at > NOW() - INTERVAL '1 hour'`,
+      [req.user.id]
+    );
+    if (Number(recent.rows[0]?.count || 0) >= 3) {
+      return res.status(429).json({ ok: false, error: "Veuillez patienter avant d'envoyer un autre avis." });
+    }
+    const inserted = await pool.query(
+      `INSERT INTO testimonials (user_id, display_name, role_label, rating, comment, status)
+       VALUES ($1, $2, $3, $4, $5, 'pending')
+       RETURNING id, status, created_at`,
+      [req.user.id, displayName || "Candidat", roleLabel, rating, comment]
+    );
+    return res.status(201).json({
+      ok: true,
+      testimonial: inserted.rows[0],
+      message: "Merci. Votre avis sera publié après validation.",
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
 app.get("/api/admin/users", requireAdmin, async (req, res) => {
   try {
     const users = await pool.query(`
@@ -3299,6 +3578,63 @@ app.patch("/api/admin/users/:id/status", requireAdmin, updateAdminUserStatusHand
 app.patch("/api/admin/users/:id/suspend", requireAdmin, (req, res) => {
   req.body = { ...(req.body ?? {}), status: req.body?.status === "active" ? "active" : "suspended" };
   return updateAdminUserStatusHandler(req, res);
+});
+
+app.get("/api/admin/testimonials", requireAdmin, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT t.*, u.email AS user_email, a.email AS reviewed_by_email
+         FROM testimonials t
+         LEFT JOIN users u ON u.id = t.user_id
+         LEFT JOIN users a ON a.id = t.reviewed_by
+        ORDER BY t.created_at DESC
+        LIMIT 200`
+    );
+    return res.json({ ok: true, testimonials: result.rows });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.patch("/api/admin/testimonials/:id", requireAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const status = ["pending", "approved", "rejected"].includes(req.body?.status) ? req.body.status : null;
+    const displayName = req.body?.displayName == null ? null : cleanPublicText(req.body.displayName, 80);
+    const roleLabel = req.body?.roleLabel == null ? null : cleanPublicText(req.body.roleLabel, 80);
+    const comment = req.body?.comment == null ? null : cleanPublicText(req.body.comment, 1000);
+    const rating = req.body?.rating == null ? null : Math.max(1, Math.min(5, Math.round(Number(req.body.rating))));
+    const adminNote = req.body?.adminNote == null ? null : cleanPublicText(req.body.adminNote, 500);
+    if (!Number.isInteger(id)) return res.status(400).json({ ok: false, error: "Invalid testimonial id" });
+    if (comment != null && comment.length < 20) {
+      return res.status(400).json({ ok: false, error: "Comment is too short" });
+    }
+    const updated = await pool.query(
+      `UPDATE testimonials
+          SET status = COALESCE($1, status),
+              display_name = COALESCE(NULLIF($2, ''), display_name),
+              role_label = COALESCE($3, role_label),
+              comment = COALESCE($4, comment),
+              rating = COALESCE($5, rating),
+              admin_note = COALESCE($6, admin_note),
+              reviewed_by = CASE WHEN $1 IS NULL THEN reviewed_by ELSE $7 END,
+              reviewed_at = CASE WHEN $1 IS NULL THEN reviewed_at ELSE NOW() END,
+              updated_at = NOW()
+        WHERE id = $8
+        RETURNING *`,
+      [status, displayName, roleLabel, comment, rating, adminNote, req.user.id, id]
+    );
+    if (!updated.rows[0]) return res.status(404).json({ ok: false, error: "Testimonial not found" });
+    await auditAdminAction(req, "testimonial.update", "testimonial", id, {
+      status,
+      edited: Boolean(displayName || roleLabel || comment || rating || adminNote),
+    });
+    return res.json({ ok: true, testimonial: updated.rows[0] });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
 });
 
 const adminAnalyticsHandler = async (req, res) => {
@@ -3858,10 +4194,18 @@ app.get("/api/subscription-plans", async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT id, level, plan_key, plan_name, duration_days, price_eur, currency,
-              writing_simulator_attempts, certifications, unlocked_sections
+              writing_simulator_attempts, speaking_simulator_quota, certifications, unlocked_sections,
+              plan_category, access_months, billed_months
        FROM subscription_plans
        WHERE is_active = TRUE
        ORDER BY level, CASE plan_key WHEN 'starter' THEN 1 WHEN 'standard' THEN 2 ELSE 3 END`
+    );
+    const industrial = await pool.query(
+      `SELECT id, offer_key, label, duration_days, access_months, billed_months, price_eur, currency,
+              speaking_simulator_quota, certifications, unlocked_sections
+         FROM industrial_subscription_offers
+        WHERE is_active = TRUE
+        ORDER BY duration_days`
     );
     return res.json({
       ok: true,
@@ -3874,6 +4218,23 @@ app.get("/api/subscription-plans", async (req, res) => {
         priceEur: Number(row.price_eur),
         currency: row.currency,
         writingSimulatorAttempts: Number(row.writing_simulator_attempts),
+        speakingSimulatorQuota: Number(row.speaking_simulator_quota ?? 0),
+        planCategory: row.plan_category || "standard",
+        accessMonths: row.access_months ? Number(row.access_months) : null,
+        billedMonths: row.billed_months ? Number(row.billed_months) : null,
+        certifications: normalizeStringArray(row.certifications, SUBSCRIPTION_CERTIFICATIONS),
+        unlockedSections: normalizeStringArray(row.unlocked_sections, SUBSCRIPTION_SECTIONS),
+      })),
+      industrialOffers: industrial.rows.map((row) => ({
+        id: row.id,
+        offerKey: row.offer_key,
+        label: row.label,
+        durationDays: Number(row.duration_days),
+        accessMonths: Number(row.access_months),
+        billedMonths: Number(row.billed_months),
+        priceEur: Number(row.price_eur),
+        currency: row.currency,
+        speakingSimulatorQuota: Number(row.speaking_simulator_quota),
         certifications: normalizeStringArray(row.certifications, SUBSCRIPTION_CERTIFICATIONS),
         unlockedSections: normalizeStringArray(row.unlocked_sections, SUBSCRIPTION_SECTIONS),
       })),
@@ -3938,7 +4299,7 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
 
     const planResult = await pool.query(
       `SELECT id, level, plan_key, plan_name, duration_days, price_eur, currency,
-              writing_simulator_attempts, certifications, unlocked_sections
+              writing_simulator_attempts, speaking_simulator_quota, certifications, unlocked_sections
        FROM subscription_plans
        WHERE level = $1 AND plan_key = $2 AND is_active = TRUE
        LIMIT 1`,
@@ -3971,6 +4332,7 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
           selectedCertificationCount,
           finalPriceEur,
           writingSimulatorAttempts: Number(plan.writing_simulator_attempts),
+          speakingSimulatorQuota: Number(plan.speaking_simulator_quota ?? 0),
           requestedProvider: provider,
         }),
       ]
@@ -3994,11 +4356,248 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
         currency: plan.currency,
         durationDays: Number(plan.duration_days),
         writingSimulatorAttempts: Number(plan.writing_simulator_attempts),
+        speakingSimulatorQuota: Number(plan.speaking_simulator_quota ?? 0),
         certifications: selectedCertifications,
         unlockedSections: normalizeStringArray(plan.unlocked_sections, SUBSCRIPTION_SECTIONS),
         message: "Paiement bientôt disponible. Ce pack est prêt pour l’intégration du paiement.",
       },
     });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.get("/api/admin/subscriptions", requireAdmin, async (req, res) => {
+  try {
+    const [plans, industrialOffers, subscriptions, events] = await Promise.all([
+      pool.query(
+        `SELECT id, level, plan_key, plan_name, duration_days, price_eur, currency,
+                writing_simulator_attempts, speaking_simulator_quota, certifications, unlocked_sections
+           FROM subscription_plans
+          WHERE is_active = TRUE
+          ORDER BY level, CASE plan_key WHEN 'starter' THEN 1 WHEN 'standard' THEN 2 ELSE 3 END`
+      ),
+      pool.query(
+        `SELECT id, offer_key, label, duration_days, access_months, billed_months, price_eur, currency,
+                speaking_simulator_quota, certifications, unlocked_sections
+           FROM industrial_subscription_offers
+          WHERE is_active = TRUE
+          ORDER BY duration_days`
+      ),
+      pool.query(
+        `SELECT us.id, us.user_id, u.email, u.username, us.plan_id, us.level, us.plan_key, us.status,
+                us.starts_at, us.expires_at, us.selected_certifications, us.amount_paid, us.currency,
+                us.payment_provider, us.payment_reference, us.speaking_simulator_quota_override,
+                us.revoked_at, us.grant_reason, us.created_at, us.updated_at,
+                sp.plan_name, sp.duration_days, sp.price_eur, sp.writing_simulator_attempts,
+                sp.speaking_simulator_quota, sp.unlocked_sections
+           FROM user_subscriptions us
+           JOIN users u ON u.id = us.user_id
+           JOIN subscription_plans sp ON sp.id = us.plan_id
+          ORDER BY us.created_at DESC
+          LIMIT 200`
+      ),
+      pool.query(
+        `SELECT e.id, e.subscription_id, e.user_id, u.email, e.action, e.details, e.created_at,
+                a.email AS admin_email
+           FROM subscription_admin_events e
+           LEFT JOIN users u ON u.id = e.user_id
+           LEFT JOIN users a ON a.id = e.admin_id
+          ORDER BY e.created_at DESC
+          LIMIT 80`
+      ),
+    ]);
+
+    return res.json({
+      ok: true,
+      plans: plans.rows.map((row) => ({
+        id: row.id,
+        level: row.level,
+        planKey: row.plan_key,
+        planName: row.plan_name,
+        durationDays: Number(row.duration_days),
+        priceEur: Number(row.price_eur),
+        currency: row.currency,
+        writingSimulatorAttempts: Number(row.writing_simulator_attempts),
+        speakingSimulatorQuota: Number(row.speaking_simulator_quota ?? 0),
+        certifications: normalizeStringArray(row.certifications, SUBSCRIPTION_CERTIFICATIONS),
+        unlockedSections: normalizeStringArray(row.unlocked_sections, SUBSCRIPTION_SECTIONS),
+      })),
+      industrialOffers: industrialOffers.rows.map((row) => ({
+        id: row.id,
+        offerKey: row.offer_key,
+        label: row.label,
+        durationDays: Number(row.duration_days),
+        accessMonths: Number(row.access_months),
+        billedMonths: Number(row.billed_months),
+        priceEur: Number(row.price_eur),
+        currency: row.currency,
+        speakingSimulatorQuota: Number(row.speaking_simulator_quota),
+      })),
+      subscriptions: subscriptions.rows.map((row) => ({
+        ...mapSubscriptionRow(row),
+        userId: row.user_id,
+        email: row.email,
+        username: row.username,
+        paymentProvider: row.payment_provider,
+        paymentReference: row.payment_reference,
+        grantReason: row.grant_reason,
+        revokedAt: row.revoked_at,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      })),
+      events: events.rows.map((row) => ({
+        id: row.id,
+        subscriptionId: row.subscription_id,
+        userId: row.user_id,
+        email: row.email,
+        adminEmail: row.admin_email,
+        action: row.action,
+        details: row.details,
+        createdAt: row.created_at,
+      })),
+      paymentProviderStatus: {
+        automaticActivationReady: false,
+        message: "No verified payment webhook is configured. Manual admin grants are available.",
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.post("/api/admin/subscriptions/manual-grant", requireAdmin, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const userId = Number(req.body?.userId);
+    const planId = Number(req.body?.planId);
+    const selectedCertifications = normalizeStringArray(req.body?.selectedCertifications, SUBSCRIPTION_CERTIFICATIONS);
+    const startsAt = req.body?.startsAt ? new Date(req.body.startsAt) : new Date();
+    const requestedExpiresAt = req.body?.expiresAt ? new Date(req.body.expiresAt) : null;
+    const quotaOverride = req.body?.speakingSimulatorQuotaOverride === "" || req.body?.speakingSimulatorQuotaOverride == null
+      ? null
+      : Number(req.body.speakingSimulatorQuotaOverride);
+    const grantReason = String(req.body?.grantReason || "Manual admin grant").trim().slice(0, 500);
+
+    if (!Number.isInteger(userId) || userId <= 0) return res.status(400).json({ ok: false, error: "Valid userId is required" });
+    if (!Number.isInteger(planId) || planId <= 0) return res.status(400).json({ ok: false, error: "Valid planId is required" });
+    if (!selectedCertifications.length) return res.status(400).json({ ok: false, error: "Select at least one certification" });
+    if (Number.isFinite(quotaOverride) && quotaOverride < 0) return res.status(400).json({ ok: false, error: "Quota override must be positive" });
+    if (Number.isNaN(startsAt.getTime())) return res.status(400).json({ ok: false, error: "Invalid start date" });
+
+    await client.query("BEGIN");
+    const user = await client.query(`SELECT id, email FROM users WHERE id = $1`, [userId]);
+    if (!user.rows[0]) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ ok: false, error: "User not found" });
+    }
+    const planResult = await client.query(
+      `SELECT id, level, plan_key, plan_name, duration_days, price_eur, currency, writing_simulator_attempts
+         FROM subscription_plans
+        WHERE id = $1 AND is_active = TRUE`,
+      [planId]
+    );
+    const plan = planResult.rows[0];
+    if (!plan) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ ok: false, error: "Plan not found" });
+    }
+    const expiresAt = requestedExpiresAt && !Number.isNaN(requestedExpiresAt.getTime())
+      ? requestedExpiresAt
+      : new Date(startsAt.getTime() + Number(plan.duration_days) * 24 * 60 * 60 * 1000);
+    if (expiresAt <= startsAt) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ ok: false, error: "End date must be after start date" });
+    }
+
+    const finalPrice = Number((Number(plan.price_eur) * selectedCertifications.length).toFixed(2));
+    const inserted = await client.query(
+      `INSERT INTO user_subscriptions (
+         user_id, plan_id, level, plan_key, status, starts_at, expires_at,
+         payment_provider, payment_reference, selected_certifications, amount_paid,
+         currency, speaking_simulator_quota_override, grant_reason
+       )
+       VALUES ($1, $2, $3, $4, 'active', $5, $6, 'manual', $7, $8::jsonb, $9, $10, $11, $12)
+       RETURNING *`,
+      [
+        userId,
+        plan.id,
+        plan.level,
+        plan.plan_key,
+        startsAt,
+        expiresAt,
+        `manual-admin-${Date.now()}`,
+        JSON.stringify(selectedCertifications),
+        finalPrice,
+        plan.currency,
+        Number.isFinite(quotaOverride) ? quotaOverride : null,
+        grantReason,
+      ]
+    );
+    await client.query(
+      `INSERT INTO writing_simulator_usage (user_id, subscription_id, level, attempts_allowed, attempts_used)
+       VALUES ($1, $2, $3, $4, 0)
+       ON CONFLICT (user_id, subscription_id, level)
+       DO UPDATE SET attempts_allowed = EXCLUDED.attempts_allowed, updated_at = NOW()`,
+      [userId, inserted.rows[0].id, plan.level, Number(plan.writing_simulator_attempts)]
+    );
+    await client.query(
+      `INSERT INTO subscription_admin_events (subscription_id, user_id, admin_id, action, details)
+       VALUES ($1, $2, $3, 'manual_grant', $4::jsonb)`,
+      [
+        inserted.rows[0].id,
+        userId,
+        req.user.id,
+        JSON.stringify({
+          planId: plan.id,
+          level: plan.level,
+          planKey: plan.plan_key,
+          selectedCertifications,
+          startsAt: startsAt.toISOString(),
+          expiresAt: expiresAt.toISOString(),
+          speakingSimulatorQuotaOverride: Number.isFinite(quotaOverride) ? quotaOverride : null,
+          grantReason,
+        }),
+      ]
+    );
+    await client.query("COMMIT");
+    return res.status(201).json({ ok: true, subscription: inserted.rows[0] });
+  } catch (err) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {}
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
+app.patch("/api/admin/subscriptions/:id/revoke", requireAdmin, async (req, res) => {
+  try {
+    const subscriptionId = Number(req.params.id);
+    if (!Number.isInteger(subscriptionId)) return res.status(400).json({ ok: false, error: "Invalid subscription id" });
+    const reason = String(req.body?.reason || "Manual revoke").trim().slice(0, 500);
+    const updated = await pool.query(
+      `UPDATE user_subscriptions
+          SET status = 'cancelled',
+              revoked_at = NOW(),
+              revoked_by = $1,
+              grant_reason = COALESCE(NULLIF($2, ''), grant_reason),
+              updated_at = NOW()
+        WHERE id = $3
+        RETURNING *`,
+      [req.user.id, reason, subscriptionId]
+    );
+    if (!updated.rows[0]) return res.status(404).json({ ok: false, error: "Subscription not found" });
+    await pool.query(
+      `INSERT INTO subscription_admin_events (subscription_id, user_id, admin_id, action, details)
+       VALUES ($1, $2, $3, 'revoke', $4::jsonb)`,
+      [subscriptionId, updated.rows[0].user_id, req.user.id, JSON.stringify({ reason })]
+    );
+    return res.json({ ok: true, subscription: updated.rows[0] });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ ok: false, error: "Server error" });
@@ -4169,6 +4768,56 @@ app.get("/api/admin/listening-audio/:examId/items", requireAdmin, async (req, re
     });
   } catch (err) {
     console.error("Listening audio item lookup failed", err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.put("/api/admin/listening-audio/items/:itemId", requireAdmin, async (req, res) => {
+  try {
+    await ensureListeningAudioProductionSchema();
+    const itemId = Number(req.params.itemId);
+    if (!Number.isInteger(itemId)) return res.status(400).json({ ok: false, error: "Invalid audio item id" });
+    const title = cleanPublicText(req.body?.title, 180);
+    const transcript = String(req.body?.transcript ?? req.body?.adminTranscript ?? "").trim();
+    const listeningCount = Number(req.body?.listeningCount);
+    const audioEngineSettings = req.body?.audioEngineSettings && typeof req.body.audioEngineSettings === "object"
+      ? req.body.audioEngineSettings
+      : {};
+    const validationWarnings = Array.isArray(req.body?.validationWarnings)
+      ? req.body.validationWarnings.map((item) => cleanPublicText(item, 300)).filter(Boolean)
+      : [];
+    if (!transcript) return res.status(400).json({ ok: false, error: "Transcript is required" });
+    const updated = await pool.query(
+      `UPDATE exam_listening_audio_items
+          SET title = COALESCE(NULLIF($2, ''), title),
+              admin_transcript = $3,
+              listening_count = CASE WHEN $4::int BETWEEN 1 AND 3 THEN $4::int ELSE listening_count END,
+              audio_engine_settings = COALESCE($5::jsonb, audio_engine_settings),
+              validation_warnings = $6::jsonb,
+              audio_generation_status = CASE
+                WHEN generated_audio_asset_id IS NOT NULL THEN 'generated'
+                ELSE audio_generation_status
+              END,
+              updated_at = NOW()
+        WHERE id = $1
+        RETURNING *`,
+      [
+        itemId,
+        title,
+        transcript,
+        Number.isFinite(listeningCount) ? Math.round(listeningCount) : null,
+        JSON.stringify(audioEngineSettings),
+        JSON.stringify(validationWarnings),
+      ]
+    );
+    if (!updated.rows[0]) return res.status(404).json({ ok: false, error: "Audio item not found" });
+    await auditAdminAction(req, "listening_audio.item_update", "listening_audio_item", itemId, {
+      examId: updated.rows[0].exam_id,
+      hasTranscript: Boolean(transcript),
+    });
+    return res.json({ ok: true, item: updated.rows[0] });
+  } catch (err) {
+    console.error("Listening audio item update failed", err);
     return res.status(500).json({ ok: false, error: "Server error" });
   }
 });
@@ -4907,6 +5556,18 @@ app.post("/api/admin/exams/import-wizard/:id/validate", requireAdmin, async (req
 
 app.post("/api/admin/exams/import-wizard/:id/publish", requireAdmin, async (req, res) => {
   try {
+    const force = req.query.force === "true" || req.body?.force === true;
+    const row = await getExamImportDraft({ pool, importId: Number(req.params.id) });
+    if (!row) return res.status(404).json({ ok: false, error: "Import draft not found" });
+    const preValidation = validateImportDraftContent(row.draft_content);
+    if (!force && preValidation.warnings?.length) {
+      return res.status(409).json({
+        ok: false,
+        error: "Unresolved validation warnings found. Review them before publishing or publish with force after admin approval.",
+        validation: preValidation,
+        canForce: true,
+      });
+    }
     const result = await publishExamImportDraft({
       pool,
       importId: Number(req.params.id),
@@ -4995,6 +5656,19 @@ app.post("/api/admin/exams/import-document", requireAdmin, documentUpload.single
   } catch (err) {
     console.error("Document import failed", err);
     return res.status(400).json({ ok: false, error: err.message || "Document import failed" });
+  }
+});
+
+app.get("/api/admin/exams/:id/validation", requireAdmin, async (req, res) => {
+  try {
+    const examId = Number(req.params.id);
+    if (!Number.isInteger(examId)) return res.status(400).json({ ok: false, error: "Invalid exam id" });
+    const validation = await buildExamContentValidation(examId);
+    if (!validation) return res.status(404).json({ ok: false, error: "Exam not found" });
+    return res.json({ ok: true, validation });
+  } catch (err) {
+    console.error("Exam validation failed", err);
+    return res.status(500).json({ ok: false, error: "Server error" });
   }
 });
 

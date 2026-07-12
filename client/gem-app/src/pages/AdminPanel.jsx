@@ -369,6 +369,8 @@ function AdminShell({ children }) {
   const links = [
     { to: "/admin/dashboard", label: "Dashboard", icon: BarChart3 },
     { to: "/admin/users", label: "Users", icon: Users },
+    { to: "/admin/subscriptions", label: "Subscriptions", icon: Shield },
+    { to: "/admin/testimonials", label: "Testimonials", icon: MessageSquareText },
     { to: "/admin/exams", label: "Exams", icon: FileJson },
     { to: "/admin/hoeren-studio", label: "Hören Studio", icon: Headphones },
     { to: "/admin/api-usage", label: "API usage", icon: Activity },
@@ -790,6 +792,226 @@ function UserAccessControl({ user, onUpdate }) {
   );
 }
 
+const CERTIFICATION_OPTIONS = [
+  { id: "goethe", label: "Goethe" },
+  { id: "osd", label: "ÖSD" },
+  { id: "telc", label: "TELC" },
+  { id: "ecl", label: "ECL" },
+];
+
+function AdminSubscriptions() {
+  const loader = useCallback(async () => {
+    const [subscriptionsRes, usersRes] = await Promise.all([
+      API.get("/api/admin/subscriptions"),
+      API.get("/api/admin/users"),
+    ]);
+    return { ...subscriptionsRes.data, users: usersRes.data.users ?? [] };
+  }, []);
+  const { data, loading, error, reload } = useAdminData(loader);
+  const [form, setForm] = useState({
+    userId: "",
+    planId: "",
+    startsAt: "",
+    expiresAt: "",
+    selectedCertifications: ["goethe"],
+    speakingSimulatorQuotaOverride: "",
+    grantReason: "",
+  });
+  const [status, setStatus] = useState("");
+
+  const selectedPlan = (data?.plans ?? []).find((plan) => String(plan.id) === String(form.planId));
+
+  useEffect(() => {
+    if (!form.planId && data?.plans?.[0]) {
+      setForm((current) => ({ ...current, planId: String(data.plans[0].id) }));
+    }
+    if (!form.userId && data?.users?.[0]) {
+      setForm((current) => ({ ...current, userId: String(data.users[0].id) }));
+    }
+  }, [data?.plans, data?.users, form.planId, form.userId]);
+
+  const toggleCertification = (certification) => {
+    setForm((current) => {
+      const selected = current.selectedCertifications.includes(certification)
+        ? current.selectedCertifications.filter((item) => item !== certification)
+        : [...current.selectedCertifications, certification];
+      return { ...current, selectedCertifications: selected };
+    });
+  };
+
+  const submitGrant = async (event) => {
+    event.preventDefault();
+    setStatus("");
+    await API.post("/api/admin/subscriptions/manual-grant", {
+      ...form,
+      userId: Number(form.userId),
+      planId: Number(form.planId),
+    });
+    setStatus("Manual subscription granted.");
+    await reload();
+  };
+
+  const revoke = async (subscription) => {
+    setStatus("");
+    await API.patch(`/api/admin/subscriptions/${subscription.id}/revoke`, { reason: "Revoked from admin panel" });
+    setStatus("Subscription revoked.");
+    await reload();
+  };
+
+  return (
+    <>
+      <Header title="Subscription Management" subtitle="Secure manual grants, plan quotas, and payment-ready subscription history." />
+      {status ? <p className={styles.status}>{status}</p> : null}
+      {error ? <p className={styles.error}>{error}</p> : null}
+      {loading ? <p>Loading...</p> : null}
+      <section className={styles.panel}>
+        <div className={styles.panelHeader}>
+          <div>
+            <h2>Manual grant</h2>
+            <p className={styles.panelHint}>{data?.paymentProviderStatus?.message}</p>
+          </div>
+        </div>
+        <form className={styles.formGrid} onSubmit={submitGrant}>
+          <label className={styles.field}>
+            User
+            <select value={form.userId} onChange={(event) => setForm((current) => ({ ...current, userId: event.target.value }))}>
+              {(data?.users ?? []).map((user) => <option key={user.id} value={user.id}>{user.email}</option>)}
+            </select>
+          </label>
+          <label className={styles.field}>
+            Plan
+            <select value={form.planId} onChange={(event) => setForm((current) => ({ ...current, planId: event.target.value }))}>
+              {(data?.plans ?? []).map((plan) => (
+                <option key={plan.id} value={plan.id}>{plan.level} {plan.planName} - {plan.durationDays} days</option>
+              ))}
+            </select>
+          </label>
+          <label className={styles.field}>
+            Start date
+            <input type="datetime-local" value={form.startsAt} onChange={(event) => setForm((current) => ({ ...current, startsAt: event.target.value }))} />
+          </label>
+          <label className={styles.field}>
+            End date override
+            <input type="datetime-local" value={form.expiresAt} onChange={(event) => setForm((current) => ({ ...current, expiresAt: event.target.value }))} />
+          </label>
+          <label className={styles.field}>
+            Speaking quota override
+            <input type="number" min="0" placeholder={String(selectedPlan?.speakingSimulatorQuota ?? "")} value={form.speakingSimulatorQuotaOverride} onChange={(event) => setForm((current) => ({ ...current, speakingSimulatorQuotaOverride: event.target.value }))} />
+          </label>
+          <label className={styles.field}>
+            Reason
+            <input value={form.grantReason} onChange={(event) => setForm((current) => ({ ...current, grantReason: event.target.value }))} placeholder="Manual school/client grant" />
+          </label>
+          <div className={styles.multiAccessGroup}>
+            <p>Certifications</p>
+            <div className={styles.multiAccessList}>
+              {CERTIFICATION_OPTIONS.map((item) => (
+                <label key={item.id} className={styles.checkOption}>
+                  <input type="checkbox" checked={form.selectedCertifications.includes(item.id)} onChange={() => toggleCertification(item.id)} />
+                  <span>{item.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+          <div className={styles.actions}>
+            <button className={styles.button} type="submit" disabled={!form.userId || !form.planId || !form.selectedCertifications.length}>
+              Grant access
+            </button>
+          </div>
+        </form>
+      </section>
+      <section className={styles.panel}>
+        <h2>Industrial offers</h2>
+        <div className={styles.tableWrap}>
+          <table className={styles.table}>
+            <thead><tr><th>Offer</th><th>Price</th><th>Access</th><th>Sprechen quota</th></tr></thead>
+            <tbody>
+              {(data?.industrialOffers ?? []).map((offer) => (
+                <tr key={offer.id}>
+                  <td>{offer.label}</td>
+                  <td>€{Number(offer.priceEur).toFixed(2)}</td>
+                  <td>{offer.accessMonths} months ({offer.billedMonths} billed)</td>
+                  <td>{offer.speakingSimulatorQuota}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section className={styles.panel}>
+        <h2>Recent subscriptions</h2>
+        <div className={styles.tableWrap}>
+          <table className={styles.table}>
+            <thead><tr><th>User</th><th>Plan</th><th>Status</th><th>Certifications</th><th>Dates</th><th>Quota</th><th>Actions</th></tr></thead>
+            <tbody>
+              {(data?.subscriptions ?? []).map((subscription) => (
+                <tr key={subscription.id}>
+                  <td>{subscription.email}</td>
+                  <td>{subscription.level} {subscription.planName}</td>
+                  <td><span className={`${styles.badge} ${subscription.status !== "active" ? styles.warn : ""}`}>{subscription.status}</span></td>
+                  <td>{subscription.selectedCertifications?.join(", ") || "-"}</td>
+                  <td>{formatDate(subscription.startsAt)}<br />{formatDate(subscription.expiresAt)}</td>
+                  <td>{subscription.speakingSimulatorQuota}</td>
+                  <td>{subscription.status === "active" ? <button className={styles.dangerButton} type="button" onClick={() => revoke(subscription)}>Revoke</button> : "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </>
+  );
+}
+
+function AdminTestimonials() {
+  const loader = useCallback(async () => {
+    const res = await API.get("/api/admin/testimonials");
+    return res.data.testimonials ?? [];
+  }, []);
+  const { data: testimonials, loading, error, reload } = useAdminData(loader);
+  const [status, setStatus] = useState("");
+
+  const updateTestimonial = async (testimonial, payload) => {
+    setStatus("");
+    await API.patch(`/api/admin/testimonials/${testimonial.id}`, payload);
+    setStatus("Testimonial updated.");
+    await reload();
+  };
+
+  return (
+    <>
+      <Header title="Testimonial Moderation" subtitle="Review, approve, reject, or lightly edit public student comments." />
+      {status ? <p className={styles.status}>{status}</p> : null}
+      {error ? <p className={styles.error}>{error}</p> : null}
+      {loading ? <p>Loading...</p> : null}
+      <section className={styles.panel}>
+        <div className={styles.tableWrap}>
+          <table className={styles.table}>
+            <thead><tr><th>Author</th><th>Rating</th><th>Comment</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody>
+              {(testimonials ?? []).map((item) => (
+                <tr key={item.id}>
+                  <td>{item.display_name}<br /><span>{item.user_email ?? item.role_label ?? "-"}</span></td>
+                  <td>{item.rating}/5</td>
+                  <td>{item.comment}</td>
+                  <td><span className={`${styles.badge} ${item.status !== "approved" ? styles.warn : ""}`}>{item.status}</span></td>
+                  <td>
+                    <div className={styles.actions}>
+                      <button className={styles.button} type="button" onClick={() => updateTestimonial(item, { status: "approved" })}>Approve</button>
+                      <button className={styles.secondaryButton} type="button" onClick={() => updateTestimonial(item, { status: "pending" })}>Pending</button>
+                      <button className={styles.dangerButton} type="button" onClick={() => updateTestimonial(item, { status: "rejected" })}>Reject</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </>
+  );
+}
+
 function AdminApiUsage() {
   const loader = useCallback(async () => {
     const res = await API.get("/api/admin/api-usage");
@@ -905,7 +1127,9 @@ function AdminExams() {
   const [sectionDraft, setSectionDraft] = useState(null);
   const [questionDraft, setQuestionDraft] = useState(null);
   const [examAudio, setExamAudio] = useState(null);
+  const [listeningAudioItems, setListeningAudioItems] = useState([]);
   const [examAudioLoading, setExamAudioLoading] = useState(false);
+  const [examValidation, setExamValidation] = useState(null);
   const [stylePanel, setStylePanel] = useState(null);
   const [stylePreview, setStylePreview] = useState(null);
   const [styleBusy, setStyleBusy] = useState("");
@@ -1014,6 +1238,7 @@ function AdminExams() {
     () => exams.find((exam) => String(exam.id) === String(selectedExamId)) ?? visibleExams[0] ?? null,
     [exams, selectedExamId, visibleExams]
   );
+  const selectedExamNumericId = selectedExam?.id ?? null;
   const selectedExamIsListening = String(selectedExam?.section_type ?? "").toLowerCase() === "listen";
 
   const selectedSections = useMemo(
@@ -1026,29 +1251,83 @@ function AdminExams() {
     setExamDraft(selectedExam ? makeExamDraft(selectedExam) : null);
     setSectionDraft(null);
     setQuestionDraft(null);
+    setExamValidation(null);
   }, [selectedExam]);
 
   const loadSelectedExamAudio = useCallback(async () => {
-    if (!selectedExam || !selectedExamIsListening) {
+    if (!selectedExamNumericId || !selectedExamIsListening) {
       setExamAudio(null);
+      setListeningAudioItems([]);
       return;
     }
     setExamAudioLoading(true);
     try {
-      const res = await API.get(`/api/admin/exams/${selectedExam.id}/audio`);
-      setExamAudio(res.data);
+      const [audioRes, itemsRes] = await Promise.all([
+        API.get(`/api/admin/exams/${selectedExamNumericId}/audio`),
+        API.get(`/api/admin/listening-audio/${selectedExamNumericId}/items`),
+      ]);
+      setExamAudio(audioRes.data);
+      setListeningAudioItems((itemsRes.data?.items ?? []).map((item) => ({
+        ...item,
+        titleDraft: item.title ?? "",
+        transcriptDraft: item.admin_transcript ?? "",
+        listeningCountDraft: item.listening_count ?? 2,
+      })));
     } catch (err) {
       setExamAudio({
         error: err.response?.data?.error ?? "Production audio status could not be loaded.",
       });
+      setListeningAudioItems([]);
     } finally {
       setExamAudioLoading(false);
     }
-  }, [selectedExam?.id, selectedExamIsListening]);
+  }, [selectedExamNumericId, selectedExamIsListening]);
 
   useEffect(() => {
     loadSelectedExamAudio();
   }, [loadSelectedExamAudio]);
+
+  const runSelectedExamValidation = async () => {
+    if (!selectedExam) return;
+    setBusyAction("validate-exam");
+    setDocumentError("");
+    try {
+      const res = await API.get(`/api/admin/exams/${selectedExam.id}/validation`);
+      setExamValidation(res.data.validation);
+      const counts = res.data.validation?.counts ?? {};
+      setStatus(`Validation complete: ${counts.errors ?? 0} error(s), ${counts.warnings ?? 0} warning(s).`);
+    } catch (err) {
+      setDocumentError(err.response?.data?.error ?? "Exam validation failed.");
+    } finally {
+      setBusyAction("");
+    }
+  };
+
+  const updateListeningAudioItemDraft = (itemId, patch) => {
+    setListeningAudioItems((current) =>
+      current.map((item) => (item.id === itemId ? { ...item, ...patch } : item))
+    );
+  };
+
+  const saveListeningAudioItem = async (item) => {
+    setBusyAction(`save-audio-item-${item.id}`);
+    setDocumentError("");
+    try {
+      await API.put(`/api/admin/listening-audio/items/${item.id}`, {
+        title: item.titleDraft,
+        transcript: item.transcriptDraft,
+        listeningCount: Number(item.listeningCountDraft) || item.listening_count,
+        audioEngineSettings: item.audio_engine_settings || {},
+        validationWarnings: item.validation_warnings || [],
+      });
+      setStatus("Listening transcript saved. Regenerate and publish audio if the spoken text changed.");
+      await loadSelectedExamAudio();
+    } catch (err) {
+      setDocumentError(err.response?.data?.error ?? "Could not save listening audio item.");
+    } finally {
+      setBusyAction("");
+    }
+  };
 
   const runAction = async (label, action, successMessage) => {
     setBusyAction(label);
@@ -1782,8 +2061,30 @@ function AdminExams() {
                     <Edit3 size={16} />
                     Save exam
                   </button>
+                  <button className={styles.secondaryButton} type="button" onClick={runSelectedExamValidation} disabled={busyAction === "validate-exam"}>
+                    <ClipboardList size={16} />
+                    {busyAction === "validate-exam" ? "Checking..." : "Run validation"}
+                  </button>
                 </div>
               </form>
+
+              {examValidation ? (
+                <section className={styles.validationPanel}>
+                  <strong>Quality flags</strong>
+                  <p>{examValidation.counts?.errors ?? 0} error(s), {examValidation.counts?.warnings ?? 0} warning(s)</p>
+                  {examValidation.flags?.length ? (
+                    <ul>
+                      {examValidation.flags.slice(0, 20).map((flag, index) => (
+                        <li key={`${flag.code}-${flag.entityId ?? "exam"}-${index}`}>
+                          [{flag.severity}] {flag.message}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p>No content quality flags found.</p>
+                  )}
+                </section>
+              ) : null}
 
               {selectedExamIsListening ? (
                 <section className={styles.editorPanel}>
@@ -1829,6 +2130,57 @@ function AdminExams() {
                   {examAudio?.error ? <p className={styles.error}>{examAudio.error}</p> : null}
                   {providerStatusLoaded && !anyTtsProviderConfigured ? (
                     <p className={styles.warningList}>No TTS provider key is configured on the backend yet. Add ELEVENLABS_API_KEY or another provider key before generating production audio.</p>
+                  ) : null}
+                  {listeningAudioItems.length ? (
+                    <div className={styles.audioItemEditorList}>
+                      {listeningAudioItems.map((item) => (
+                        <article className={styles.audioItemEditor} key={item.id}>
+                          <div className={styles.panelHeader}>
+                            <div>
+                              <h4>Teil {item.part_number} - Audio {item.item_number}</h4>
+                              <p className={styles.panelHint}>
+                                Status: {item.audio_generation_status} - {item.asset_status || "no MP3"}
+                              </p>
+                            </div>
+                            <button
+                              className={styles.button}
+                              type="button"
+                              disabled={busyAction === `save-audio-item-${item.id}`}
+                              onClick={() => saveListeningAudioItem(item)}
+                            >
+                              Save transcript
+                            </button>
+                          </div>
+                          <div className={styles.formGrid}>
+                            <label className={styles.field}>
+                              Title
+                              <input
+                                value={item.titleDraft}
+                                onChange={(event) => updateListeningAudioItemDraft(item.id, { titleDraft: event.target.value })}
+                              />
+                            </label>
+                            <label className={styles.field}>
+                              Listening count
+                              <input
+                                type="number"
+                                min="1"
+                                max="3"
+                                value={item.listeningCountDraft}
+                                onChange={(event) => updateListeningAudioItemDraft(item.id, { listeningCountDraft: event.target.value })}
+                              />
+                            </label>
+                          </div>
+                          <label className={styles.field}>
+                            Admin transcript
+                            <textarea
+                              value={item.transcriptDraft}
+                              onChange={(event) => updateListeningAudioItemDraft(item.id, { transcriptDraft: event.target.value })}
+                              rows={8}
+                            />
+                          </label>
+                        </article>
+                      ))}
+                    </div>
                   ) : null}
                   {productionAudioReady ? (
                     <div className={styles.audioPreviewPanel}>
@@ -4369,6 +4721,8 @@ export default function AdminPanel() {
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<AdminDashboard />} />
         <Route path="users" element={<AdminUsers />} />
+        <Route path="subscriptions" element={<AdminSubscriptions />} />
+        <Route path="testimonials" element={<AdminTestimonials />} />
         <Route path="exams" element={<AdminExams />} />
         <Route path="hoeren-studio" element={<AdminHoerenStudio />} />
         <Route path="api-usage" element={<AdminApiUsage />} />

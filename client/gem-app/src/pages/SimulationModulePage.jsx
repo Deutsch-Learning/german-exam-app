@@ -2099,6 +2099,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const recordingTaskIndexRef = useRef(0);
   const fallbackRecordingRef = useRef(false);
   const levelActivityKeyRef = useRef("");
+  const writingTextareaRef = useRef(null);
 
   const currentTask = module.tasks[Math.min(currentIndex, totalTasks - 1)];
   const currentAnswer = answers[currentIndex];
@@ -3877,6 +3878,26 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     const text = String(currentAnswer ?? "");
     const words = countWords(text);
     const suggestions = getWritingSuggestions(currentTask, text);
+    const insertGermanCharacter = (character) => {
+      const textarea = writingTextareaRef.current;
+      const start = textarea?.selectionStart ?? text.length;
+      const end = textarea?.selectionEnd ?? text.length;
+      const nextText = `${text.slice(0, start)}${character}${text.slice(end)}`;
+      setAnswerForCurrent(nextText);
+      window.setTimeout(() => {
+        textarea?.focus();
+        textarea?.setSelectionRange(start + character.length, start + character.length);
+      }, 0);
+    };
+    const renderGermanCharacterToolbar = () => (
+      <div className={styles.germanCharacterToolbar} aria-label="Deutsche Sonderzeichen">
+        {["Ä", "ä", "Ö", "ö", "Ü", "ü", "ß"].map((character) => (
+          <button key={character} type="button" onClick={() => insertGermanCharacter(character)}>
+            {character}
+          </button>
+        ))}
+      </div>
+    );
 
     if (module.id === "write") {
       return (
@@ -3907,11 +3928,13 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               </button>
             </div>
             <textarea
+              ref={writingTextareaRef}
               value={text}
               onChange={(event) => setAnswerForCurrent(event.target.value)}
               placeholder="Schreiben Sie Ihre Antwort auf Deutsch..."
               className={styles.editor}
             />
+            {renderGermanCharacterToolbar()}
           </section>
 
           <div className={styles.writingSupportGrid}>
@@ -3987,11 +4010,13 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             </button>
           </div>
           <textarea
+            ref={writingTextareaRef}
             value={text}
             onChange={(event) => setAnswerForCurrent(event.target.value)}
             placeholder="Rédigez votre réponse en allemand..."
             className={styles.editor}
           />
+          {renderGermanCharacterToolbar()}
         </section>
 
         <div className={styles.writingSupportGrid}>

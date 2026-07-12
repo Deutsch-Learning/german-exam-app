@@ -746,6 +746,23 @@
   margin-top: 12px;
 }
 
+.audioItemEditorList {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.audioItemEditor {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 14px;
+}
+
+.audioItemEditor h4 {
+  margin: 0;
+}
+
 .audioFieldGrid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

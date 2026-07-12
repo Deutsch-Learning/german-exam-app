@@ -2,6 +2,8 @@ const WORDS_PER_MINUTE = 132;
 const MAX_UTTERANCE_CHARS = 220;
 const VOICE_LOAD_TIMEOUT_MS = 2600;
 const VOICE_LOAD_RETRY_MS = 180;
+const DEFAULT_TURN_PAUSE_MS = 220;
+const DEFAULT_SEGMENT_PAUSE_MS = 120;
 
 const NAME_GENDER_HINTS = {
   female: [
@@ -52,12 +54,14 @@ const cleanSpeakableText = (value) =>
     .replace(/[“”"„]/g, "")
     .replace(/[+*=#\\/^`~@$%€£§©®™]/g, " ")
     .replace(/\b([a-d])\s*[.)]\s*/gi, "$1 ")
+    .replace(/\b(?:text|track|audio|teil|part)\s*\d+\s*[:.-]\s*/gi, "")
     .replace(/\s*[-–—]\s*/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 
 const sanitizeTranscriptForSpeech = (value) => {
   const lines = normalizeText(value)
+    .replace(/\[(?:pause|stille|silence)\s*([0-9]+(?:[.,][0-9]+)?)\s*(?:s|sec|sekunden?)?\]/gi, "\n[[pause:$1]]\n")
     .replace(/\r/g, "\n")
     .split("\n")
     .map((line) => line.trim())
@@ -68,6 +72,10 @@ const sanitizeTranscriptForSpeech = (value) => {
     const key = normalizeKey(line);
     if (/^(aufgaben|aufgabe\s+\d|questions?|corrig|correction|loesung|losung|answer key)\b/.test(key)) break;
     if (isSpeechMetadataLine(line)) continue;
+    if (/^\[\[\s*pause\s*:\s*[0-9.,]+\s*\]\]$/i.test(line)) {
+      cleanLines.push(line.replace(",", "."));
+      continue;
+    }
     const cleanLine = cleanSpeakableText(line);
     if (cleanLine) cleanLines.push(cleanLine);
   }
@@ -102,11 +110,21 @@ const splitIntoSpeakableChunks = (text) => {
 };
 
 const estimateDuration = (segments, rate = 0.92) => {
-  const words = segments.reduce((sum, segment) => sum + segment.text.split(/\s+/).filter(Boolean).length, 0);
-  return Math.max(8, Math.round((words / WORDS_PER_MINUTE) * 60 / Math.max(0.65, Number(rate) || 0.92)));
+  const words = segments.reduce((sum, segment) => sum + String(segment.text || "").split(/\s+/).filter(Boolean).length, 0);
+  const pauses = segments.reduce((sum, segment) => sum + Number(segment.pauseMs || 0) / 1000, 0);
+  return Math.max(8, Math.round((words / WORDS_PER_MINUTE) * 60 / Math.max(0.65, Number(rate) || 0.92) + pauses));
 };
 
 const parseSegmentLine = (line, fallbackSpeaker) => {
+  const pause = line.match(/^\[\[\s*pause\s*:\s*([0-9.]+)\s*\]\]$/i);
+  if (pause) {
+    return {
+      speaker: fallbackSpeaker,
+      text: "",
+      pauseMs: Math.max(250, Math.min(5000, Math.round(Number(pause[1] || 1) * 1000))),
+      type: "pause",
+    };
+  }
   const match = line.match(/^([^:\n]{2,56})\s*:\s*(.+)$/);
   if (!match) return { speaker: fallbackSpeaker, text: cleanSpeakableText(line) };
   return {
@@ -123,7 +141,7 @@ export const parseListeningSpeechSegments = (audio = {}) => {
     const fallbackSpeaker = track.title || `Narrator ${trackIndex + 1}`;
     text.split("\n").map((line) => line.trim()).filter(Boolean).forEach((line) => {
       const parsed = parseSegmentLine(line, fallbackSpeaker);
-      if (parsed.speaker === fallbackSpeaker && segments.length && !/[.!?]$/.test(segments[segments.length - 1].text)) {
+      if (parsed.speaker === fallbackSpeaker && segments.length && !segments[segments.length - 1].pauseMs && !/[.!?]$/.test(segments[segments.length - 1].text)) {
         segments[segments.length - 1].text = normalizeText(`${segments[segments.length - 1].text} ${parsed.text}`);
         return;
       }
@@ -131,14 +149,14 @@ export const parseListeningSpeechSegments = (audio = {}) => {
     });
   });
 
-  if (segments.length) return segments.filter((segment) => segment.text);
+  if (segments.length) return segments.filter((segment) => segment.text || segment.pauseMs);
 
   return sanitizeTranscriptForSpeech(audio.transcript || "")
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => parseSegmentLine(line, "Narrator"))
-    .filter((segment) => segment.text);
+    .filter((segment) => segment.text || segment.pauseMs);
 };
 
 const parseTextNumbers = (value) =>
@@ -211,7 +229,7 @@ const buildSpeakerKey = (speakerName) => normalizeKey(speakerName) || "narrator"
 
 const isStructuralSpeakerLabel = (speakerName) => {
   const key = buildSpeakerKey(speakerName);
-  return /^(text|teil|part|section|transkription|transcript|narrator)\b/.test(key) || key.includes(" kurztexte text ");
+  return /^(text|teil|part|section|transkription|transcript|narrator|narration|dialog|dialogue|gespraech|gesprach|monolog|monologue|ansage)\b/.test(key) || key.includes(" kurztexte text ");
 };
 
 const hasSpeakerSetting = (setting = {}) => Object.keys(setting).length > 0;
@@ -281,12 +299,14 @@ export const buildListeningVoicePlan = ({ audio = {}, voices = [] } = {}) => {
   }));
   const dialogueKeys = new Set(
     segmentSettings
+      .filter(({ segment }) => !segment.pauseMs)
       .filter(({ segment, setting }) => !isStructuralSpeakerLabel(segment.speaker) || hasSpeakerSetting(setting))
       .map(({ segment }) => buildSpeakerKey(segment.speaker))
   );
   const hasDialogue = dialogueKeys.size > 1;
 
   segmentSettings.forEach(({ segment, setting }) => {
+    if (segment.pauseMs) return;
     const speakerKey = hasDialogue ? buildSpeakerKey(segment.speaker) : "narrator";
     if (assignments.has(speakerKey)) return;
     const gender = hasDialogue ? inferGender(segment.speaker, setting) : "neutral";
@@ -460,16 +480,34 @@ export const createListeningSpeechFallback = ({ audio, onTime, onEnd, onError, o
     }
 
     const item = queue[index];
+    if (item.type === "pause") {
+      const pauseMs = Math.max(120, Number(item.pauseMs || DEFAULT_SEGMENT_PAUSE_MS));
+      window.setTimeout(() => {
+        if (!active || paused) return;
+        index += 1;
+        elapsedBefore = Math.min(plan.duration, elapsedBefore + pauseMs / 1000);
+        startedAt = Date.now();
+        speakNext();
+      }, pauseMs);
+      return;
+    }
+
     const utterance = new window.SpeechSynthesisUtterance(item.text);
     utterance.lang = item.assignment.lang || "de-DE";
     utterance.rate = item.assignment.rate;
     utterance.pitch = item.assignment.pitch;
+    utterance.volume = 1;
     if (item.assignment.voice) utterance.voice = item.assignment.voice;
     utterance.onend = () => {
       index += 1;
       elapsedBefore = Math.min(plan.duration, elapsedBefore + estimateDuration([item], audio.rate));
       startedAt = Date.now();
-      speakNext();
+      const next = queue[index];
+      const speakerChanged = next?.assignment?.speakerKey && next.assignment.speakerKey !== item.assignment.speakerKey;
+      window.setTimeout(() => {
+        if (!active || paused) return;
+        speakNext();
+      }, speakerChanged ? DEFAULT_TURN_PAUSE_MS : DEFAULT_SEGMENT_PAUSE_MS);
     };
     utterance.onerror = (event) => {
       if (!active) return;
@@ -513,6 +551,9 @@ export const createListeningSpeechFallback = ({ audio, onTime, onEnd, onError, o
   const rebuildQueue = (voices) => {
     plan = buildListeningVoicePlan({ audio, voices });
     queue = plan.segments.flatMap((segment) => {
+      if (segment.pauseMs) {
+        return [{ ...segment, type: "pause", durationSeconds: segment.pauseMs / 1000 }];
+      }
       const key = plan.isDialogue ? buildSpeakerKey(segment.speaker) : "narrator";
       const assignment = plan.assignments[key] || plan.fallback;
       return splitIntoSpeakableChunks(segment.text).map((text) => ({

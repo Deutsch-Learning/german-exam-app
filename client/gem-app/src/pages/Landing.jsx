@@ -20,6 +20,7 @@ import certificateIcon from "../assets/images/certificate.png";
 import activePeopleIcon from "../assets/images/active_people.png";
 import avatar1 from "../assets/images/avatar-1.png";
 import avatar2 from "../assets/images/avatar-2.png";
+import partnerLogo from "../assets/images/partner-logo.jpeg";
 import algeriaFlag from "../assets/images/algeria.png";
 import bangladeshFlag from "../assets/images/bangladesh.png";
 import brazilFlag from "../assets/images/brazil.png";
@@ -48,6 +49,8 @@ import TestimonialCard from "../components/landing/TestimonialCard";
 import { useLanguage } from "../context/LanguageContext";
 import { examSimulations } from "../data/siteContent";
 import { useStartSimulationLanguage } from "../utils/simulationLanguage";
+import API from "../services/api";
+import { getAuthSession } from "../utils/access";
 
 const trustedCountries = [
   { code: "DE", name: "Germany", flag: germanyFlag },
@@ -139,6 +142,27 @@ export default function LandingPage() {
   );
   const typedHeadline = useHeroTypingText(heroPhrases);
   const longestHeroPhrase = heroPhrases.reduce((longest, phrase) => Math.max(longest, phrase.length), 0);
+  const [approvedTestimonials, setApprovedTestimonials] = useState([]);
+  const [testimonialFormOpen, setTestimonialFormOpen] = useState(false);
+  const [testimonialComment, setTestimonialComment] = useState("");
+  const [testimonialRating, setTestimonialRating] = useState(5);
+  const [testimonialStatus, setTestimonialStatus] = useState("");
+  const [testimonialError, setTestimonialError] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    API.get("/api/testimonials")
+      .then((res) => {
+        if (!alive) return;
+        setApprovedTestimonials(Array.isArray(res.data?.testimonials) ? res.data.testimonials : []);
+      })
+      .catch(() => {
+        if (alive) setApprovedTestimonials([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const services = [
     {
@@ -202,10 +226,28 @@ export default function LandingPage() {
     },
   ];
 
-  const onLeaveComment = () => {
-    const message = window.prompt(copy.commentPrompt);
-    if (message && message.trim()) {
-      window.alert("Merci pour votre commentaire.");
+  const onLeaveComment = async (event) => {
+    event?.preventDefault?.();
+    setTestimonialStatus("");
+    setTestimonialError("");
+    const session = getAuthSession();
+    if (!session?.token) {
+      setTestimonialError("Connectez-vous pour laisser un avis.");
+      return;
+    }
+    const comment = testimonialComment.trim();
+    if (comment.length < 20) {
+      setTestimonialError("Votre avis doit contenir au moins 20 caractères.");
+      return;
+    }
+    try {
+      await API.post("/api/testimonials", { comment, rating: testimonialRating });
+      setTestimonialComment("");
+      setTestimonialRating(5);
+      setTestimonialStatus("Merci. Votre avis sera publié après validation.");
+      setTestimonialFormOpen(false);
+    } catch (err) {
+      setTestimonialError(err.response?.data?.error || "Impossible d'envoyer votre avis.");
     }
   };
 
@@ -338,17 +380,55 @@ export default function LandingPage() {
           <div className="testimonials-slider">
             <button className="slider-arrow" type="button">&lt;</button>
             <div className="testimonials-track">
-              <TestimonialCard avatar={avatar1} text={copy.testimonialsText[0]} rating={5} />
-              <TestimonialCard avatar={avatar2} text={copy.testimonialsText[1]} rating={5} />
+              {approvedTestimonials.length ? (
+                approvedTestimonials.slice(0, 4).map((item, index) => (
+                  <TestimonialCard
+                    key={item.id}
+                    avatar={index % 2 === 0 ? avatar1 : avatar2}
+                    text={item.comment}
+                    rating={item.rating}
+                    name={item.displayName}
+                    role={item.roleLabel}
+                  />
+                ))
+              ) : (
+                <>
+                  <TestimonialCard avatar={avatar1} text={copy.testimonialsText[0]} rating={5} />
+                  <TestimonialCard avatar={avatar2} text={copy.testimonialsText[1]} rating={5} />
+                </>
+              )}
             </div>
             <button className="slider-arrow" type="button">&gt;</button>
           </div>
           <p className="reviews-followup">{copy.reviewsFollowup}</p>
           <div className="text-center">
-            <button className="btn btn-primary mt-4" type="button" onClick={onLeaveComment}>
+            <button className="btn btn-primary mt-4" type="button" onClick={() => setTestimonialFormOpen((value) => !value)}>
               {copy.leaveComment}
             </button>
           </div>
+          {testimonialFormOpen ? (
+            <form className="testimonial-form" onSubmit={onLeaveComment}>
+              <label>
+                Note
+                <select value={testimonialRating} onChange={(event) => setTestimonialRating(Number(event.target.value))}>
+                  {[5, 4, 3, 2, 1].map((rating) => <option key={rating} value={rating}>{rating}/5</option>)}
+                </select>
+              </label>
+              <label>
+                Avis
+                <textarea
+                  value={testimonialComment}
+                  onChange={(event) => setTestimonialComment(event.target.value)}
+                  maxLength={1000}
+                  rows={4}
+                  placeholder={copy.commentPrompt}
+                />
+              </label>
+              {testimonialError ? <p className="testimonial-message is-error">{testimonialError}</p> : null}
+              <button className="btn btn-secondary" type="submit">Envoyer pour validation</button>
+            </form>
+          ) : null}
+          {testimonialStatus ? <p className="testimonial-message">{testimonialStatus}</p> : null}
         </div>
       </section>
 
@@ -376,7 +456,7 @@ export default function LandingPage() {
         <div className="container">
           <h2 className="section-title">{copy.partners}</h2>
           <div className="partners-grid">
-    
+            <img src={partnerLogo} alt="Partenaire institutionnel" loading="lazy" />
           </div>
         </div>
       </section>
