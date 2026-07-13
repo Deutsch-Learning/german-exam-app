@@ -3722,7 +3722,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const getGapTask = (number) =>
     getCurrentPartTasks().find(({ task }) => Number(task.sourceQuestionNumber || task.sourceQuestionId || task.partNumber) === Number(number));
 
-  const isAnswerBankLine = (line) => /(?:^|\s)[a-o]\)\s+/i.test(line) && !/^\s*\d{1,2}\.\s*a\)/i.test(line);
+  const isAnswerBankLine = (line) => /^\s*[a-o]\)\s+/i.test(line);
 
   const splitTelcSprachPartMaterial = (part) => {
     const lines = String(part?.instructions || part?.sourceText || "")
