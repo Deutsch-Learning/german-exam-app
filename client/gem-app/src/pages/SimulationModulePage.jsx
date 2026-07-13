@@ -1,5 +1,5 @@
 /* eslint-disable react-hooks/set-state-in-effect */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   AlertCircle,
@@ -2615,6 +2615,16 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     [currentIndex]
   );
 
+  const setAnswerForIndex = useCallback((taskIndex, value) => {
+    setAnswers((previous) => ({ ...previous, [taskIndex]: value }));
+    setSkipped((previous) => {
+      if (!previous[taskIndex]) return previous;
+      const next = { ...previous };
+      delete next[taskIndex];
+      return next;
+    });
+  }, []);
+
   const startSimulation = useCallback(() => {
     setCurrentIndex(0);
     setAnswers({});
@@ -3672,7 +3682,189 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     return null;
   };
 
+  const isTelcSprachbausteineModule = module.id === "sprach" && /telc/i.test(String(selectedSeries?.examId || selectedSeries?.examName || ""));
+
+  const getCurrentPartTasks = () =>
+    (currentPart?.taskIndexes || []).map((taskIndex) => ({ taskIndex, task: module.tasks[taskIndex] })).filter((item) => item.task);
+
+  const getGapTask = (number) =>
+    getCurrentPartTasks().find(({ task }) => Number(task.sourceQuestionNumber || task.sourceQuestionId || task.partNumber) === Number(number));
+
+  const isAnswerBankLine = (line) => /(?:^|\s)[a-o]\)\s+/i.test(line) && !/^\s*\d{1,2}\.\s*a\)/i.test(line);
+
+  const splitTelcSprachPartMaterial = (part) => {
+    const lines = String(part?.instructions || part?.sourceText || "")
+      .replace(/\r/g, "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const optionStart = lines.findIndex((line) => /^\d{1,2}\.\s*a\)/i.test(line));
+    const answerBankStart = lines.findIndex((line) => isAnswerBankLine(line));
+    const splitIndex = [optionStart, answerBankStart].filter((index) => index >= 0).sort((a, b) => a - b)[0] ?? lines.length;
+    return {
+      textLines: lines.slice(0, splitIndex),
+      answerBankLines: answerBankStart >= 0 ? lines.slice(answerBankStart) : [],
+    };
+  };
+
+  const renderTelcGapControl = ({ taskIndex, task, compact = false }) => {
+    const answer = answers[taskIndex] ?? "";
+    const options = Array.isArray(task.options) ? task.options : [];
+    return (
+      <label className={compact ? styles.sprachInlineGapCompact : styles.sprachInlineGap}>
+        <span className={styles.sprachGapNumber}>{task.sourceQuestionNumber ?? taskIndex + 1}</span>
+        <select
+          value={answer}
+          onChange={(event) => {
+            setCurrentIndex(taskIndex);
+            setAnswerForIndex(taskIndex, event.target.value);
+          }}
+          aria-label={`Lücke ${task.sourceQuestionNumber ?? taskIndex + 1}`}
+        >
+          <option value="">—</option>
+          {options.map((option) => (
+            <option key={option.value} value={option.value} translate="no">
+              {compact ? option.value : `${option.value}) ${getProtectedChoiceLabel(task, option)}`}
+            </option>
+          ))}
+        </select>
+      </label>
+    );
+  };
+
+  const renderTelcSprachLine = (line, lineIndex) => {
+    const parts = [];
+    let cursor = 0;
+    const gapPattern = /\((1[0-9]|20|[1-9])\)/g;
+    for (const match of line.matchAll(gapPattern)) {
+      const number = Number(match[1]);
+      const gap = getGapTask(number);
+      if (!gap) continue;
+      if (match.index > cursor) parts.push(line.slice(cursor, match.index));
+      parts.push(
+        <Fragment key={`gap-${lineIndex}-${number}`}>
+          {renderTelcGapControl({ ...gap, compact: currentPart?.number === 2 })}
+        </Fragment>
+      );
+      cursor = match.index + match[0].length;
+    }
+    if (cursor < line.length) parts.push(line.slice(cursor));
+
+    const isHeader = lineIndex <= 1 || /^Lesen Sie\b/.test(line) || /^Text\.$/.test(line);
+    const isTitle = !isHeader && lineIndex > 1 && line.length < 80 && !/[.!?:,]$/.test(line) && currentPart?.number === 2;
+    return (
+      <p
+        key={`sprach-line-${lineIndex}`}
+        className={isTitle ? styles.sprachArticleTitle : isHeader ? styles.sprachInstructionLine : styles.sprachTextLine}
+        translate="no"
+      >
+        {parts.length ? parts : line}
+      </p>
+    );
+  };
+
+  const renderTelcPart1Options = () => {
+    const tasks = getCurrentPartTasks();
+    return (
+      <div className={styles.sprachOptionsGrid}>
+        {tasks.map(({ taskIndex, task }) => (
+          <fieldset key={task.id} className={styles.sprachOptionGroup}>
+            <legend>Lücke {task.sourceQuestionNumber ?? taskIndex + 1}</legend>
+            <div className={styles.sprachOptionChoices}>
+              {(task.options || []).map((option) => {
+                const selected = answers[taskIndex] === option.value;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={selected ? styles.sprachOptionSelected : styles.sprachOptionButton}
+                    onClick={() => {
+                      setCurrentIndex(taskIndex);
+                      setAnswerForIndex(taskIndex, option.value);
+                    }}
+                  >
+                    <span>{option.value})</span>
+                    <strong translate="no">{getProtectedChoiceLabel(task, option)}</strong>
+                  </button>
+                );
+              })}
+            </div>
+          </fieldset>
+        ))}
+      </div>
+    );
+  };
+
+  const renderTelcAnswerBank = () => {
+    const tasks = getCurrentPartTasks();
+    const firstTask = tasks[0]?.task;
+    const options = Array.isArray(firstTask?.options) ? firstTask.options : [];
+    return (
+      <section className={styles.sprachAnswerBank} aria-label="Antwortkasten">
+        <h3>Antwortkasten</h3>
+        <div className={styles.sprachAnswerBankGrid}>
+          {options.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={styles.sprachBankItem}
+              onClick={() => {
+                const firstEmpty = tasks.find(({ taskIndex }) => !answers[taskIndex]);
+                if (firstEmpty) {
+                  setCurrentIndex(firstEmpty.taskIndex);
+                  setAnswerForIndex(firstEmpty.taskIndex, option.value);
+                }
+              }}
+            >
+              <span>{option.value})</span>
+              <strong translate="no">{getProtectedChoiceLabel(firstTask, option)}</strong>
+            </button>
+          ))}
+        </div>
+      </section>
+    );
+  };
+
+  const renderTelcSprachbausteine = () => {
+    const partMaterial = splitTelcSprachPartMaterial(currentPart);
+    const currentPartTasks = getCurrentPartTasks();
+    const answeredInPart = currentPartTasks.filter(({ taskIndex, task }) => getTaskAnswered(module, task, answers[taskIndex])).length;
+
+    return (
+      <div className={styles.sprachExamLayout}>
+        <section className={styles.sprachExamPane} onWheel={handleReadableWheel}>
+          <div className={styles.sectionLabel}>
+            <BookOpen size={18} />
+            TELC B2 Sprachbausteine
+          </div>
+          <div className={styles.sprachExamHeader}>
+            <div>
+              <h2 translate="no">{currentPart?.displayTitle ?? "Sprachbausteine"}</h2>
+              <p>{answeredInPart}/{currentPartTasks.length} Lücken bearbeitet</p>
+            </div>
+            <span>{currentPart?.points ?? currentPartTasks.length} Punkte</span>
+          </div>
+
+          <article className={styles.sprachArticle}>
+            {partMaterial.textLines.map((line, index) => renderTelcSprachLine(line, index))}
+          </article>
+
+          {currentPart?.number === 1 ? renderTelcPart1Options() : renderTelcAnswerBank()}
+
+          {!simulationMode ? (
+            <div className={styles.sprachFeedbackGrid}>
+              {currentPartTasks.map(({ taskIndex, task }) => (
+                <FeedbackBox key={task.id} task={task} answer={answers[taskIndex]} />
+              ))}
+            </div>
+          ) : null}
+        </section>
+      </div>
+    );
+  };
+
   const renderReading = () => (
+    isTelcSprachbausteineModule ? renderTelcSprachbausteine() :
     <div className={styles.readingLayout}>
       <section className={styles.passagePane} onWheel={handleReadableWheel}>
         <div className={styles.sectionLabel}>

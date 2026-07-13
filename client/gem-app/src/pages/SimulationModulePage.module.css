@@ -820,6 +820,209 @@
   text-transform: uppercase;
 }
 
+.sprachExamLayout {
+  display: grid;
+  gap: 18px;
+}
+
+.sprachExamPane {
+  padding: 22px;
+  max-height: min(74vh, 820px);
+  overflow-y: auto;
+  overscroll-behavior-y: auto;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+}
+
+.sprachExamHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 8px 0 18px;
+}
+
+.sprachExamHeader h2 {
+  margin: 0 0 6px;
+  color: #111827;
+  line-height: 1.15;
+}
+
+.sprachExamHeader p {
+  margin: 0;
+  color: #667085;
+  font-weight: 800;
+}
+
+.sprachExamHeader > span {
+  border-radius: 999px;
+  background: var(--module-soft);
+  color: var(--module-accent);
+  padding: 8px 12px;
+  font-weight: 950;
+  white-space: nowrap;
+}
+
+.sprachArticle {
+  border: 1px solid #edf0f3;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: clamp(16px, 3vw, 26px);
+  color: #111827;
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.04);
+}
+
+.sprachInstructionLine,
+.sprachTextLine,
+.sprachArticleTitle {
+  margin: 0 0 11px;
+  line-height: 1.82;
+  white-space: pre-wrap;
+}
+
+.sprachInstructionLine {
+  color: #475467;
+  font-weight: 760;
+}
+
+.sprachArticleTitle {
+  margin-top: 8px;
+  color: #111827;
+  font-size: 1.12rem;
+  font-weight: 950;
+}
+
+.sprachInlineGap,
+.sprachInlineGapCompact {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0 4px;
+  vertical-align: baseline;
+}
+
+.sprachGapNumber {
+  min-width: 24px;
+  min-height: 24px;
+  border-radius: 999px;
+  background: var(--module-soft);
+  color: var(--module-accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.78rem;
+  font-weight: 950;
+}
+
+.sprachInlineGap select,
+.sprachInlineGapCompact select {
+  min-height: 34px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #111827;
+  padding: 0 28px 0 10px;
+  font: inherit;
+  font-weight: 850;
+}
+
+.sprachInlineGap select {
+  max-width: min(48vw, 260px);
+}
+
+.sprachInlineGapCompact select {
+  width: 74px;
+}
+
+.sprachOptionsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.sprachOptionGroup {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.sprachOptionGroup legend {
+  padding: 0 6px;
+  color: var(--module-accent);
+  font-weight: 950;
+}
+
+.sprachOptionChoices {
+  display: grid;
+  gap: 8px;
+}
+
+.sprachOptionButton,
+.sprachOptionSelected {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #111827;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sprachOptionSelected {
+  border-color: var(--module-accent);
+  background: var(--module-soft);
+}
+
+.sprachOptionButton span,
+.sprachOptionSelected span,
+.sprachBankItem span {
+  color: var(--module-accent);
+  font-weight: 950;
+}
+
+.sprachAnswerBank {
+  margin-top: 18px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #fbfcfe;
+  padding: 16px;
+}
+
+.sprachAnswerBank h3 {
+  margin: 0 0 12px;
+  color: #111827;
+}
+
+.sprachAnswerBankGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.sprachBankItem {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #111827;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sprachFeedbackGrid {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+
 .optionList {
   display: grid;
   gap: 10px;
@@ -3235,6 +3438,31 @@
     min-height: 54px;
     padding: 0 8px;
     font-size: 0.88rem;
+  }
+}
+
+@media (max-width: 620px) {
+  .sprachExamPane {
+    padding: 16px;
+    max-height: none;
+  }
+
+  .sprachExamHeader {
+    display: grid;
+  }
+
+  .sprachOptionsGrid,
+  .sprachAnswerBankGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .sprachInlineGap,
+  .sprachInlineGapCompact {
+    margin: 2px 3px;
+  }
+
+  .sprachInlineGap select {
+    max-width: 72vw;
   }
 }
 
