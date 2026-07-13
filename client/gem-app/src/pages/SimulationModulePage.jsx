@@ -2120,6 +2120,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const fallbackRecordingRef = useRef(false);
   const levelActivityKeyRef = useRef("");
   const writingTextareaRef = useRef(null);
+  const previousScrollTargetRef = useRef({ partId: "", taskId: "" });
+  const visitedScrollTargetsRef = useRef(new Set());
 
   const currentTask = module.tasks[Math.min(currentIndex, Math.max(totalTasks - 1, 0))] ?? {
     id: `${module.id}-loading-task`,
@@ -2178,6 +2180,11 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const audioReplayBlocked = module.id === "listen" && replaysUsed >= listeningReplayLimit && (!audioSessionActive || audioAtSessionEnd);
 
   useEffect(() => {
+    previousScrollTargetRef.current = { partId: "", taskId: "" };
+    visitedScrollTargetsRef.current = new Set();
+  }, [module.id, progressScopeId]);
+
+  useEffect(() => {
     listeningAmbienceRef.current?.dispose();
     listeningAmbienceRef.current = null;
     listeningSpeechFallbackRef.current?.dispose();
@@ -2204,8 +2211,22 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }, [currentIndex, currentPart?.id]);
+    const partId = String(currentPart?.id || currentPart?.number || "part-1");
+    const taskId = String(currentTask?.id || currentIndex);
+    const previous = previousScrollTargetRef.current;
+    const visitedKey = `${partId}:${taskId}`;
+    const visitedBefore = visitedScrollTargetsRef.current.has(visitedKey);
+    const firstRender = !previous.partId && !previous.taskId;
+    const movedToNewPart = Boolean(previous.partId && previous.partId !== partId);
+    const fullPageTaskChanged = previous.taskId && previous.taskId !== taskId && !["read", "sprach"].includes(module.id);
+    const shouldResetScroll = firstRender || movedToNewPart || (fullPageTaskChanged && !visitedBefore);
+
+    previousScrollTargetRef.current = { partId, taskId };
+    visitedScrollTargetsRef.current.add(visitedKey);
+
+    if (!shouldResetScroll) return;
+    window.scrollTo({ top: 0, behavior: firstRender ? "auto" : "smooth" });
+  }, [currentIndex, currentPart?.id, currentPart?.number, currentTask?.id, module.id]);
 
   const stopListeningAmbience = useCallback((immediate = false) => {
     listeningAmbienceRef.current?.stop(immediate);
