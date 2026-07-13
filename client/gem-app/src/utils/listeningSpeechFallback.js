@@ -1,9 +1,9 @@
 const WORDS_PER_MINUTE = 132;
-const MAX_UTTERANCE_CHARS = 220;
+const MAX_UTTERANCE_CHARS = 280;
 const VOICE_LOAD_TIMEOUT_MS = 2600;
 const VOICE_LOAD_RETRY_MS = 180;
-const DEFAULT_TURN_PAUSE_MS = 280;
-const DEFAULT_SEGMENT_PAUSE_MS = 130;
+const DEFAULT_TURN_PAUSE_MS = 340;
+const DEFAULT_SEGMENT_PAUSE_MS = 90;
 
 const NAME_GENDER_HINTS = {
   female: [
@@ -237,25 +237,25 @@ const hasSpeakerSetting = (setting = {}) => Object.keys(setting).length > 0;
 const normalizeSpeechRate = (...values) => {
   for (const value of values) {
     const numeric = Number(value);
-    if (Number.isFinite(numeric) && numeric > 0) return Math.max(0.78, Math.min(1.04, numeric));
+    if (Number.isFinite(numeric) && numeric > 0) return Math.max(0.82, Math.min(0.98, numeric));
     const key = normalizeKey(value);
     if (!key) continue;
-    if (/(langsam|slow|ruhig|calm|lent)/.test(key)) return 0.84;
-    if (/(schnell|fast|rapid|vite)/.test(key)) return 0.98;
-    if (/(moderat|normal|standard|mittel|moyen)/.test(key)) return 0.91;
+    if (/(langsam|slow|ruhig|calm|lent)/.test(key)) return 0.86;
+    if (/(schnell|fast|rapid|vite)/.test(key)) return 0.96;
+    if (/(moderat|normal|standard|mittel|moyen)/.test(key)) return 0.9;
   }
-  return 0.91;
+  return 0.9;
 };
 
 const getGenderPitch = (gender) => {
-  if (gender === "male") return 0.76;
-  if (gender === "female") return 1.18;
+  if (gender === "male") return 0.94;
+  if (gender === "female") return 1.04;
   return 1;
 };
 
 const getGenderRateOffset = (gender) => {
-  if (gender === "male") return -0.04;
-  if (gender === "female") return 0.03;
+  if (gender === "male") return -0.025;
+  if (gender === "female") return 0.015;
   return 0;
 };
 
@@ -326,7 +326,7 @@ export const buildListeningVoicePlan = ({ audio = {}, voices = [] } = {}) => {
       voice,
       voiceName: voice?.name || "Browser default German voice",
       lang: voice?.lang || "de-DE",
-      rate: Math.max(0.76, Math.min(1.03, normalizeSpeechRate(setting.speed, setting.rate, audio.rate) + getGenderRateOffset(gender))),
+      rate: Math.max(0.82, Math.min(0.98, normalizeSpeechRate(setting.speed, setting.rate, audio.rate) + getGenderRateOffset(gender))),
       pitch: getGenderPitch(gender),
     });
   });
