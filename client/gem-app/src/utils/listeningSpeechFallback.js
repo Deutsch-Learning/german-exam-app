@@ -1,9 +1,9 @@
 const WORDS_PER_MINUTE = 132;
-const MAX_UTTERANCE_CHARS = 280;
+const MAX_UTTERANCE_CHARS = 240;
 const VOICE_LOAD_TIMEOUT_MS = 2600;
 const VOICE_LOAD_RETRY_MS = 180;
-const DEFAULT_TURN_PAUSE_MS = 340;
-const DEFAULT_SEGMENT_PAUSE_MS = 90;
+const DEFAULT_TURN_PAUSE_MS = 420;
+const DEFAULT_SEGMENT_PAUSE_MS = 140;
 
 const NAME_GENDER_HINTS = {
   female: [
@@ -202,7 +202,8 @@ const scoreVoice = (voice, gender) => {
   const text = normalizeKey([voice.name, voice.lang, voice.voiceURI, voice.localService ? "local" : ""].join(" "));
   let score = 0;
   if (/^de\b/i.test(voice.lang || "") || text.includes("german") || text.includes("deutsch")) score += 30;
-  if (voice.localService) score += 5;
+  if (/google|microsoft|apple|siri|neural|natural|online/.test(text)) score += 10;
+  if (voice.localService) score += 2;
   if (gender === "female" && /\bfemale\b|frau|anna|sarah|laura|alice|lena|maria|katja|vicki|helena|google deutsch/.test(text)) score += 16;
   if (gender === "male" && /\bmale\b|herr|paul|markus|klaus|liam|roger|george|hans|stefan/.test(text)) score += 16;
   if (gender === "neutral" && /deutsch|german|google/.test(text)) score += 8;
@@ -224,6 +225,8 @@ const getVoicePools = (voices = []) => {
     neutral: sorted,
   };
 };
+
+const getVoiceSignature = (voice) => normalizeKey([voice?.name, voice?.lang, voice?.voiceURI].filter(Boolean).join(" "));
 
 const buildSpeakerKey = (speakerName) => normalizeKey(speakerName) || "narrator";
 
@@ -248,14 +251,15 @@ const normalizeSpeechRate = (...values) => {
 };
 
 const getGenderPitch = (gender) => {
-  if (gender === "male") return 0.94;
-  if (gender === "female") return 1.04;
+  // Browser TTS voices crack easily when pitch is forced. Keep the native voice natural.
+  if (gender === "male") return 1;
+  if (gender === "female") return 1;
   return 1;
 };
 
 const getGenderRateOffset = (gender) => {
-  if (gender === "male") return -0.025;
-  if (gender === "female") return 0.015;
+  if (gender === "male") return -0.015;
+  if (gender === "female") return 0.01;
   return 0;
 };
 
@@ -310,6 +314,7 @@ export const buildListeningVoicePlan = ({ audio = {}, voices = [] } = {}) => {
       .map(({ segment }) => buildSpeakerKey(segment.speaker))
   );
   const hasDialogue = dialogueKeys.size > 1;
+  let dialogueVoiceIndex = 0;
 
   segmentSettings.forEach(({ segment, setting }) => {
     if (segment.pauseMs) return;
@@ -317,8 +322,15 @@ export const buildListeningVoicePlan = ({ audio = {}, voices = [] } = {}) => {
     if (assignments.has(speakerKey)) return;
     const gender = hasDialogue ? inferGender(segment.speaker, setting) : "neutral";
     const pool = pools[gender]?.length ? pools[gender] : pools.neutral;
-    const voice = pool.length ? pool[usage[gender] % pool.length] : null;
+    let voice = pool.length ? pool[usage[gender] % pool.length] : null;
+    if (hasDialogue && pool.length > 1 && !voiceLooksFemale(voice) && !voiceLooksMale(voice)) {
+      voice = pool[dialogueVoiceIndex % pool.length];
+      dialogueVoiceIndex += 1;
+    }
     usage[gender] += 1;
+    const sameVoiceUsedForMultipleSpeakers = Array.from(assignments.values()).some(
+      (assignment) => getVoiceSignature(assignment.voice) && getVoiceSignature(assignment.voice) === getVoiceSignature(voice)
+    );
     assignments.set(speakerKey, {
       speakerKey,
       speaker: hasDialogue ? segment.speaker : "Narrator",
@@ -326,8 +338,8 @@ export const buildListeningVoicePlan = ({ audio = {}, voices = [] } = {}) => {
       voice,
       voiceName: voice?.name || "Browser default German voice",
       lang: voice?.lang || "de-DE",
-      rate: Math.max(0.82, Math.min(0.98, normalizeSpeechRate(setting.speed, setting.rate, audio.rate) + getGenderRateOffset(gender))),
-      pitch: getGenderPitch(gender),
+      rate: Math.max(0.84, Math.min(0.96, normalizeSpeechRate(setting.speed, setting.rate, audio.rate) + getGenderRateOffset(gender))),
+      pitch: sameVoiceUsedForMultipleSpeakers ? 1 : getGenderPitch(gender),
     });
   });
 
