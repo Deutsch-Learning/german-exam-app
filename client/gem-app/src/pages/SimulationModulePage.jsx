@@ -2121,7 +2121,19 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const levelActivityKeyRef = useRef("");
   const writingTextareaRef = useRef(null);
 
-  const currentTask = module.tasks[Math.min(currentIndex, totalTasks - 1)];
+  const currentTask = module.tasks[Math.min(currentIndex, Math.max(totalTasks - 1, 0))] ?? {
+    id: `${module.id}-loading-task`,
+    title: "",
+    question: "",
+    type: "multiple",
+    typeLabel: "",
+    hint: "",
+    options: [],
+    correct: null,
+    prepSeconds: speakingTasks[0].prepSeconds,
+    responseSeconds: speakingTasks[0].responseSeconds,
+    checklist: [],
+  };
   const currentAnswer = answers[currentIndex];
   const examParts = useMemo(() => buildExamParts(module), [module]);
   const currentPartIndex = Math.max(
