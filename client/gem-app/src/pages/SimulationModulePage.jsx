@@ -2740,6 +2740,17 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   }, [beginPart, partTransition]);
 
   const goToNext = useCallback(() => {
+    if (module.id === "sprach") {
+      const nextPart = examParts[currentPartIndex + 1] || null;
+      if (!nextPart) {
+        finishModule();
+        return;
+      }
+      if (startPartTransition(nextPart, nextPart.firstIndex)) return;
+      setCurrentIndex(nextPart.firstIndex);
+      setPartIntroVisible(false);
+      return;
+    }
     if (currentIndex >= totalTasks - 1) {
       finishModule();
       return;
@@ -2759,10 +2770,17 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   }, [armPrepTimer, currentIndex, currentPart, currentPartIndex, examParts, finishModule, module, simulationMode, startPartTransition, totalTasks]);
 
   const goToPrevious = useCallback(() => {
+    if (module.id === "sprach") {
+      const previousPart = examParts[currentPartIndex - 1] || null;
+      if (!previousPart) return;
+      setCurrentIndex(previousPart.firstIndex);
+      setPartIntroVisible(false);
+      return;
+    }
     const previousIndex = Math.max(0, currentIndex - 1);
     setCurrentIndex(previousIndex);
     setPartIntroVisible(false);
-  }, [currentIndex]);
+  }, [currentIndex, currentPartIndex, examParts, module.id]);
 
   const jumpToQuestion = useCallback((targetIndex) => {
     if (isRecording) return;
@@ -4900,6 +4918,13 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     );
   }
 
+  const isLastNavigationStep = module.id === "sprach"
+    ? currentPartIndex >= Math.max(0, examParts.length - 1)
+    : currentIndex >= totalTasks - 1;
+  const isPreviousNavigationDisabled = module.id === "sprach"
+    ? currentPartIndex <= 0
+    : currentIndex === 0;
+
   return (
     <div className={styles.page} style={{ "--module-accent": module.accent, "--module-soft": module.soft }}>
       {partTransition ? (
@@ -5010,7 +5035,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               type="button"
               className={`${styles.secondaryButton} ${styles.mobileNavButton}`}
               onClick={goToPrevious}
-              disabled={currentIndex === 0 || isRecording}
+              disabled={isPreviousNavigationDisabled || isRecording}
             >
               <ChevronLeft size={16} />
               Zurueck
@@ -5025,7 +5050,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               onClick={goToNext}
               disabled={isRecording}
             >
-              {currentIndex >= totalTasks - 1 ? t.common.submit : t.common.next}
+              {isLastNavigationStep ? t.common.submit : t.common.next}
               <Send size={16} />
             </button>
           </section>
