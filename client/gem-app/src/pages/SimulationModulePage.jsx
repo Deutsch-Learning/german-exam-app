@@ -1181,6 +1181,20 @@ const MODULES = {
       "Relances plus spontanées",
     ],
   },
+  sprach: {
+    id: "sprach",
+    title: "Sprachbausteine",
+    eyebrow: "Sprachbausteine",
+    examPart: "Sprachbausteine",
+    accent: "#b91c1c",
+    soft: "#fff1f1",
+    Icon: BookOpen,
+    simulationSeconds: 30 * 60,
+    tasks: [],
+    passage: { title: "Sprachbausteine", intro: "", paragraphs: [] },
+    focus: ["Lueckentext", "Grammatik", "Wortschatz", "Antwortkasten"],
+    advancement: ["Offizielle TELC-Struktur", "Zwei Teile", "20 Luecken", "Antwortbank"],
+  },
 };
 
 const GERMAN_MODULE_OVERRIDES = {
@@ -1216,6 +1230,12 @@ const GERMAN_MODULE_OVERRIDES = {
     tasks: withGermanTaskCopy(speakingTasks),
     focus: ["Aussprache", "Fluessigkeit", "Interaktion", "Gedanken ordnen"],
     advancement: ["Laengere Antworten", "Kuerzere Vorbereitungszeit", "Abstraktere Themen", "Spontanere Nachfragen"],
+  },
+  sprach: {
+    title: "Sprachbausteine",
+    eyebrow: "Sprachbausteine",
+    focus: ["Lueckentext", "Grammatik", "Wortschatz", "Antwortkasten"],
+    advancement: ["Offizielle TELC-Struktur", "Zwei Teile", "20 Luecken", "Antwortbank"],
   },
 };
 
