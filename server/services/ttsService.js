@@ -46,6 +46,7 @@ const normalizeText = (value) =>
 
 const stripProductionMarkers = (value) =>
   normalizeText(value)
+    .replace(/^\s*(?:teil\s*\d+\s*[—-]\s*)?(?:script\s*)?\((?:dialog|dialogue|gespr[aä]ch|gespraech|monolog|monologue|interview|radio)\)\s*/i, " ")
     .replace(/\[(?:pause|stille|silence)\s*[0-9.,]*\s*(?:s|sec|secondes|sekunden)?\]/gi, " ")
     .replace(/\((?:pause|stille|silence)\s*[0-9.,]*\s*(?:s|sec|secondes|sekunden)?\)/gi, " ")
     .replace(/\b(?:pause|stille|silence)\s*[0-9.,]+\s*(?:s|sec|secondes|sekunden)\b/gi, " ")
@@ -66,6 +67,42 @@ const normalizeKey = (value) =>
 const parseTextNumbers = (value) =>
   Array.from(String(value ?? "").matchAll(/\btexts?\s*([0-9,\s-]+)/gi))
     .flatMap((match) => String(match[1]).split(/[^0-9]+/).filter(Boolean).map(Number));
+
+const normalizeSpeakerLabel = (value) => {
+  const label = normalizeText(value)
+    .replace(/^\s*(?:teil\s*\d+\s*[—-]\s*)?(?:script\s*)?\((?:dialog|dialogue|gespr[aä]ch|gespraech|monolog|monologue|interview|radio)\)\s*/i, "")
+    .replace(/^\s*(?:text|track|audio|teil)\s*\d+\s*[—:.-]\s*/i, "")
+    .trim();
+  return label || "Narrator";
+};
+
+const isProductionOnlyLabel = (value) =>
+  /^(?:text|track|audio|teil)\s*\d*$/i.test(normalizeText(value)) ||
+  /^(?:script|dialog|dialogue|gespr[aä]ch|gespraech|monolog|monologue|interview|radio)$/i.test(normalizeText(value));
+
+const splitSpeakerTurns = (text, trackIndex = 0) => {
+  const normalized = stripProductionMarkers(text);
+  if (!normalized) return [];
+  const matches = Array.from(normalized.matchAll(/(^|[\s.!?\n])((?:Herr|Frau|Dr\.?|Moderator|Moderatorin|Reporter|Reporterin|Sprecher|Sprecherin|Person|Mann|Frau|[A-ZÄÖÜ][\p{Ll}.'-]+)(?:\s+(?:[A-ZÄÖÜ][\p{Ll}.'-]+|[A-Z]|\d+)){0,4})\s*:\s*/gu))
+    .map((match) => ({
+      index: match.index + match[1].length,
+      end: match.index + match[0].length,
+      label: match[2],
+    }))
+    .filter((match) => !isProductionOnlyLabel(match.label));
+  if (!matches.length) {
+    return [{ trackIndex, speaker: "Narrator", text: stripProductionMarkers(normalized) }].filter((segment) => segment.text);
+  }
+  return matches.map((match, index) => {
+    const start = match.end;
+    const end = index + 1 < matches.length ? matches[index + 1].index : normalized.length;
+    return {
+      trackIndex,
+      speaker: normalizeSpeakerLabel(match.label),
+      text: stripProductionMarkers(normalized.slice(start, end)),
+    };
+  }).filter((segment) => segment.text);
+};
 
 const parseSpeed = (value, fallback = 1) => {
   const match = String(value ?? "").match(/([0-9.]+)\s*x/i);
@@ -125,17 +162,13 @@ const parseSpeakerSegments = (audio = {}) => {
     if (!text) return;
     const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
     lines.forEach((line) => {
-      const match = line.match(/^([^:\n]{2,48})\s*:\s*(.+)$/);
-      if (match) {
-        trackSegments.push({
-          trackIndex,
-          speaker: match[1].trim(),
-          text: stripProductionMarkers(match[2]),
-        });
+      const segments = splitSpeakerTurns(line, trackIndex);
+      if (segments.length > 1 || segments[0]?.speaker !== "Narrator") {
+        trackSegments.push(...segments);
       } else if (trackSegments.length) {
         trackSegments[trackSegments.length - 1].text = stripProductionMarkers(`${trackSegments[trackSegments.length - 1].text} ${line}`);
       } else {
-        trackSegments.push({ trackIndex, speaker: "Narrator", text: stripProductionMarkers(line) });
+        trackSegments.push(...segments);
       }
     });
   });
@@ -147,12 +180,14 @@ const parseSpeakerSegments = (audio = {}) => {
   const lines = transcript.split("\n").map((line) => line.trim()).filter(Boolean);
   const segments = [];
   lines.forEach((line, index) => {
-    const match = line.match(/^([^:\n]{2,48})\s*:\s*(.+)$/);
-    segments.push({
-      trackIndex: 0,
-      speaker: match ? match[1].trim() : "Narrator",
-      text: stripProductionMarkers(match ? match[2] : line),
-    });
+    const turns = splitSpeakerTurns(line, 0);
+    if (turns.length > 1 || turns[0]?.speaker !== "Narrator") {
+      segments.push(...turns);
+    } else if (segments.length) {
+      segments[segments.length - 1].text = stripProductionMarkers(`${segments[segments.length - 1].text} ${line}`);
+    } else {
+      segments.push(...turns);
+    }
   });
   return segments.filter((segment) => segment.text);
 };
