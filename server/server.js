@@ -1712,6 +1712,9 @@ const toPublicSeriesList = (rows, routeMeta = {}) => {
     if (!Number.isFinite(seriesNumber)) continue;
 
     if (!groups.has(seriesNumber)) {
+      const publicExamId = routeMeta.level
+        ? `${provider}-${String(routeMeta.level).toLowerCase()}`
+        : meta.examId;
       groups.set(seriesNumber, {
         id: toImportedSeriesId(provider, row.level, seriesNumber),
         code: `Series ${String(seriesNumber).padStart(2, "0")}`,
@@ -1720,7 +1723,8 @@ const toPublicSeriesList = (rows, routeMeta = {}) => {
         duration: "Imported modules",
         theme: "",
         setting: examName,
-        examId: meta.examId,
+        examId: publicExamId,
+        accessExamId: meta.examId,
         examName,
         accent: meta.accent,
         isFree: seriesNumber === 1,
@@ -1825,6 +1829,7 @@ const queryImportedExamRows = async (provider, seriesNumber = null, level = null
 
 const buildTaskPartMeta = (question, index = 0) => {
   const metadata = asJsonObject(question.source_metadata);
+  const sectionMetadata = asJsonObject(question.section_metadata);
   const partNumber = Number(question.part_number) || Number(question.section_position) || index + 1;
   const partTitle = question.section_title || (partNumber ? `Teil ${partNumber}` : "Part");
   return {
@@ -1835,6 +1840,8 @@ const buildTaskPartMeta = (question, index = 0) => {
     partDurationMinutes: Number(question.section_duration_minutes) || null,
     partPoints: Number(question.section_points) || null,
     sourceQuestionNumber: metadata.sourceQuestionNumber ?? question.position ?? index + 1,
+    sourceMetadata: metadata,
+    partSourceMetadata: sectionMetadata,
   };
 };
 
@@ -1906,6 +1913,8 @@ const buildReadingTask = (question, index = 0) => {
   const correctValue = extractCorrectValue(question.correct_answer);
   const options = normalizeChoiceOptions(question.options);
   const metadata = asJsonObject(question.source_metadata);
+  const scoring = asJsonObject(question.scoring);
+  const taskPoints = Number(scoring.points);
   const base = {
     id: `db-question-${question.id}`,
     level: question.level || "B1",
@@ -1915,8 +1924,19 @@ const buildReadingTask = (question, index = 0) => {
     explanation: question.explanation || "Réponse issue du document importé.",
     sourceQuestionId: question.id,
     contentStyle: asJsonObject(metadata.contentStyle),
+    points: Number.isFinite(taskPoints) ? taskPoints : 1,
     ...buildTaskPartMeta(question, index),
   };
+
+  if (metadata.goetheB2Lesen && options.length >= 2) {
+    return {
+      ...base,
+      type: questionType.includes("multiple") ? "multiple" : "select",
+      options,
+      correct: correctValue || options[0].value,
+      alternatives: correctValue ? [correctValue.toLowerCase(), correctValue.toUpperCase()] : [],
+    };
+  }
 
   if (questionType.includes("true_false")) {
     return {
@@ -2226,6 +2246,7 @@ const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {},
       : clipText(applyExamAlias(section.instructions || section.title, routeMeta), 5200),
     durationMinutes: Number(section.duration_minutes) || null,
     points: Number(section.points) || null,
+    sourceMetadata: asJsonObject(section.metadata),
   }));
 
   let tasks;
@@ -2308,6 +2329,7 @@ const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {},
             : stripPublicListeningTranscriptFields(audioSummary);
         })()
       : undefined,
+    globalDurationMinutes: Number(metadata.globalDurationMinutes || metadata.scoring?.globalDurationMinutes) || null,
     tasks,
     sourceExamId: exam.id,
   };

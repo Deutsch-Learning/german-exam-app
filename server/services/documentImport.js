@@ -5,6 +5,7 @@ const path = require("path");
 const { execFile } = require("child_process");
 const { promisify } = require("util");
 const mammoth = require("mammoth");
+const { parseGoetheB2LesenSeries } = require("./goetheB2LesenParser");
 
 const execFileAsync = promisify(execFile);
 
@@ -4002,6 +4003,10 @@ const parseStructuredContent = (text, metadata) => {
     const series = parseB2NumberedSeries(text, metadata);
     if (series.length > 1) return series;
   }
+  if (provider === "goethe" && metadata.level === "B2" && metadata.sectionType === "read" && /DOCUMENT_USAGE_CONTRACT|IMPORT SCHEMA REFERENCE/i.test(text)) {
+    const series = parseGoetheB2LesenSeries(text, metadata);
+    if (series.length) return series;
+  }
   if (provider === "telc" && metadata.level === "B2" && metadata.sectionType === "read") {
     const series = parseB2NumberedSeries(text, metadata);
     if (series.length > 1) return series;
@@ -4481,6 +4486,7 @@ const summarizeOutline = (parsed = {}) => ({
 const insertParsedExamsForImport = async ({ client, parsed, importRow, adminId = null, isActive = true }) => {
   const importedExams = [];
   for (const series of parsed.series) {
+      const explicitCode = series.examCode || series.metadata?.examCode || null;
       const codeParts = [
         parsed.metadata.provider,
         parsed.metadata.level || "level",
@@ -4488,7 +4494,7 @@ const insertParsedExamsForImport = async ({ client, parsed, importRow, adminId =
         `series-${String(series.seriesNumber).padStart(2, "0")}`,
         parsed.documentHash.slice(0, 8),
       ];
-      const code = codeParts.map(slugify).filter(Boolean).join("-");
+      const code = explicitCode || codeParts.map(slugify).filter(Boolean).join("-");
       const name = `${parsed.metadata.examType} - ${SECTION_LABELS[parsed.metadata.sectionType] || parsed.metadata.sectionType} - ${series.sourceLabel || `Serie ${series.seriesNumber}`}`;
       const exam = await client.query(
         `INSERT INTO exams (
@@ -4512,6 +4518,7 @@ const insertParsedExamsForImport = async ({ client, parsed, importRow, adminId =
             title: series.title,
             instructions: series.instructions,
             scoring: series.scoring,
+            ...(series.metadata || {}),
             documentHash: parsed.documentHash,
             parser: parsed.analyzerVersion || IMPORT_ANALYZER_VERSION,
           }),

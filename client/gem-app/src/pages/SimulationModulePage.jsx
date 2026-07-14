@@ -1468,6 +1468,7 @@ const buildExamParts = (module) => {
       instructions: part.instructions || part.text || "",
       durationMinutes: part.durationMinutes,
       points: part.points,
+      sourceMetadata: part.sourceMetadata || {},
       taskIndexes: [],
     });
   });
@@ -1482,6 +1483,7 @@ const buildExamParts = (module) => {
         instructions: task.partInstructions || "",
         durationMinutes: task.partDurationMinutes,
         points: task.partPoints,
+        sourceMetadata: task.partSourceMetadata || {},
         taskIndexes: [],
       });
     }
@@ -1490,6 +1492,9 @@ const buildExamParts = (module) => {
     if (!part.instructions && task.partInstructions) part.instructions = task.partInstructions;
     if (!part.durationMinutes && task.partDurationMinutes) part.durationMinutes = task.partDurationMinutes;
     if (!part.points && task.partPoints) part.points = task.partPoints;
+    if (!part.sourceMetadata?.goetheB2Lesen && task.partSourceMetadata?.goetheB2Lesen) {
+      part.sourceMetadata = task.partSourceMetadata;
+    }
   });
 
   return [...partMap.values()]
@@ -1660,6 +1665,20 @@ const calculateModuleScore = (module, answers) => {
     return Math.round(total / module.tasks.length);
   }
 
+  const pointWeights = module.tasks.map((task) => Number(task.points));
+  const hasConfiguredPoints = pointWeights.some((points) => Number.isFinite(points) && points >= 0);
+  if (hasConfiguredPoints) {
+    const maxPoints = pointWeights.reduce((sum, points) => sum + (Number.isFinite(points) && points > 0 ? points : 0), 0);
+    if (maxPoints > 0) {
+      const earnedPoints = module.tasks.reduce((sum, task, index) => {
+        const points = Number(task.points);
+        if (!Number.isFinite(points) || points <= 0) return sum;
+        return sum + (isAnswerCorrect(task, answers[index]) ? points : 0);
+      }, 0);
+      return Math.round((earnedPoints / maxPoints) * 100);
+    }
+  }
+
   const correct = module.tasks.filter((task, index) => isAnswerCorrect(task, answers[index])).length;
   return Math.round((correct / module.tasks.length) * 100);
 };
@@ -1815,6 +1834,7 @@ const buildSeriesModule = (baseModule, content, series) => {
       passage: content.passage ?? baseModule.passage,
       parts: content.parts ?? baseModule.parts,
       audio: content.audio ?? baseModule.audio,
+      globalDurationMinutes: content.globalDurationMinutes ?? baseModule.globalDurationMinutes,
       focus: content.focus ?? baseModule.focus,
       advancement: content.advancement ?? baseModule.advancement,
       seriesContext: {
@@ -2053,7 +2073,13 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     : module.id;
   const progressKey = getProgressKey(progressScopeId);
   const totalExamDuration = useMemo(
-    () => module.tasks.reduce((sum, task) => sum + getTaskDuration(module, task), 0),
+    () => {
+      const configuredMinutes = Number(module.globalDurationMinutes);
+      if (Number.isFinite(configuredMinutes) && configuredMinutes > 0) {
+        return Math.round(configuredMinutes * 60);
+      }
+      return module.tasks.reduce((sum, task) => sum + getTaskDuration(module, task), 0);
+    },
     [module]
   );
   const seriesRoute = selectedSeries
@@ -3934,7 +3960,268 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     );
   };
 
+  const isGoetheB2LesenModule =
+    module.id === "read" &&
+    Boolean(currentPart?.sourceMetadata?.goetheB2Lesen?.partType || currentTask?.sourceMetadata?.goetheB2Lesen);
+
+  const getGoethePartMeta = () => currentPart?.sourceMetadata?.goetheB2Lesen || {};
+
+  const setGoetheAnswer = (taskIndex, value) => {
+    const meta = getGoethePartMeta();
+    const partIndexes = currentPart?.taskIndexes || [];
+    setCurrentIndex(taskIndex);
+    setAnswers((previous) => {
+      const next = { ...previous };
+      if (meta.uniqueAnswers && value) {
+        partIndexes.forEach((index) => {
+          if (index !== taskIndex && next[index] === value) delete next[index];
+        });
+      }
+      next[taskIndex] = value;
+      return next;
+    });
+    setSkipped((previous) => {
+      if (!previous[taskIndex]) return previous;
+      const next = { ...previous };
+      delete next[taskIndex];
+      return next;
+    });
+  };
+
+  const renderGoetheSelect = ({ taskIndex, task, compact = false }) => {
+    const answer = answers[taskIndex] ?? "";
+    return (
+      <label className={compact ? styles.goetheInlineSelect : styles.goetheSelectField}>
+        {!compact ? <span>Aufgabe {task.sourceQuestionNumber ?? taskIndex + 1}</span> : null}
+        <select
+          value={answer}
+          onChange={(event) => setGoetheAnswer(taskIndex, event.target.value)}
+          aria-label={`Aufgabe ${task.sourceQuestionNumber ?? taskIndex + 1}`}
+        >
+          <option value="">-</option>
+          {(task.options || []).map((option) => (
+            <option key={option.value} value={option.value} translate="no">
+              {compact ? option.value.toUpperCase() : `${option.value.toUpperCase()} - ${getProtectedChoiceLabel(task, option)}`}
+            </option>
+          ))}
+        </select>
+      </label>
+    );
+  };
+
+  const renderGoetheTextBlocks = (text, keyPrefix = "goethe-text") =>
+    String(text || "")
+      .replace(/\r/g, "")
+      .split(/\n{2,}/)
+      .map((block) => block.trim())
+      .filter(Boolean)
+      .map((block, index) => {
+        const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
+        if (lines.length === 1 && lines[0].length < 90 && !/[.!?]$/.test(lines[0])) {
+          return <h3 key={`${keyPrefix}-${index}`} className={styles.goetheArticleTitle} translate="no">{lines[0]}</h3>;
+        }
+        return (
+          <div key={`${keyPrefix}-${index}`} className={styles.goetheTextBlock}>
+            {lines.map((line, lineIndex) => (
+              <p key={`${keyPrefix}-${index}-${lineIndex}`} translate="no">{line}</p>
+            ))}
+          </div>
+        );
+      });
+
+  const getGoetheTaskByNumber = (number) =>
+    getCurrentPartTasks().find(({ task }) => Number(task.sourceQuestionNumber) === Number(number));
+
+  const renderGoetheArticleWithGaps = (article) => {
+    const lines = String(article || "").replace(/\r/g, "").split(/\n{2,}/).map((line) => line.trim()).filter(Boolean);
+    return lines.map((block, blockIndex) => {
+      const elements = [];
+      let cursor = 0;
+      const pattern = /\[\s*(\d{1,2})\s*\]\s*_{5,}/g;
+      for (const match of block.matchAll(pattern)) {
+        const number = Number(match[1]);
+        const gap = getGoetheTaskByNumber(number);
+        if (match.index > cursor) elements.push(block.slice(cursor, match.index));
+        elements.push(
+          <Fragment key={`goethe-gap-${number}`}>
+            <span className={styles.goetheGapNumber}>[{number}]</span>
+            {gap ? renderGoetheSelect({ ...gap, compact: true }) : <span className={styles.goetheMissingGap}>_____</span>}
+          </Fragment>
+        );
+        cursor = match.index + match[0].length;
+      }
+      if (cursor < block.length) elements.push(block.slice(cursor));
+      const isTitle = blockIndex === 0 && block.length < 90 && !/[.!?]$/.test(block);
+      return isTitle
+        ? <h3 key={`goethe-article-${blockIndex}`} className={styles.goetheArticleTitle} translate="no">{block}</h3>
+        : <p key={`goethe-article-${blockIndex}`} className={styles.goetheInlineArticle} translate="no">{elements}</p>;
+    });
+  };
+
+  const renderGoetheBank = (items, title = "Auswahl") => (
+    <section className={styles.goetheBank} aria-label={title}>
+      <h3>{title}</h3>
+      <div className={styles.goetheBankGrid}>
+        {(items || []).map((item) => (
+          <article key={item.value} className={styles.goetheBankItem}>
+            <strong>{String(item.value).toUpperCase()}</strong>
+            <span translate="no">{item.label}</span>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+
+  const renderGoetheFeedback = (tasks) =>
+    !simulationMode ? (
+      <div className={styles.sprachFeedbackGrid}>
+        {tasks.map(({ taskIndex, task }) => (
+          <FeedbackBox key={task.id} task={task} answer={answers[taskIndex]} />
+        ))}
+      </div>
+    ) : null;
+
+  const renderGoetheB2Lesen = () => {
+    const meta = getGoethePartMeta();
+    const tasks = getCurrentPartTasks();
+    const answeredInPart = tasks.filter(({ taskIndex, task }) => getTaskAnswered(module, task, answers[taskIndex])).length;
+
+    const header = (
+      <div className={styles.goethePartHeader}>
+        <div>
+          <div className={styles.sectionLabel}>
+            <BookOpen size={18} />
+            Goethe B2 Lesen
+          </div>
+          <h2 translate="no">{currentPart?.displayTitle ?? "Teil"}</h2>
+          <p translate="no">{meta.instruction}</p>
+        </div>
+        <span>{answeredInPart}/{tasks.length} bearbeitet</span>
+      </div>
+    );
+
+    if (meta.partType === "person_matching") {
+      return (
+        <div className={styles.goetheExamLayout}>
+          <section className={styles.goetheExamPane} onWheel={handleReadableWheel}>
+            {header}
+            <div className={styles.goethePersonGrid}>
+              {(meta.persons || []).map((person) => (
+                <article key={person.value} className={styles.goethePersonCard}>
+                  <h3 translate="no">{person.title}</h3>
+                  <p translate="no">{person.text}</p>
+                </article>
+              ))}
+            </div>
+            <div className={styles.goetheQuestionList}>
+              {tasks.map(({ taskIndex, task }) => (
+                <article key={task.id} className={styles.goetheQuestionRow}>
+                  <p translate="no"><strong>{task.sourceQuestionNumber}.</strong> {task.question}</p>
+                  {renderGoetheSelect({ taskIndex, task })}
+                </article>
+              ))}
+            </div>
+            {renderGoetheFeedback(tasks)}
+          </section>
+        </div>
+      );
+    }
+
+    if (meta.partType === "inline_sentence_gap") {
+      return (
+        <div className={styles.goetheExamLayout}>
+          <section className={styles.goetheExamPane} onWheel={handleReadableWheel}>
+            {header}
+            <article className={styles.goetheArticle}>{renderGoetheArticleWithGaps(meta.article)}</article>
+            {renderGoetheBank(meta.bank, "Satzbank A-H")}
+            {renderGoetheFeedback(tasks)}
+          </section>
+        </div>
+      );
+    }
+
+    if (meta.partType === "single_choice") {
+      return (
+        <div className={styles.goetheExamLayout}>
+          <section className={styles.goetheExamPane} onWheel={handleReadableWheel}>
+            {header}
+            <article className={styles.goetheArticle}>{renderGoetheTextBlocks(meta.readingText, "goethe-teil3")}</article>
+            <div className={styles.goetheChoiceList}>
+              {tasks.map(({ taskIndex, task }) => (
+                <fieldset key={task.id} className={styles.goetheChoiceGroup}>
+                  <legend translate="no">{task.sourceQuestionNumber}. {task.question}</legend>
+                  <div className={styles.goetheChoiceButtons}>
+                    {(task.options || []).map((option) => {
+                      const selected = answers[taskIndex] === option.value;
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          className={selected ? styles.sprachOptionSelected : styles.sprachOptionButton}
+                          onClick={() => setGoetheAnswer(taskIndex, option.value)}
+                        >
+                          <span>{option.value})</span>
+                          <strong translate="no">{getProtectedChoiceLabel(task, option)}</strong>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </fieldset>
+              ))}
+            </div>
+            {renderGoetheFeedback(tasks)}
+          </section>
+        </div>
+      );
+    }
+
+    if (meta.partType === "heading_matching_with_unmatched_opinion") {
+      return (
+        <div className={styles.goetheExamLayout}>
+          <section className={styles.goetheExamPane} onWheel={handleReadableWheel}>
+            {header}
+            {renderGoetheBank([...(meta.headingBank || []), { value: "X", label: "Keine passende Ueberschrift" }], "Ueberschriften a-f und X")}
+            <div className={styles.goetheQuestionList}>
+              {tasks.map(({ taskIndex, task }) => (
+                <article key={task.id} className={styles.goetheQuestionRow}>
+                  <p translate="no"><strong>{task.sourceQuestionNumber}.</strong> {task.question}</p>
+                  {renderGoetheSelect({ taskIndex, task })}
+                </article>
+              ))}
+            </div>
+            {renderGoetheFeedback(tasks)}
+          </section>
+        </div>
+      );
+    }
+
+    return (
+      <div className={styles.goetheExamLayout}>
+        <section className={styles.goetheExamPane} onWheel={handleReadableWheel}>
+          {header}
+          <article className={styles.goetheArticle}>
+            {meta.documentTitle ? <h3 className={styles.goetheArticleTitle} translate="no">{meta.documentTitle}</h3> : null}
+            {(meta.sections || []).map((section) => (
+              <p key={section.number} className={styles.goetheTextBlock} translate="no">{section.prompt}</p>
+            ))}
+          </article>
+          {renderGoetheBank(meta.headingBank, "Ueberschriften a-g")}
+          <div className={styles.goetheQuestionList}>
+            {tasks.map(({ taskIndex, task }) => (
+              <article key={task.id} className={styles.goetheQuestionRow}>
+                <p translate="no"><strong>Abschnitt {task.sourceQuestionNumber}</strong></p>
+                {renderGoetheSelect({ taskIndex, task })}
+              </article>
+            ))}
+          </div>
+          {renderGoetheFeedback(tasks)}
+        </section>
+      </div>
+    );
+  };
+
   const renderReading = () => (
+    isGoetheB2LesenModule ? renderGoetheB2Lesen() :
     isTelcSprachbausteineModule ? renderTelcSprachbausteine() :
     <div className={styles.readingLayout}>
       <section className={styles.passagePane} onWheel={handleReadableWheel}>

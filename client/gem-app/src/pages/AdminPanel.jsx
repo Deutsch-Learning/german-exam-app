@@ -2812,15 +2812,15 @@ function ImportWizardPanel({
   onLoadImport,
 }) {
   const [audioTarget, setAudioTarget] = useState({ seriesIndex: 0, sectionIndex: 0 });
-  const draft = wizard?.draft || {};
   const parsedWizardJson = useMemo(() => {
+    const draft = wizard?.draft || {};
     if (!wizardJson?.trim()) return { value: draft, error: "" };
     try {
       return { value: JSON.parse(wizardJson), error: "" };
     } catch (err) {
       return { value: draft, error: err.message || "Invalid JSON" };
     }
-  }, [draft, wizardJson]);
+  }, [wizard?.draft, wizardJson]);
   const editableDraft = parsedWizardJson.value || {};
   const draftSeries = Array.isArray(editableDraft.series) ? editableDraft.series : [];
   const validation = analysis?.validation || {};

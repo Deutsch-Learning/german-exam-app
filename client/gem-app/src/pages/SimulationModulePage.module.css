@@ -2349,6 +2349,250 @@
   line-height: 1.65;
 }
 
+.goetheExamLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.goetheExamPane {
+  border: 1px solid var(--exam-border);
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: var(--exam-shadow-soft);
+  padding: clamp(18px, 3vw, 28px);
+  max-height: min(74vh, 860px);
+  overflow-y: auto;
+  overscroll-behavior-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.goethePartHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid #edf0f3;
+  margin-bottom: 22px;
+}
+
+.goethePartHeader h2 {
+  margin: 8px 0 8px;
+  color: #111827;
+  font-size: clamp(1.35rem, 2vw, 1.9rem);
+  font-weight: 950;
+}
+
+.goethePartHeader p {
+  margin: 0;
+  color: #344054;
+  line-height: 1.55;
+}
+
+.goethePartHeader > span {
+  flex: 0 0 auto;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  background: #fff7db;
+  color: #7a5a00;
+  padding: 0 12px;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.goethePersonGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 22px;
+}
+
+.goethePersonCard,
+.goetheQuestionRow,
+.goetheChoiceGroup,
+.goetheBankItem {
+  border: 1px solid #edf0f3;
+  border-radius: 12px;
+  background: #fafafa;
+}
+
+.goethePersonCard {
+  padding: 16px;
+}
+
+.goethePersonCard h3,
+.goetheArticleTitle,
+.goetheBank h3 {
+  margin: 0 0 10px;
+  color: #111827;
+  font-size: 1rem;
+  font-weight: 950;
+}
+
+.goethePersonCard p,
+.goetheTextBlock p,
+.goetheInlineArticle,
+.goetheQuestionRow p {
+  color: #2f2f2f;
+  line-height: 1.72;
+}
+
+.goetheQuestionList,
+.goetheChoiceList {
+  display: grid;
+  gap: 12px;
+}
+
+.goetheQuestionRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 220px);
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+}
+
+.goetheQuestionRow p {
+  margin: 0;
+}
+
+.goetheSelectField {
+  display: grid;
+  gap: 6px;
+  color: #344054;
+  font-size: 0.8rem;
+  font-weight: 850;
+}
+
+.goetheSelectField select,
+.goetheInlineSelect select {
+  min-height: 42px;
+  border: 1px solid #d6dae1;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #111827;
+  padding: 0 10px;
+  font-weight: 850;
+}
+
+.goetheInlineSelect {
+  display: inline-flex;
+  vertical-align: middle;
+  margin: 0 6px;
+}
+
+.goetheInlineSelect select {
+  min-width: 74px;
+}
+
+.goetheGapNumber {
+  display: inline-flex;
+  color: var(--exam-red);
+  font-weight: 950;
+  margin-left: 4px;
+}
+
+.goetheMissingGap {
+  color: #98a2b3;
+  font-weight: 900;
+}
+
+.goetheArticle {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.goetheArticleTitle {
+  margin-top: 4px;
+}
+
+.goetheTextBlock {
+  margin: 0;
+}
+
+.goetheTextBlock p,
+.goetheInlineArticle {
+  margin: 0;
+}
+
+.goetheBank {
+  margin: 20px 0;
+  padding: 16px;
+  border-radius: 12px;
+  background: #fffdf4;
+  border: 1px solid #f8e7a6;
+}
+
+.goetheBankGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.goetheBankItem {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 12px;
+  background: #ffffff;
+}
+
+.goetheBankItem strong {
+  color: var(--exam-red);
+  font-weight: 950;
+}
+
+.goetheBankItem span {
+  color: #344054;
+  line-height: 1.5;
+}
+
+.goetheChoiceGroup {
+  padding: 14px;
+}
+
+.goetheChoiceGroup legend {
+  padding: 0 4px;
+  color: #111827;
+  font-weight: 900;
+  line-height: 1.5;
+}
+
+.goetheChoiceButtons {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+@media (max-width: 760px) {
+  .goetheExamPane {
+    max-height: none;
+    padding: 16px;
+  }
+
+  .goethePartHeader {
+    display: grid;
+  }
+
+  .goethePartHeader > span {
+    justify-self: start;
+  }
+
+  .goethePersonGrid,
+  .goetheBankGrid,
+  .goetheChoiceButtons {
+    grid-template-columns: 1fr;
+  }
+
+  .goetheQuestionRow {
+    grid-template-columns: 1fr;
+  }
+}
+
 .sectionLabel,
 .questionTopline {
   color: var(--exam-red);
