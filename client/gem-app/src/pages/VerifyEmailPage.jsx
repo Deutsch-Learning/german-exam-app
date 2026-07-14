@@ -3,6 +3,7 @@ import { Link, useLocation, useParams, useSearchParams } from "react-router-dom"
 import API from "../services/api";
 import logo from "../assets/images/logo.png";
 import "./LoginPage.css";
+import BackButton from "../components/BackButton";
 
 const normalizeCode = (value) => String(value || "").replace(/\D/g, "").slice(0, 6);
 
@@ -109,7 +110,7 @@ export default function VerifyEmailPage() {
 
       <div className="login-form-panel">
         <div className="form-container">
-          <Link className="auth-back-home" to="/login">← Retour connexion</Link>
+          <BackButton fallback="/login" label="Retour connexion" className="auth-back-home" />
           <div className="form-header">
             <h1>{token ? "Confirmation du compte" : "Vérifiez votre email"}</h1>
             <p>

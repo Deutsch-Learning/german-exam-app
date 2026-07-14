@@ -5,6 +5,7 @@ import logo from "../assets/images/logo.png";
 import API from "../services/api";
 import { useLanguage } from "../context/LanguageContext";
 import { storeAuthSession } from "../utils/access";
+import BackButton from "../components/BackButton";
 
 export default function LoginPage() {
   const { t } = useLanguage();
@@ -91,9 +92,7 @@ export default function LoginPage() {
 
       <div className="login-form-panel">
         <div className="form-container">
-          <Link className="auth-back-home" to="/">
-            ← {t.auth.backHome}
-          </Link>
+          <BackButton fallback="/" label={t.auth.backHome} className="auth-back-home" />
 
           <div className="form-header">
             <h1>{t.auth.loginTitle}</h1>

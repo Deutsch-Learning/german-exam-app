@@ -1,8 +1,7 @@
 import API from "./api";
+import { clearExamMetadata, readExamMetadata, writeExamMetadata } from "./examCache";
 
 const CACHE_TTL_MS = 5 * 60_000;
-const CACHE_VERSION = "2026-07-05-sprach-hoeren";
-const SERIES_STORAGE_PREFIX = "imported-series:";
 const seriesCache = new Map();
 const moduleCache = new Map();
 
@@ -22,33 +21,12 @@ const setCached = (cache, key, promise) => {
   return promise;
 };
 
-const readStoredSeries = (key) => {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.localStorage.getItem(`${SERIES_STORAGE_PREFIX}${key}`);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed || parsed.version !== CACHE_VERSION || Date.now() - Number(parsed.createdAt) > CACHE_TTL_MS) {
-      window.localStorage.removeItem(`${SERIES_STORAGE_PREFIX}${key}`);
-      return null;
-    }
-    return Array.isArray(parsed.series) ? parsed.series : null;
-  } catch {
-    return null;
-  }
-};
-
-const writeStoredSeries = (key, series) => {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(
-      `${SERIES_STORAGE_PREFIX}${key}`,
-      JSON.stringify({ version: CACHE_VERSION, createdAt: Date.now(), series })
-    );
-  } catch {
-    // Cache writes are optional; network results still drive the UI.
-  }
-};
+const requestSeries = (examId, key, withAccessExamId) =>
+  API.get(`/api/exams/${encodeURIComponent(examId)}/series`).then((response) => {
+    const series = withAccessExamId(Array.isArray(response.data?.series) ? response.data.series : []);
+    void writeExamMetadata(`series:${key}`, series);
+    return series;
+  });
 
 export const fetchImportedSeries = async (examId) => {
   if (!examId) return [];
@@ -56,17 +34,20 @@ export const fetchImportedSeries = async (examId) => {
   const withAccessExamId = (series = []) => series.map((item) => ({ ...item, accessExamId: key }));
   const cached = getCached(seriesCache, key);
   if (cached) return cached;
-  const stored = readStoredSeries(key);
-  if (stored) return withAccessExamId(stored);
+  const stored = await readExamMetadata(`series:${key}`);
+  if (Array.isArray(stored)) {
+    const series = withAccessExamId(stored);
+    setCached(seriesCache, key, Promise.resolve(series));
+    requestSeries(examId, key, withAccessExamId)
+      .then((fresh) => seriesCache.set(key, { promise: Promise.resolve(fresh), createdAt: Date.now() }))
+      .catch(() => {});
+    return series;
+  }
 
   return setCached(
     seriesCache,
     key,
-    API.get(`/api/exams/${encodeURIComponent(examId)}/series`).then((response) => {
-      const series = withAccessExamId(Array.isArray(response.data?.series) ? response.data.series : []);
-      writeStoredSeries(key, series);
-      return series;
-    })
+    requestSeries(examId, key, withAccessExamId)
   );
 };
 
@@ -99,9 +80,5 @@ export const fetchImportedSeriesModule = async (examId, seriesId, moduleId) => {
 export const clearImportedExamCache = () => {
   seriesCache.clear();
   moduleCache.clear();
-  if (typeof window !== "undefined") {
-    Object.keys(window.localStorage)
-      .filter((key) => key.startsWith(SERIES_STORAGE_PREFIX))
-      .forEach((key) => window.localStorage.removeItem(key));
-  }
+  void clearExamMetadata();
 };

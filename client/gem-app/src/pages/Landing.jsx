@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Activity,
@@ -148,6 +148,8 @@ export default function LandingPage() {
   const [testimonialRating, setTestimonialRating] = useState(5);
   const [testimonialStatus, setTestimonialStatus] = useState("");
   const [testimonialError, setTestimonialError] = useState("");
+  const [statsAnimationKey, setStatsAnimationKey] = useState(0);
+  const restartStats = useCallback(() => setStatsAnimationKey((value) => value + 1), []);
 
   useEffect(() => {
     let alive = true;
@@ -292,7 +294,13 @@ export default function LandingPage() {
         </div>
       </section>
 
-      <section className="stats-section">
+      <section
+        className="stats-section"
+        onPointerEnter={(event) => {
+          if (event.pointerType === "mouse") restartStats();
+        }}
+        onTouchStart={restartStats}
+      >
         <div className="container stats-container">
           <StatCard
             icon={
@@ -305,6 +313,7 @@ export default function LandingPage() {
             }
             value="1000+"
             label={copy.stats[0]}
+            animationKey={statsAnimationKey}
           />
           <StatCard
             icon={
@@ -319,6 +328,7 @@ export default function LandingPage() {
             }
             value="99%"
             label={copy.stats[1]}
+            animationKey={statsAnimationKey}
           />
           <StatCard
             icon={
@@ -328,6 +338,7 @@ export default function LandingPage() {
             }
             value="4.9/5"
             label={copy.stats[2]}
+            animationKey={statsAnimationKey}
           />
         </div>
       </section>

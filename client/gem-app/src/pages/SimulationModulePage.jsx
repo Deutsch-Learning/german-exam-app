@@ -31,7 +31,6 @@ import {
   Timer,
   TimerReset,
   Trophy,
-  Volume2,
   WandSparkles,
   X,
   XCircle,
@@ -1322,7 +1321,6 @@ const getProtectedChoiceLabel = (task, option, index = 0) =>
     `Option ${index + 1}`
   );
 
-const AUDIO_REPLAY_LIMIT = 5;
 const AUDIO_WORDS_PER_MINUTE = 132;
 
 const normalizeText = (value) =>
@@ -2116,7 +2114,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const [audioSessionActive, setAudioSessionActive] = useState(false);
   const [audioError, setAudioError] = useState("");
   const [listeningAudioDuration, setListeningAudioDuration] = useState(0);
-  const [replaysUsed, setReplaysUsed] = useState(0);
   const [prepRemaining, setPrepRemaining] = useState(speakingTasks[0].prepSeconds);
   const [prepActive, setPrepActive] = useState(false);
   const [speakingPhase, setSpeakingPhase] = useState("prep");
@@ -2124,6 +2121,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [recordError, setRecordError] = useState("");
   const [restoredKey, setRestoredKey] = useState("");
+  const [exitConfirmationOpen, setExitConfirmationOpen] = useState(false);
 
   const mediaRecorderRef = useRef(null);
   const mediaStreamRef = useRef(null);
@@ -2148,6 +2146,50 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const writingTextareaRef = useRef(null);
   const previousScrollTargetRef = useRef({ partId: "", taskId: "" });
   const visitedScrollTargetsRef = useRef(new Set());
+  const exitGuardBypassRef = useRef(false);
+  const exitHistoryIndexRef = useRef(0);
+
+  useEffect(() => {
+    if (
+      completed ||
+      module.unavailable ||
+      (params.seriesId && !selectedSeriesContent) ||
+      typeof window === "undefined"
+    ) return undefined;
+    const guardId = `${currentRoute}:${Date.now()}`;
+    exitHistoryIndexRef.current = Number(window.history.state?.idx) || 0;
+    const guardState = { ...(window.history.state || {}), simulationGuard: guardId };
+    if (window.history.state?.simulationGuard !== guardId) {
+      window.history.pushState(guardState, "", window.location.href);
+    }
+
+    const requestConfirmation = () => {
+      if (exitGuardBypassRef.current) return;
+      window.history.pushState(guardState, "", window.location.href);
+      setExitConfirmationOpen(true);
+    };
+    const preventUnload = (event) => {
+      if (exitGuardBypassRef.current) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("popstate", requestConfirmation);
+    window.addEventListener("beforeunload", preventUnload);
+    return () => {
+      window.removeEventListener("popstate", requestConfirmation);
+      window.removeEventListener("beforeunload", preventUnload);
+    };
+  }, [completed, currentRoute, module.unavailable, params.seriesId, selectedSeriesContent]);
+
+  const leaveSimulation = () => {
+    exitGuardBypassRef.current = true;
+    setExitConfirmationOpen(false);
+    if (exitHistoryIndexRef.current > 0 && window.history.length > 2) {
+      window.history.go(-2);
+      return;
+    }
+    navigate(seriesRoute, { replace: true, state: { fromSimulationExit: true } });
+  };
 
   const currentTask = module.tasks[Math.min(currentIndex, Math.max(totalTasks - 1, 0))] ?? {
     id: `${module.id}-loading-task`,
@@ -2180,7 +2222,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const currentTaskDuration = getTaskDuration(module, currentTask);
   const currentListeningAudio = module.id === "listen" ? (currentTask?.audio || module.audio || null) : null;
   const isBrowserSpeechAudio = currentListeningAudio?.fallbackEngine === "browser-speech";
-  const listeningReplayLimit = Math.max(1, Number(currentListeningAudio?.listeningCount) || AUDIO_REPLAY_LIMIT);
   const currentAudioDuration = module.id === "listen"
     ? Math.round(Number(currentListeningAudio?.durationSeconds) || listeningAudioDuration || getEstimatedAudioDuration(currentListeningAudio))
     : 0;
@@ -2206,9 +2247,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       // Starting-level tracking is helpful but should never block an exercise.
     });
   }, [auth?.id, level, module.id, module.unavailable, progressScopeId]);
-  const audioAtSessionEnd = module.id === "listen" && audioTimestamp >= currentAudioDuration;
-  const audioReplayBlocked = module.id === "listen" && replaysUsed >= listeningReplayLimit && (!audioSessionActive || audioAtSessionEnd);
-
   useEffect(() => {
     previousScrollTargetRef.current = { partId: "", taskId: "" };
     visitedScrollTargetsRef.current = new Set();
@@ -2229,7 +2267,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     audioSessionRef.current = false;
     setAudioSessionActive(false);
     setListeningAudioDuration(0);
-    setReplaysUsed(0);
     setAudioError("");
     return () => {
       listeningAmbienceRef.current?.dispose();
@@ -2238,6 +2275,19 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       listeningSpeechFallbackRef.current = null;
     };
   }, [currentListeningAudio?.id, listeningAudioUrl]);
+
+  useEffect(() => {
+    if (module.id !== "listen" || typeof Audio === "undefined") return undefined;
+    const nextAudioUrl = module.tasks[currentIndex + 1]?.audio?.audioUrl;
+    if (!nextAudioUrl || nextAudioUrl === listeningAudioUrl) return undefined;
+    const preloadAudio = new Audio();
+    preloadAudio.preload = "metadata";
+    preloadAudio.src = nextAudioUrl;
+    return () => {
+      preloadAudio.removeAttribute("src");
+      preloadAudio.load();
+    };
+  }, [currentIndex, listeningAudioUrl, module.id, module.tasks]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -2369,7 +2419,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     const restoredAudioTimestamp = Number(stored?.audioTimestamp) || 0;
     setAudioTimestamp(restoredAudioTimestamp);
     audioTimestampRef.current = restoredAudioTimestamp;
-    setReplaysUsed(Number(stored?.replaysUsed) || 0);
     const restoredPrepActive = module.id === "speak" && !stored?.completed && !restoredPartIntroVisible && (stored?.prepActive ?? true);
     setSpeakingPhase(stored?.speakingPhase ?? "prep");
     setPrepActive(restoredPrepActive);
@@ -2557,7 +2606,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       simulationMode,
       completed,
       audioTimestamp,
-      replaysUsed,
       prepRemaining,
       prepActive,
       speakingPhase,
@@ -2586,7 +2634,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       progressPercent,
       remainingCount,
       progressScopeId,
-      replaysUsed,
       selectedSeries,
       simulationMode,
       skipped,
@@ -2730,7 +2777,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     audioSessionRef.current = false;
     setAudioSessionActive(false);
     setListeningAudioDuration(0);
-    setReplaysUsed(0);
     setAudioPlaying(false);
     setSpeakingPhase("prep");
     armPrepTimer(module.tasks[0]?.prepSeconds ?? speakingTasks[0].prepSeconds, { running: false });
@@ -2843,15 +2889,9 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
   const playListeningAudio = useCallback(async () => {
     if (module.id !== "listen") return;
-    const replayLimit = listeningReplayLimit;
     const startingFresh = audioTimestamp <= 0 || audioTimestamp >= currentAudioDuration || !audioSessionActive;
 
     if (startingFresh) {
-      if (replaysUsed >= replayLimit) {
-        setSaveStatus(`Die maximale Anzahl von ${replayLimit} Hoerdurchgaengen ist erreicht.`);
-        return;
-      }
-      setReplaysUsed((value) => value + 1);
       setAudioTimestamp(0);
       audioTimestampRef.current = 0;
       audioSessionRef.current = true;
@@ -2905,7 +2945,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       setAudioSessionActive(false);
       setAudioError("Die Audiodatei konnte auf diesem Geraet nicht abgespielt werden.");
     }
-  }, [audioSessionActive, audioTimestamp, currentAudioDuration, getListeningSpeechFallback, isBrowserSpeechAudio, listeningAudioUrl, listeningReplayLimit, module.id, replaysUsed]);
+  }, [audioSessionActive, audioTimestamp, currentAudioDuration, getListeningSpeechFallback, isBrowserSpeechAudio, listeningAudioUrl, module.id]);
 
   const pauseListeningAudio = useCallback(() => {
     setAudioPlaying(false);
@@ -4258,8 +4298,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   );
 
   const renderListening = () => {
-    const replayLimit = listeningReplayLimit;
-    const replaysLeft = Math.max(0, replayLimit - replaysUsed);
     const audioProgressPercent = currentAudioDuration
       ? Math.min(100, (audioTimestamp / currentAudioDuration) * 100)
       : 0;
@@ -4267,7 +4305,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       <audio
         ref={listeningAudioRef}
         src={listeningAudioUrl || undefined}
-        preload="metadata"
+        preload="auto"
         onLoadedMetadata={handleListeningAudioLoadedMetadata}
         onTimeUpdate={handleListeningAudioTimeUpdate}
         onEnded={handleListeningAudioEnded}
@@ -4287,10 +4325,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
                 </div>
                 <h2>{currentListeningAudio?.speaker || module.audio?.speaker || "Standarddeutsch"}</h2>
               </div>
-              <div className={styles.replayBadge} data-blocked={audioReplayBlocked ? "true" : "false"}>
-                <Volume2 size={16} />
-                {replaysLeft} Hoerdurchgang{replaysLeft !== 1 ? "e" : ""} uebrig
-              </div>
             </div>
 
             {listeningAudioElement}
@@ -4299,10 +4333,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
                 type="button"
                 className={styles.audioPlayButton}
                 data-playing={audioPlaying ? "true" : "false"}
-                data-blocked={audioReplayBlocked ? "true" : "false"}
                 style={{ "--audio-progress": `${audioProgressPercent}%` }}
                 onClick={audioPlaying ? pauseListeningAudio : playListeningAudio}
-                disabled={!audioPlaying && audioReplayBlocked}
                 aria-label={audioPlaying ? "Pause" : "Abspielen"}
               >
                 {audioPlaying ? <Pause size={34} /> : <Play size={34} />}
@@ -4316,7 +4348,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
                   <span style={{ width: `${audioProgressPercent}%` }} />
                 </div>
               </div>
-              <button type="button" className={styles.iconButton} onClick={resetListeningAudio} disabled={audioReplayBlocked} aria-label="Zum Anfang zurueck">
+              <button type="button" className={styles.iconButton} onClick={resetListeningAudio} aria-label="Zum Anfang zurueck">
                 <RotateCcw size={20} />
                 Noch einmal hoeren
               </button>
@@ -4363,10 +4395,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               </div>
               <h2>{module.audio.speaker}</h2>
             </div>
-            <div className={styles.replayBadge} data-blocked={audioReplayBlocked ? "true" : "false"}>
-              <Volume2 size={16} />
-              {replaysLeft} écoute{replaysLeft > 1 ? "s" : ""} restante{replaysLeft > 1 ? "s" : ""}
-            </div>
           </div>
 
           {listeningAudioElement}
@@ -4375,10 +4403,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               type="button"
               className={styles.audioPlayButton}
               data-playing={audioPlaying ? "true" : "false"}
-              data-blocked={audioReplayBlocked ? "true" : "false"}
               style={{ "--audio-progress": `${audioProgressPercent}%` }}
               onClick={audioPlaying ? pauseListeningAudio : playListeningAudio}
-              disabled={!audioPlaying && audioReplayBlocked}
               aria-label={audioPlaying ? "Pause" : "Lecture"}
             >
               {audioPlaying ? <Pause size={34} /> : <Play size={34} />}
@@ -4392,7 +4418,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
                 <span style={{ width: `${audioProgressPercent}%` }} />
               </div>
             </div>
-            <button type="button" className={styles.iconButton} onClick={resetListeningAudio} disabled={audioReplayBlocked} aria-label="Revenir au début">
+            <button type="button" className={styles.iconButton} onClick={resetListeningAudio} aria-label="Revenir au début">
               <RotateCcw size={20} />
               Reecouter
             </button>
@@ -5166,16 +5192,16 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             {resultStatus ? <p className={styles.statusLine}>{toGermanStatus(resultStatus)}</p> : null}
             <div className={styles.resultActions}>
               <button type="button" className={styles.secondaryButton} onClick={() => navigate(loggedIn ? "/dashboard" : "/")}>
-                <ChevronLeft size={16} />
-                Zurueck
+                <Home size={16} />
+                Zum Dashboard
               </button>
               <button type="button" className={styles.secondaryButton} onClick={startSimulation}>
                 <RotateCcw size={16} />
-                Neu starten
+                Neue Simulation starten
               </button>
               <button type="button" className={styles.secondaryButton} onClick={() => navigate(selectedSeries ? `/simulations/${selectedSeries.examId}` : "/simulations", { state: { fromResults: true } })}>
                 <ClipboardCheck size={16} />
-                Neue Serie waehlen
+                Zurueck zu den Simulationen
               </button>
               <button type="button" className={styles.primaryButton} onClick={() => navigate(seriesRoute)}>
                 {t.modulePage.chooseModule}
@@ -5248,32 +5274,30 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           onComplete={completePartTransition}
         />
       ) : null}
+      {exitConfirmationOpen ? (
+        <div className={styles.exitDialogOverlay} role="presentation">
+          <section className={styles.exitDialog} role="dialog" aria-modal="true" aria-labelledby="exit-simulation-title">
+            <AlertCircle size={30} />
+            <h2 id="exit-simulation-title">Simulation wirklich verlassen?</h2>
+            <p>Ihr aktueller Fortschritt kann verloren gehen.</p>
+            <div>
+              <button type="button" className={styles.secondaryButton} onClick={() => setExitConfirmationOpen(false)}>In der Simulation bleiben</button>
+              <button type="button" className={styles.primaryButton} onClick={leaveSimulation}>Simulation verlassen</button>
+            </div>
+          </section>
+        </div>
+      ) : null}
       <nav className={styles.nav}>
-        <button
-          type="button"
-          className={styles.logoButton}
-          onClick={() => navigate(loggedIn ? "/dashboard" : "/")}
-          aria-label="Zurueck"
-        >
+        <div className={styles.logoButton}>
           <img src={logo} alt="Deutsch Prüfungen" />
-        </button>
+        </div>
         <div className={styles.navActions}>
-          {!loggedIn ? (
-            <button type="button" onClick={() => navigate("/")}>
-              <Home size={16} />
-              {t.common.home}
+          {!completed && !module.unavailable ? (
+            <button type="button" onClick={() => setExitConfirmationOpen(true)}>
+              <X size={16} />
+              Simulation beenden
             </button>
           ) : null}
-          {loggedIn ? (
-            <button type="button" onClick={() => navigate("/dashboard")}>
-              <ClipboardCheck size={16} />
-              {t.common.dashboard}
-            </button>
-          ) : null}
-          <button type="button" onClick={() => navigate(seriesRoute)}>
-            <ClipboardCheck size={16} />
-            {t.common.modules}
-          </button>
         </div>
       </nav>
 

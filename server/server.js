@@ -222,6 +222,8 @@ const sanitizeUser = (user) => ({
   first_name: user.first_name,
   last_name: user.last_name,
   date_of_birth: user.date_of_birth,
+  country: user.country || null,
+  phone: user.phone || null,
   role: user.role,
   status: user.status,
   email_verified: Boolean(user.email_verified),
@@ -776,6 +778,8 @@ async function ensureSchema() {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name TEXT;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS date_of_birth DATE;`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS country TEXT;`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user';`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT FALSE;`);
@@ -1284,6 +1288,19 @@ async function ensureSchema() {
   `);
 
   await ensureDocumentImportSchema(pool);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS exams_published_catalog_idx
+      ON exams (LOWER(provider), UPPER(level), series_number, section_type)
+      WHERE is_active = TRUE;
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS exam_sections_exam_part_position_idx
+      ON exam_sections (exam_id, part_number, position, id);
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS exam_questions_exam_section_position_idx
+      ON exam_questions (exam_id, section_id, position, id);
+  `);
   await ensureWritingCorrectionSchema(pool);
   await ensureContentStyleSchema(pool);
   await ensureAudioAssetSchema(pool);
@@ -2431,7 +2448,7 @@ app.get("/api/exams/:provider/series/:seriesId/:moduleId", async (req, res) => {
 
 const registerHandler = async (req, res) => {
   try {
-    const { email, password, username, firstName, lastName, marketingEmailsEnabled } = req.body ?? {};
+    const { email, password, username, firstName, lastName, country, phone, marketingEmailsEnabled } = req.body ?? {};
 
     if (!isEmail(email) || typeof password !== "string") {
       return res.status(400).json({ ok: false, error: "A valid email and password are required" });
@@ -2448,6 +2465,14 @@ const registerHandler = async (req, res) => {
     const normalizedEmail = normalizeEmail(email);
     const safeFirst = typeof firstName === "string" ? firstName.trim().slice(0, 80) : null;
     const safeLast = typeof lastName === "string" ? lastName.trim().slice(0, 80) : null;
+    const safeCountry = typeof country === "string" ? country.trim().toUpperCase() : "";
+    const safePhone = typeof phone === "string" ? phone.trim().slice(0, 40) : "";
+    if (!/^[A-Z]{2}$/.test(safeCountry)) {
+      return res.status(400).json({ ok: false, error: "A valid country is required" });
+    }
+    if (!/^\+[\d\s().-]{7,}$/.test(safePhone)) {
+      return res.status(400).json({ ok: false, error: "A valid international phone number is required" });
+    }
     const passwordHash = await bcrypt.hash(password, 12);
     const verificationToken = EMAIL_VERIFICATION_ENABLED ? makeToken() : null;
     const verificationCode = EMAIL_VERIFICATION_ENABLED ? makeVerificationCode() : null;
@@ -2455,18 +2480,20 @@ const registerHandler = async (req, res) => {
 
     const insert = await pool.query(
       `INSERT INTO users (
-         email, username, first_name, last_name, password_hash, role, status,
+         email, username, first_name, last_name, country, phone, password_hash, role, status,
          email_verified, verification_token_hash, verification_expires_at,
          verification_code_hash, verification_code_expires_at,
          last_verification_email_sent_at, marketing_emails_enabled
        )
-       VALUES ($1, $2, $3, $4, $5, 'user', 'active', $6, $7, $8, $9, $10, NULL, $11)
-       RETURNING id, email, username, first_name, last_name, email_verified, marketing_emails_enabled`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'user', 'active', $8, $9, $10, $11, $12, NULL, $13)
+       RETURNING id, email, username, first_name, last_name, country, phone, email_verified, marketing_emails_enabled`,
       [
         normalizedEmail,
         safeUsername,
         safeFirst,
         safeLast,
+        safeCountry,
+        safePhone,
         passwordHash,
         !EMAIL_VERIFICATION_ENABLED,
         verificationToken ? tokenHash(verificationToken) : null,
@@ -2669,7 +2696,7 @@ const loginHandler = async (req, res) => {
     }
 
     const userRes = await pool.query(
-      `SELECT id, email, username, first_name, last_name, date_of_birth, password_hash, role, status,
+      `SELECT id, email, username, first_name, last_name, date_of_birth, country, phone, password_hash, role, status,
               email_verified, has_full_access, partial_access, current_level, target_level,
               marketing_emails_enabled, created_at, last_login_at
        FROM users
@@ -2724,7 +2751,7 @@ const refreshHandler = async (req, res) => {
     const hashed = tokenHash(refreshToken);
     const tokenRes = await pool.query(
       `SELECT rt.id AS refresh_token_id, rt.user_id, rt.expires_at, rt.revoked_at,
-              u.email, u.username, u.first_name, u.last_name, u.date_of_birth,
+              u.email, u.username, u.first_name, u.last_name, u.date_of_birth, u.country, u.phone,
               u.role, u.status, u.email_verified, u.has_full_access, u.partial_access,
               u.current_level, u.target_level, u.marketing_emails_enabled, u.created_at, u.last_login_at
        FROM refresh_tokens rt

@@ -683,6 +683,53 @@
   line-height: 1.75;
 }
 
+.exitDialogOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(17, 24, 39, 0.56);
+  backdrop-filter: blur(6px);
+}
+
+.exitDialog {
+  width: min(480px, 100%);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: clamp(22px, 5vw, 34px);
+  text-align: center;
+  box-shadow: 0 24px 70px rgba(17, 24, 39, 0.28);
+}
+
+.exitDialog > svg {
+  color: #c10016;
+}
+
+.exitDialog h2 {
+  margin: 14px 0 8px;
+  font-size: 1.35rem;
+}
+
+.exitDialog p {
+  margin: 0;
+  color: #667085;
+}
+
+.exitDialog > div {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+@media (max-width: 520px) {
+  .exitDialog > div {
+    grid-template-columns: 1fr;
+  }
+}
+
 .richExamText {
   color: #374151;
   font-weight: 400;
@@ -2360,10 +2407,23 @@
   background: #ffffff;
   box-shadow: var(--exam-shadow-soft);
   padding: clamp(18px, 3vw, 28px);
-  max-height: min(74vh, 860px);
+  max-height: min(82dvh, 1000px);
   overflow-y: auto;
   overscroll-behavior-y: auto;
   scrollbar-gutter: stable;
+}
+
+@media (min-width: 980px) {
+  .goetheExamPane {
+    min-height: min(660px, calc(100dvh - 138px));
+    max-height: calc(100dvh - 112px);
+  }
+}
+
+@media (max-width: 620px) {
+  .goetheExamPane {
+    max-height: 78dvh;
+  }
 }
 
 .goethePartHeader {

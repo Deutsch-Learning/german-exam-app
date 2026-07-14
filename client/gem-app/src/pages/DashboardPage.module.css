@@ -929,7 +929,7 @@
   }
 
   .contentArea {
-    padding: 24px 16px;
+    padding: 24px 16px calc(112px + env(safe-area-inset-bottom, 0px));
   }
 
   .dashboardGrid {
@@ -937,7 +937,8 @@
   }
 
   .floatingCta {
-    bottom: 24px;
+    position: fixed;
+    bottom: calc(18px + env(safe-area-inset-bottom, 0px));
     right: 24px;
     left: 24px;
     padding: 16px;

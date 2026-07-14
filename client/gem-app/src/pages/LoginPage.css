@@ -205,6 +205,130 @@
   gap: 6px;
 }
 
+.country-phone-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.country-select-group {
+  min-width: 0;
+}
+
+.country-combobox {
+  position: relative;
+}
+
+.country-trigger {
+  width: 100%;
+  min-height: 48px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid #dddddd;
+  border-radius: var(--border-radius-md);
+  background: #ffffff;
+  color: var(--text-dark);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.country-trigger > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.country-trigger small,
+.country-option small {
+  color: #64748b;
+  font-weight: 700;
+}
+
+.country-trigger:focus-visible {
+  outline: 3px solid rgba(249, 196, 21, 0.28);
+  border-color: var(--primary-color);
+}
+
+.country-menu {
+  position: absolute;
+  z-index: 80;
+  top: calc(100% + 6px);
+  left: 0;
+  width: min(380px, calc(100vw - 40px));
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.16);
+  overflow: hidden;
+}
+
+.country-search-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px;
+  padding: 0 10px;
+  border: 1px solid #dbe2ea;
+  border-radius: 7px;
+}
+
+.country-search-wrap input[type="search"] {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  padding: 10px 0;
+  outline: none;
+}
+
+.country-options {
+  max-height: min(310px, 44vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.country-option {
+  width: 100%;
+  min-height: 46px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto 18px;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-top: 1px solid #f1f5f9;
+  background: #ffffff;
+  color: #172033;
+  padding: 8px 12px;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.country-option:hover,
+.country-option[aria-selected="true"] {
+  background: #fff9df;
+}
+
+.country-option-flag {
+  font-size: 1.25rem;
+}
+
+.country-empty {
+  margin: 0;
+  padding: 18px;
+  color: #64748b;
+  text-align: center;
+}
+
+@media (max-width: 620px) {
+  .country-phone-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
 .form-group label {
   font-weight: 600;
   font-size: 0.92rem;

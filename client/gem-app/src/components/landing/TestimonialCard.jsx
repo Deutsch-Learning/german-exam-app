@@ -5,7 +5,7 @@ export default function TestimonialCard({ avatar, text, rating = 5, name, role }
 
   return (
     <div className="testimonial-card">
-      <img src={avatar} alt="User Avatar" className="testimonial-avatar" />
+      <img src={avatar} alt="User Avatar" className="testimonial-avatar" loading="lazy" decoding="async" />
       <div className="testimonial-body">
         <div className="testimonial-rating" aria-label={`${safeRating} out of 5 stars`}>
           {Array.from({ length: 5 }).map((_, index) => (

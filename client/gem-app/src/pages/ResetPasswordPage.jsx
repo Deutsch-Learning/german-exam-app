@@ -3,6 +3,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import API from "../services/api";
 import logo from "../assets/images/logo.png";
 import "./LoginPage.css";
+import BackButton from "../components/BackButton";
 
 export default function ResetPasswordPage() {
   const { token } = useParams();
@@ -61,7 +62,7 @@ export default function ResetPasswordPage() {
 
       <div className="login-form-panel">
         <div className="form-container">
-          <Link className="auth-back-home" to="/login">← Retour connexion</Link>
+          <BackButton fallback="/login" label="Retour connexion" className="auth-back-home" />
           <div className="form-header">
             <h1>Réinitialiser le mot de passe</h1>
             <p>Choisissez un nouveau mot de passe sécurisé.</p>
