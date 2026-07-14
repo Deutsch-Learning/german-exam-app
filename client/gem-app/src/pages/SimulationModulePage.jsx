@@ -2171,6 +2171,10 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const currentPart = examParts[currentPartIndex] ?? examParts[0];
   const currentPartQuestionIndex = currentPart ? Math.max(0, currentPart.taskIndexes.indexOf(currentIndex)) : 0;
   const currentPartQuestionTotal = currentPart?.taskIndexes.length ?? totalTasks;
+  const isGoetheB2LesenCurrentPart =
+    module.id === "read" &&
+    Boolean(currentPart?.sourceMetadata?.goetheB2Lesen?.partType || currentTask?.sourceMetadata?.goetheB2Lesen);
+  const usesFullPartNavigation = module.id === "sprach" || isGoetheB2LesenCurrentPart;
   const moduleItemSingular = isTopicModule(module.id) ? "Thema" : "Frage";
   const moduleItemPlural = getModuleCountLabel(module.id);
   const currentTaskDuration = getTaskDuration(module, currentTask);
@@ -2787,7 +2791,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   }, [beginPart, partTransition]);
 
   const goToNext = useCallback(() => {
-    if (module.id === "sprach") {
+    if (usesFullPartNavigation) {
       const nextPart = examParts[currentPartIndex + 1] || null;
       if (!nextPart) {
         finishModule();
@@ -2814,10 +2818,10 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setPrepActive(module.id === "speak" && simulationMode);
     setRecordingSeconds(0);
     recordingSecondsRef.current = 0;
-  }, [armPrepTimer, currentIndex, currentPart, currentPartIndex, examParts, finishModule, module, simulationMode, startPartTransition, totalTasks]);
+  }, [armPrepTimer, currentIndex, currentPart, currentPartIndex, examParts, finishModule, module, simulationMode, startPartTransition, totalTasks, usesFullPartNavigation]);
 
   const goToPrevious = useCallback(() => {
-    if (module.id === "sprach") {
+    if (usesFullPartNavigation) {
       const previousPart = examParts[currentPartIndex - 1] || null;
       if (!previousPart) return;
       setCurrentIndex(previousPart.firstIndex);
@@ -2827,7 +2831,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     const previousIndex = Math.max(0, currentIndex - 1);
     setCurrentIndex(previousIndex);
     setPartIntroVisible(false);
-  }, [currentIndex, currentPartIndex, examParts, module.id]);
+  }, [currentIndex, currentPartIndex, examParts, usesFullPartNavigation]);
 
   const jumpToQuestion = useCallback((targetIndex) => {
     if (isRecording) return;
@@ -5226,10 +5230,10 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     );
   }
 
-  const isLastNavigationStep = module.id === "sprach"
+  const isLastNavigationStep = usesFullPartNavigation
     ? currentPartIndex >= Math.max(0, examParts.length - 1)
     : currentIndex >= totalTasks - 1;
-  const isPreviousNavigationDisabled = module.id === "sprach"
+  const isPreviousNavigationDisabled = usesFullPartNavigation
     ? currentPartIndex <= 0
     : currentIndex === 0;
 
