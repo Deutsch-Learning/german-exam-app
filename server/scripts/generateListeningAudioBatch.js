@@ -2,6 +2,7 @@ const pool = require("../db");
 const {
   generateAndStoreExamAudio,
   getVoiceProfiles,
+  parseSpeakerSegments,
   stripProductionMarkers,
 } = require("../services/ttsService");
 
@@ -44,10 +45,81 @@ const normalizeKind = (value) => {
   return normalized || "";
 };
 
+const isIgnoredSpeakerLabel = (label) =>
+  /^(?:text|track|audio|teil|thema|aufgabe|aufgaben|frage|fragen|multiple-choice|richtig\/falsch|richtig falsch|loesung|lösung|antwort|skript|geh[oö]rt|format|transkription|transcription|type de t[aâ]che|heute|dann|erstens|zweitens|drittens|au[ßs]erdem|vorteile|nachteile|optionen|zum abschluss)\s*\d*$/i.test(String(label || "").trim());
+
+const isTemplateTranscript = (transcript) =>
+  /\bsprecher(?:in)?\s*:\s*_+/i.test(transcript) ||
+  /\(not found in source|manual review required\)/i.test(transcript) ||
+  /_{3,}/.test(transcript);
+
+const isProductionLine = (line) =>
+  /^(?:thema|aufgabe|aufgaben|frage|fragen|multiple-choice|richtig\/falsch|richtig falsch|loesung|lösung|antwort|skript|format|transkription|transcription|type de t[aâ]che|heute|dann|erstens|zweitens|drittens|au[ßs]erdem|vorteile|nachteile|optionen|zum abschluss)\s*:/i.test(line) ||
+  /^\s*(?:n|■|-)?\s*\[?(?:anfang|ende|pause|sfx|audio script|zweite wiedergabe|wiederholung)\]?/i.test(line);
+
+const extractDialogueSpeakerLabels = (item, transcript) => {
+  const settings = asObject(item.audio_engine_settings);
+  const labels = [];
+  const add = (value) => {
+    const normalized = String(value || "")
+      .replace(/^\s*(?:n|■|-)\s*/i, "")
+      .replace(/\s*\([^)]*\)\s*$/g, "")
+      .trim();
+    if (!normalized || isIgnoredSpeakerLabel(normalized)) return;
+    const folded = foldPlain(normalized);
+    if (!folded || labels.some((label) => foldPlain(label) === folded)) return;
+    labels.push(normalized);
+  };
+  if (Array.isArray(settings.speakers)) {
+    settings.speakers.forEach((speaker) => add(speaker.speaker || speaker.voiceName || speaker.id));
+  }
+  Array.from(String(transcript || "").matchAll(/(?:^|\n)\s*(?:n|■|-)?\s*((?:Moderator|Moderatorin|Gast|Reporter|Reporterin|Sprecher|Sprecherin)(?:\s+[A-ZÄÖÜ][^:\n]{0,36})?)\s*:/g))
+    .forEach((match) => add(match[1]));
+  const preferred = labels.filter((label) => /^(?:Moderator|Moderatorin|Gast|Reporter|Reporterin|Sprecher|Sprecherin)\b/i.test(label));
+  return preferred.length >= 2 ? preferred.slice(0, 4) : labels.slice(0, 4);
+};
+
+const prepareTranscriptForTts = (item) => {
+  const rawTranscript = item.admin_transcript || "";
+  if (isTemplateTranscript(rawTranscript)) return "";
+  const transcript = stripProductionMarkers(rawTranscript);
+  if (!transcript || isTemplateTranscript(transcript)) return "";
+  if (!/\b(?:radiointerview|radiogespr[aä]ch|radiogespraech|dialog|dialogue|interview|diskussion|discussion)\b/i.test(`${item.title || ""} ${JSON.stringify(item.audio_engine_settings || {})}`)) {
+    return transcript;
+  }
+  const lines = transcript.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  const speakerLabels = extractDialogueSpeakerLabels(item, transcript);
+  if (speakerLabels.length < 2) return transcript;
+  let turnIndex = 0;
+  const prepared = [];
+  lines.forEach((rawLine) => {
+    const line = rawLine.replace(/^\s*(?:format|transkription|transcription)\s*:\s*/i, "").trim();
+    if (isProductionLine(line)) return;
+    if (/^\s*(?:n|■|-)?\s*(?:Moderator|Moderatorin|Gast|Reporter|Reporterin|Sprecher|Sprecherin)\b[^:\n]*:/i.test(line)) {
+      return;
+    }
+    if (/^\s*[A-ZÄÖÜ][^:\n]{1,48}\s*:/u.test(line)) {
+      prepared.push(line.replace(/^\s*(?:n|■|-)\s*/i, ""));
+      return;
+    }
+    prepared.push(`${speakerLabels[turnIndex % speakerLabels.length]}: ${line}`);
+    turnIndex += 1;
+  });
+  return prepared.join("\n").trim() || transcript;
+};
+
 const classifyItem = (item) => {
-  const transcript = stripProductionMarkers(item.admin_transcript || "");
+  const rawTranscript = item.admin_transcript || "";
+  const transcript = stripProductionMarkers(rawTranscript);
   const settings = asObject(item.audio_engine_settings);
   const metadata = asObject(item.source_metadata);
+  const primaryText = [
+    item.title,
+    settings.documentType,
+    settings.listeningType,
+    metadata.documentType,
+    metadata.listeningType,
+  ].filter(Boolean).join(" ");
   const text = [
     item.title,
     item.instructions,
@@ -56,13 +128,22 @@ const classifyItem = (item) => {
     JSON.stringify(settings),
     JSON.stringify(metadata),
   ].join(" ");
+  if (isTemplateTranscript(rawTranscript) || isTemplateTranscript(transcript)) {
+    return "unknown";
+  }
   const labels = Array.from(transcript.matchAll(/^\s*([^:\n]{2,48})\s*:/gm))
     .map((match) => match[1].trim())
-    .filter((label) => !/^(?:text|track|audio|teil)\s*\d+$/i.test(label));
+    .filter((label) => !isIgnoredSpeakerLabel(label));
   const uniqueLabels = Array.from(new Set(labels.map(foldPlain).filter(Boolean)));
+  if (/\b(?:kurztexte?|vortrag|monolog|monologue)\b/i.test(primaryText) && !/\b(?:radiointerview|radiogespr[aä]ch|radiogespraech|dialog|dialogue|interview|diskussion|discussion)\b/i.test(primaryText)) {
+    return "monologue";
+  }
+  if (/\b(?:radiointerview|radiogespr[aä]ch|radiogespraech|dialog|dialogue|interview|diskussion|discussion)\b/i.test(primaryText)) {
+    return "dialogue";
+  }
   const dialogueHint =
     uniqueLabels.length >= 2 ||
-    /\b(dialog|dialogue|gespr[aä]ch|gespraech|interview|radio|diskussion|discussion|telefon|moderator|moderatorin|reporter|reporterin|sprecher\s*[ab]|sprecherin\s*[ab])\b/i.test(text);
+    /\b(dialog|dialogue|gespr[aä]ch|gespraech|interview|radio|diskussion|discussion|moderator|moderatorin|reporter|reporterin|sprecher\s*[ab]|sprecherin\s*[ab])\b/i.test(text);
   const monologueHint =
     /\b(monolog|monologue|vortrag|ansage|bericht|reportage|narration)\b/i.test(text) &&
     !/\b(interview|dialog|dialogue|diskussion|discussion|conversation)\b/i.test(text);
@@ -108,13 +189,31 @@ const markBrowserTtsFallback = async (item, reason) => {
 };
 
 const inferSpeakers = (item, profiles) => {
-  const transcript = stripProductionMarkers(item.admin_transcript || "");
-  const labels = Array.from(transcript.matchAll(/^\s*([^:\n]{2,48})\s*:/gm))
-    .map((match) => match[1].trim())
-    .filter((label) => !/^(?:text|track|audio|teil)\s*\d+$/i.test(label));
+  const transcript = prepareTranscriptForTts(item);
+  const audioSettings = asObject(item.audio_engine_settings);
+  const configuredSpeakers = Array.isArray(audioSettings.speakers) ? audioSettings.speakers : [];
+  const parsedSegments = parseSpeakerSegments({
+    transcript,
+    tracks: [{
+      id: `listening-item-${item.id}`,
+      transcript,
+      audio: { transcript },
+    }],
+  });
+  const labels = parsedSegments
+    .map((segment) => String(segment.speaker || "").trim())
+    .filter((label) => label && label !== "Narrator" && !isIgnoredSpeakerLabel(label));
   const femaleProfiles = profiles.filter((profile) => profile.gender === "female");
   const maleProfiles = profiles.filter((profile) => profile.gender === "male");
   const pick = (list, index = 0) => list[index % Math.max(1, list.length)] || {};
+  const configuredGenderFor = (name) => {
+    const folded = foldPlain(name);
+    const match = configuredSpeakers.find((speaker) => {
+      const labels = [speaker.speaker, speaker.voiceName, speaker.id].map(foldPlain).filter(Boolean);
+      return labels.some((label) => folded && (folded === label || folded.includes(label) || label.includes(folded)));
+    });
+    return String(match?.suggestedGender || match?.gender || "").toLowerCase();
+  };
 
   if (!labels.length) {
     const rawSettings = JSON.stringify(item.audio_engine_settings || {});
@@ -139,8 +238,12 @@ const inferSpeakers = (item, profiles) => {
     const key = foldPlain(name);
     if (!key || seen.has(key)) return;
     seen.add(key);
-    const isMale = /herr|vater|sohn|freund|ben|daniel|frank|mike|moderator|sprecher|thomas|klaus/i.test(name);
-    const gender = isMale ? "male" : "female";
+    const configuredGender = configuredGenderFor(name);
+    const looksFemale = /\b(?:frau|mutter|tochter|freundin|anna|julia|julie|maria|sara|clara|eva|gabi|moderatorin|sprecherin|reporterin|katrin|monika|lena|hannah|nadja|klara|nina|mira|petra|sabine|lara|greta|sophie)\b/i.test(name);
+    const looksMale = /\b(?:herr|vater|sohn|freund|ben|daniel|frank|mike|moderator|sprecher|reporter|thomas|klaus|marco|tobias|lukas|pawel|bernd|otto|markus|stefan|robert)\b/i.test(name);
+    const gender = configuredGender === "male" || configuredGender === "female"
+      ? configuredGender
+      : looksMale && !looksFemale ? "male" : "female";
     const sameGenderCount = speakers.filter((speaker) => speaker.gender === gender).length;
     const profile = pick(gender === "male" ? maleProfiles : femaleProfiles, sameGenderCount);
     speakers.push({
@@ -157,7 +260,7 @@ const inferSpeakers = (item, profiles) => {
 };
 
 const buildAudio = (item, profiles) => {
-  const transcript = stripProductionMarkers(item.admin_transcript || "");
+  const transcript = prepareTranscriptForTts(item);
   const speakers = inferSpeakers(item, profiles);
   return {
     title: item.title || `Hoeren Teil ${item.part_number || 1}`,

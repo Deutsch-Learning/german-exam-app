@@ -78,17 +78,32 @@ const normalizeSpeakerLabel = (value) => {
 
 const isProductionOnlyLabel = (value) =>
   /^(?:text|track|audio|teil)\s*\d*$/i.test(normalizeText(value)) ||
-  /^(?:script|dialog|dialogue|gespr[aä]ch|gespraech|monolog|monologue|interview|radio)$/i.test(normalizeText(value));
+  /^(?:script|dialog|dialogue|gespr[aä]ch|gespraech|monolog|monologue|interview|radio|thema|aufgabe|aufgaben|frage|fragen|multiple-choice|richtig\/falsch|richtig falsch|loesung|lösung|antwort|skript|geh[oö]rt|format|transkription|transcription|type de t[aâ]che|heute|dann|erstens|zweitens|drittens|au[ßs]erdem|vorteile|nachteile|optionen|zum abschluss)$/i.test(normalizeText(value));
+
+const cleanMatchedSpeakerLabel = (label) => {
+  const normalized = normalizeSpeakerLabel(label);
+  const protectedText = normalized.replace(/\bDr\.\s+/g, "Dr__DOT__ ");
+  const parts = protectedText.split(/[.!?]\s+/).map((part) => part.replace(/Dr__DOT__/g, "Dr.").trim()).filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : normalized.replace(/Dr__DOT__/g, "Dr.");
+};
 
 const splitSpeakerTurns = (text, trackIndex = 0) => {
-  const normalized = stripProductionMarkers(text);
+  let normalized = stripProductionMarkers(text);
   if (!normalized) return [];
+  normalized = normalized.replace(/^\s*(?:format|transkription|transcription)\s*:\s*/i, "").trim();
+  if (/^\s*(?:thema|aufgabe|aufgaben|frage|fragen|multiple-choice|richtig\/falsch|richtig falsch|loesung|lösung|antwort|skript|format|transkription|transcription|type de t[aâ]che|heute|dann|erstens|zweitens|drittens|au[ßs]erdem|vorteile|nachteile|optionen|zum abschluss)\s*:/i.test(normalized)) {
+    return [];
+  }
   const matches = Array.from(normalized.matchAll(/(^|[\s.!?\n])((?:Herr|Frau|Dr\.?|Moderator|Moderatorin|Reporter|Reporterin|Sprecher|Sprecherin|Person|Mann|Frau|[A-ZÄÖÜ][\p{Ll}.'-]+)(?:\s+(?:[A-ZÄÖÜ][\p{Ll}.'-]+|[A-Z]|\d+)){0,4})\s*:\s*/gu))
-    .map((match) => ({
-      index: match.index + match[1].length,
-      end: match.index + match[0].length,
-      label: match[2],
-    }))
+    .map((match) => {
+      const label = cleanMatchedSpeakerLabel(match[2]);
+      const labelOffset = match[0].lastIndexOf(label);
+      return {
+        index: match.index + (labelOffset >= 0 ? labelOffset : match[1].length),
+        end: match.index + match[0].length,
+        label,
+      };
+    })
     .filter((match) => !isProductionOnlyLabel(match.label));
   if (!matches.length) {
     return [{ trackIndex, speaker: "Narrator", text: stripProductionMarkers(normalized) }].filter((segment) => segment.text);
@@ -240,15 +255,18 @@ const ensureVoiceProfileSchema = async (pool) => {
       END $$;
     `);
     await pool.query(`
-      INSERT INTO tts_voice_profiles (profile_key, label, provider, gender, role, style, settings)
+      INSERT INTO tts_voice_profiles (profile_key, label, provider, voice_id, gender, role, style, settings)
       VALUES
-        ('de_female_1', 'Deutsch weiblich 1', 'elevenlabs', 'female', 'speaker', 'klar, freundlich', '{"stability":0.62,"similarity":0.78}'::jsonb),
-        ('de_female_2', 'Deutsch weiblich 2', 'elevenlabs', 'female', 'speaker', 'natuerlich, ruhig', '{"stability":0.58,"similarity":0.76}'::jsonb),
-        ('de_male_1', 'Deutsch maennlich 1', 'elevenlabs', 'male', 'speaker', 'klar, neutral', '{"stability":0.62,"similarity":0.78}'::jsonb),
-        ('de_male_2', 'Deutsch maennlich 2', 'elevenlabs', 'male', 'speaker', 'natuerlich, warm', '{"stability":0.58,"similarity":0.76}'::jsonb)
+        ('de_female_1', 'Deutsch weiblich 1', 'elevenlabs', 'Xb7hH8MSUJpSbSDYk0k2', 'female', 'speaker', 'klar, freundlich', '{"stability":0.62,"similarity":0.78}'::jsonb),
+        ('de_female_2', 'Deutsch weiblich 2', 'elevenlabs', 'XrExE9yKIg1WjnnlVkGX', 'female', 'speaker', 'natuerlich, ruhig', '{"stability":0.58,"similarity":0.76}'::jsonb),
+        ('de_female_3', 'Deutsch weiblich 3', 'elevenlabs', 'pFZP5JQG7iQjIQuC4Bku', 'female', 'speaker', 'warm, professionell', '{"stability":0.60,"similarity":0.77}'::jsonb),
+        ('de_male_1', 'Deutsch maennlich 1', 'elevenlabs', 'onwK4e9ZLuTAKqWW03F9', 'male', 'speaker', 'klar, neutral', '{"stability":0.62,"similarity":0.78}'::jsonb),
+        ('de_male_2', 'Deutsch maennlich 2', 'elevenlabs', 'iP95p4xoKVk53GoZ742B', 'male', 'speaker', 'natuerlich, warm', '{"stability":0.58,"similarity":0.76}'::jsonb),
+        ('de_male_3', 'Deutsch maennlich 3', 'elevenlabs', 'cjVigY5qzO86Huf0OWal', 'male', 'speaker', 'ruhig, vertrauenswuerdig', '{"stability":0.60,"similarity":0.77}'::jsonb)
       ON CONFLICT (profile_key) DO UPDATE SET
         label = EXCLUDED.label,
         provider = EXCLUDED.provider,
+        voice_id = EXCLUDED.voice_id,
         gender = EXCLUDED.gender,
         role = EXCLUDED.role,
         style = EXCLUDED.style,
