@@ -93,6 +93,8 @@ const normalizeMobilePhoneForUi = (value, countryKey) => {
 const formatMobileAmount = (amount, currency) =>
   `${Number(amount || 0).toLocaleString("fr-FR")} ${currency || ""}`.trim();
 
+const wait = (ms) => new Promise((resolve) => window.setTimeout(resolve, Math.max(0, ms)));
+
 // Kept temporarily as a compatibility reference while the payment modal is migrated.
 const CheckoutModal = ({
   plan,
@@ -441,7 +443,7 @@ const CheckoutModalV2 = ({
         {step === "processing" ? (
           <>
             <div className="pricing-processing">
-              <Smartphone size={34} />
+              <Smartphone className={`pricing-processingIcon ${verifying ? "verifying" : ""}`} size={34} />
               <h3>{processingTitle}</h3>
               <p>{processingMessage}</p>
               {checkout?.checkoutSession?.providerReference ? (
@@ -454,6 +456,7 @@ const CheckoutModalV2 = ({
             ) : (
               <>
                 <button className="pricing-modal-button" type="button" disabled={verifying || verifyCooldown > 0} onClick={onVerifyPayment}>
+                  {verifying ? <span className="pricing-button-spinner" aria-hidden="true" /> : null}
                   {verificationButtonLabel}
                 </button>
                 <p className="pricing-verify-hint">
@@ -579,7 +582,7 @@ export default function OffersPage() {
           window.clearInterval(interval);
         }
       } catch {
-        if (!cancelled) setCheckoutError("Verification du paiement temporairement indisponible.");
+        if (!cancelled) setCheckoutError("");
       }
     }, 5000);
     return () => {
@@ -748,8 +751,10 @@ export default function OffersPage() {
       checked: false,
       message: "Vérification du paiement...",
     }));
+    const startedAt = Date.now();
     try {
       const result = await getCheckoutSessionStatus(reference);
+      await wait(900 - (Date.now() - startedAt));
       setCheckoutPaymentStatus({ ...result, checked: true });
       if (result.status === "succeeded") {
         if (result.user) updateStoredUser(result.user);
@@ -762,6 +767,7 @@ export default function OffersPage() {
         setVerifyCooldown(8);
       }
     } catch (err) {
+      await wait(900 - (Date.now() - startedAt));
       setCheckoutError("");
       setCheckoutPaymentStatus((current) => ({
         ...(current || {}),

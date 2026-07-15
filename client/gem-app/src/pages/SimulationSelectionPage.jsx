@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { BookOpenCheck } from "lucide-react";
 import styles from "./SimulationSelectionPage.module.css";
@@ -222,7 +223,7 @@ export const StartConfirmationModal = ({
   };
 
   if (safeQuestionCount >= 0) {
-    return (
+    return createPortal((
       <div className={styles.modalOverlay} role="presentation">
         <section
           className={styles.confirmModal}
@@ -250,10 +251,10 @@ export const StartConfirmationModal = ({
           </div>
         </section>
       </div>
-    );
+    ), document.body);
   }
 
-  return (
+  return createPortal((
     <div className={styles.modalOverlay} role="presentation">
       <section
         className={styles.confirmModal}
@@ -281,7 +282,7 @@ export const StartConfirmationModal = ({
         </div>
       </section>
     </div>
-  );
+  ), document.body);
 };
 
 export default function SimulationSelectionPage() {

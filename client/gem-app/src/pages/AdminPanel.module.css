@@ -402,13 +402,28 @@
 .modalOverlay,
 .confirmModal,
 .styleModal {
-  scrollbar-width: none;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.55) transparent;
 }
 
 .modalOverlay::-webkit-scrollbar,
 .confirmModal::-webkit-scrollbar,
 .styleModal::-webkit-scrollbar {
-  display: none;
+  width: 8px;
+  height: 8px;
+}
+
+.modalOverlay::-webkit-scrollbar-track,
+.confirmModal::-webkit-scrollbar-track,
+.styleModal::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.modalOverlay::-webkit-scrollbar-thumb,
+.confirmModal::-webkit-scrollbar-thumb,
+.styleModal::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.45);
+  border-radius: 999px;
 }
 
 .confirmModal {

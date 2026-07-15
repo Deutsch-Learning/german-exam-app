@@ -481,13 +481,28 @@
 .pricing-modal-backdrop,
 .pricing-modal,
 .checkout-panel {
-  scrollbar-width: none;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(190, 23, 33, 0.45) transparent;
 }
 
 .pricing-modal-backdrop::-webkit-scrollbar,
 .pricing-modal::-webkit-scrollbar,
 .checkout-panel::-webkit-scrollbar {
-  display: none;
+  width: 8px;
+  height: 8px;
+}
+
+.pricing-modal-backdrop::-webkit-scrollbar-track,
+.pricing-modal::-webkit-scrollbar-track,
+.checkout-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.pricing-modal-backdrop::-webkit-scrollbar-thumb,
+.pricing-modal::-webkit-scrollbar-thumb,
+.checkout-panel::-webkit-scrollbar-thumb {
+  background: rgba(190, 23, 33, 0.38);
+  border-radius: 999px;
 }
 
 .pricing-certification-modal {
@@ -561,6 +576,15 @@
 
 .pricing-modal-button {
   margin-top: 12px;
+}
+
+.pricing-button-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-top-color: #ffffff;
+  border-radius: 999px;
+  animation: pricingSpin 0.78s linear infinite;
 }
 
 .pricing-certification-grid {
@@ -808,6 +832,14 @@
   background: #f8fafc;
   padding: 14px;
   text-align: center;
+}
+
+.pricing-processingIcon {
+  color: #d71920;
+}
+
+.pricing-processingIcon.verifying {
+  animation: pricingPulse 0.9s ease-in-out infinite;
 }
 
 .pricing-verify-hint {
@@ -1071,4 +1103,13 @@
     opacity: 1;
     transform: translateY(0) scale(1);
   }
+}
+
+@keyframes pricingSpin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes pricingPulse {
+  0%, 100% { transform: scale(1); opacity: 0.78; }
+  50% { transform: scale(1.12); opacity: 1; }
 }

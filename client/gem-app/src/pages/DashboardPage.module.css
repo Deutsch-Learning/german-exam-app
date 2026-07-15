@@ -905,6 +905,13 @@
     gap: 16px;
   }
 
+  .floatingCta {
+    position: fixed;
+    right: 18px;
+    bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+    z-index: 140;
+  }
+
   .menuOpen .floatingCta {
     opacity: 0;
     transform: translate3d(0, 12px, 0);
