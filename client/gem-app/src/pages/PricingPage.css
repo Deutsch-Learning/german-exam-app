@@ -466,7 +466,10 @@
   position: relative;
   width: min(560px, 100%);
   max-height: min(92dvh, 760px);
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   border-radius: 18px;
   border: 1px solid #fee2e2;
   background: #ffffff;

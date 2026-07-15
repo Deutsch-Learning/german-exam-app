@@ -335,9 +335,6 @@ const CheckoutModalV2 = ({
                 </div>
               ))}
             </div>
-            <p className="pricing-modal-message">
-              Validation automatique apres confirmation Notch Pay. L'activation manuelle reste reservee aux cas de recuperation support.
-            </p>
             {error ? <p className="pricing-modal-error">{error}</p> : null}
             <button className="pricing-modal-button" type="button" onClick={onContinue}>
               Continuer
@@ -765,11 +762,14 @@ export default function OffersPage() {
         setVerifyCooldown(8);
       }
     } catch (err) {
-      setCheckoutError(err.response?.data?.error || "Verification du paiement temporairement indisponible.");
+      setCheckoutError("");
       setCheckoutPaymentStatus((current) => ({
         ...(current || {}),
         status: current?.status || "processing",
         checked: true,
+        message:
+          err.response?.data?.error ||
+          "Nous n'avons pas encore reçu votre paiement. La confirmation peut prendre un court instant.",
       }));
       setVerifyCooldown(8);
     } finally {

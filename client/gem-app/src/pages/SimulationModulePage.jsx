@@ -1,5 +1,6 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   AlertCircle,
@@ -2144,6 +2145,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const fallbackRecordingRef = useRef(false);
   const levelActivityKeyRef = useRef("");
   const writingTextareaRef = useRef(null);
+  const listeningPlayerAnchorRef = useRef(null);
   const previousScrollTargetRef = useRef({ partId: "", taskId: "" });
   const visitedScrollTargetsRef = useRef(new Set());
   const exitGuardBypassRef = useRef(false);
@@ -2293,20 +2295,35 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     if (typeof window === "undefined") return;
     const partId = String(currentPart?.id || currentPart?.number || "part-1");
     const taskId = String(currentTask?.id || currentIndex);
+    const audioKey = module.id === "listen"
+      ? String(listeningAudioUrl || currentListeningAudio?.id || currentListeningAudio?.title || currentListeningAudio?.speaker || "")
+      : "";
     const previous = previousScrollTargetRef.current;
     const visitedKey = `${partId}:${taskId}`;
     const visitedBefore = visitedScrollTargetsRef.current.has(visitedKey);
     const firstRender = !previous.partId && !previous.taskId;
     const movedToNewPart = Boolean(previous.partId && previous.partId !== partId);
-    const fullPageTaskChanged = previous.taskId && previous.taskId !== taskId && !["read", "sprach"].includes(module.id);
-    const shouldResetScroll = firstRender || movedToNewPart || (fullPageTaskChanged && !visitedBefore);
+    const listeningAudioChanged = module.id === "listen" && Boolean(audioKey) && previous.audioKey !== audioKey;
+    const fullPageTaskChanged = previous.taskId && previous.taskId !== taskId && !["read", "sprach", "listen"].includes(module.id);
+    const shouldResetScroll = module.id === "listen"
+      ? firstRender || listeningAudioChanged
+      : firstRender || movedToNewPart || (fullPageTaskChanged && !visitedBefore);
 
-    previousScrollTargetRef.current = { partId, taskId };
+    previousScrollTargetRef.current = { partId, taskId, audioKey };
     visitedScrollTargetsRef.current.add(visitedKey);
 
     if (!shouldResetScroll) return;
+    if (module.id === "listen") {
+      window.requestAnimationFrame(() => {
+        const target = listeningPlayerAnchorRef.current;
+        if (target) {
+          target.scrollIntoView({ behavior: firstRender ? "auto" : "smooth", block: "start" });
+        }
+      });
+      return;
+    }
     window.scrollTo({ top: 0, behavior: firstRender ? "auto" : "smooth" });
-  }, [currentIndex, currentPart?.id, currentPart?.number, currentTask?.id, module.id]);
+  }, [currentIndex, currentPart?.id, currentPart?.number, currentListeningAudio?.id, currentListeningAudio?.speaker, currentListeningAudio?.title, currentTask?.id, listeningAudioUrl, module.id]);
 
   const stopListeningAmbience = useCallback((immediate = false) => {
     listeningAmbienceRef.current?.stop(immediate);
@@ -4316,7 +4333,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     if (module.id === "listen") {
       return (
         <div className={styles.listeningLayout}>
-          <section className={styles.audioPanel}>
+          <section className={styles.audioPanel} ref={listeningPlayerAnchorRef}>
             <div className={styles.audioHeader}>
               <div>
                 <div className={styles.sectionLabel}>
@@ -4386,7 +4403,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
     return (
       <div className={styles.listeningLayout}>
-        <section className={styles.audioPanel}>
+        <section className={styles.audioPanel} ref={listeningPlayerAnchorRef}>
           <div className={styles.audioHeader}>
             <div>
               <div className={styles.sectionLabel}>
@@ -5274,7 +5291,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           onComplete={completePartTransition}
         />
       ) : null}
-      {exitConfirmationOpen ? (
+      {exitConfirmationOpen ? createPortal((
         <div className={styles.exitDialogOverlay} role="presentation">
           <section className={styles.exitDialog} role="dialog" aria-modal="true" aria-labelledby="exit-simulation-title">
             <AlertCircle size={30} />
@@ -5286,7 +5303,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             </div>
           </section>
         </div>
-      ) : null}
+      ), document.body) : null}
       <nav className={styles.nav}>
         <div className={styles.logoButton}>
           <img src={logo} alt="Deutsch Prüfungen" />
