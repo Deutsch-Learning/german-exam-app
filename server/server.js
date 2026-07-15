@@ -481,7 +481,14 @@ const verifyNotchPaySignature = (rawBody, signature) => {
   return crypto.timingSafeEqual(Buffer.from(expected, "utf8"), Buffer.from(received, "utf8"));
 };
 
-const notchPayRequest = async (pathName, { method = "GET", body } = {}) => {
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const isTransientNotchPayError = (error) => {
+  const status = Number(error?.status || error?.statusCode || 0);
+  return !status || status === 408 || status === 409 || status === 425 || status === 429 || status >= 500;
+};
+
+const notchPayRequestOnce = async (pathName, { method = "GET", body } = {}) => {
   if (!NOTCHPAY_PUBLIC_KEY) {
     const error = new Error("Notch Pay public key is not configured.");
     error.status = 503;
@@ -507,6 +514,21 @@ const notchPayRequest = async (pathName, { method = "GET", body } = {}) => {
     throw error;
   }
   return data;
+};
+
+const notchPayRequest = async (pathName, options = {}) => {
+  const attempts = Number(options.attempts || 2);
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await notchPayRequestOnce(pathName, options);
+    } catch (err) {
+      lastError = err;
+      if (attempt >= attempts || !isTransientNotchPayError(err)) break;
+      await sleep(350 * attempt);
+    }
+  }
+  throw lastError;
 };
 
 const createNotchPayPayment = async ({
@@ -566,6 +588,7 @@ const processNotchPayMobileMoneyPayment = async ({ reference, channel, phone }) 
     body: {
       channel,
       data: {
+        account_number: phone,
         phone,
       },
     },
@@ -5264,6 +5287,7 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
     const transactionId = transaction.rows[0].id;
     let providerReference = "";
     let authorizationUrl = "";
+    let checkoutCustomerMessage = "Confirmez le paiement sur votre telephone pour terminer l'abonnement.";
     if (provider === "notchpay") {
       const merchantReference = buildNotchPayReference(transactionId);
       const notchPaySession = await createNotchPayPayment({
@@ -5279,12 +5303,34 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
         phone: mobileMoneyValidation.phone,
       });
       providerReference = getNotchPayReferenceFromPayload(notchPaySession) || merchantReference;
-      const processing = await processNotchPayMobileMoneyPayment({
-        reference: providerReference,
-        channel: mobileMoneyValidation.channel,
-        phone: mobileMoneyValidation.phone,
-      });
-      const providerStatus = getNotchPayStatusFromPayload(processing) || "processing";
+      let processing = null;
+      let processingError = null;
+      let providerStatus = "processing";
+      try {
+        processing = await processNotchPayMobileMoneyPayment({
+          reference: providerReference,
+          channel: mobileMoneyValidation.channel,
+          phone: mobileMoneyValidation.phone,
+        });
+        providerStatus = getNotchPayStatusFromPayload(processing) || "processing";
+      } catch (err) {
+        processingError = {
+          status: Number(err.status || err.statusCode || 0) || null,
+          message:
+            err?.data?.message ||
+            err?.data?.error ||
+            err?.message ||
+            "Notch Pay Mobile Money prompt could not be started immediately.",
+        };
+        console.warn("Notch Pay Mobile Money prompt was delayed", {
+          transactionId,
+          providerReference,
+          status: processingError.status,
+          message: processingError.message,
+        });
+        checkoutCustomerMessage =
+          "Paiement initialise. Si la notification Mobile Money n'apparait pas, verifiez le paiement dans quelques instants.";
+      }
       await pool.query(
         `UPDATE payment_transactions
             SET provider_reference = $2,
@@ -5304,10 +5350,11 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
               authorizationUrl,
               callbackUrl: notchPaySession.callback,
               transaction: getNotchPayTransactionObject(notchPaySession),
-              processing: getNotchPayTransactionObject(processing),
+              processing: processing ? getNotchPayTransactionObject(processing) : null,
+              processingError,
               providerStatus,
             },
-            customerMessage: "Confirmez le paiement sur votre telephone pour terminer l'abonnement.",
+            customerMessage: checkoutCustomerMessage,
           }),
         ]
       );
@@ -5328,7 +5375,7 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
         certifications: selectedForTransaction,
         unlockedSections: normalizeStringArray(plan.unlocked_sections, SUBSCRIPTION_SECTIONS),
         mobileMoney: transactionMetadata.mobileMoney,
-        message: "Confirmez le paiement sur votre telephone pour terminer l'abonnement.",
+        message: checkoutCustomerMessage,
       },
     });
   } catch (err) {
