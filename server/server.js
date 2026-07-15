@@ -309,6 +309,53 @@ const normalizePaymentProvider = (value) => {
   return ["stripe", "cinetpay", "notchpay", "manual"].includes(provider) ? provider : "manual";
 };
 
+const MOBILE_MONEY_COUNTRIES = {
+  CM: {
+    label: "Cameroun",
+    dialCode: "237",
+    currency: "XAF",
+    providers: {
+      mtn: {
+        label: "MTN Mobile Money",
+        channel: "cm.mtn",
+        prefixes: [/^237(?:650|651|652|653|654|67\d|680|681|682|683)\d{6}$/],
+      },
+      orange: {
+        label: "Orange Money",
+        channel: "cm.orange",
+        prefixes: [/^237(?:640|655|656|657|658|659|686|687|688|689|69\d)\d{6}$/],
+      },
+    },
+  },
+  CI: {
+    label: "Côte d'Ivoire",
+    dialCode: "225",
+    currency: "XOF",
+    providers: {
+      mtn: { label: "MTN Mobile Money", channel: "ci.mtn", prefixes: [/^22505\d{8}$/] },
+      orange: { label: "Orange Money", channel: "ci.orange", prefixes: [/^22507\d{8}$/] },
+    },
+  },
+  SN: {
+    label: "Sénégal",
+    dialCode: "221",
+    currency: "XOF",
+    providers: {
+      orange: { label: "Orange Money", channel: "sn.orange", prefixes: [/^22177\d{7}$/] },
+    },
+  },
+};
+
+const normalizeMobileMoneyProvider = (value) => {
+  const provider = String(value ?? "").trim().toLowerCase();
+  return ["mtn", "orange"].includes(provider) ? provider : "";
+};
+
+const normalizeMobileMoneyCountry = (value) => {
+  const country = String(value ?? "").trim().toUpperCase();
+  return MOBILE_MONEY_COUNTRIES[country] ? country : "";
+};
+
 const normalizePaymentStatus = (value) => String(value ?? "").trim().toLowerCase();
 
 const isSuccessfulPaymentStatus = (value) =>
@@ -317,15 +364,70 @@ const isSuccessfulPaymentStatus = (value) =>
 const isFailedPaymentStatus = (value) =>
   ["failed", "cancelled", "canceled", "expired", "declined", "rejected"].includes(normalizePaymentStatus(value));
 
-const eurToNotchPayAmount = (amountEur) => {
+const eurToNotchPayAmount = (amountEur, currency = NOTCHPAY_CURRENCY) => {
   const amount = Number(amountEur);
   if (!Number.isFinite(amount) || amount <= 0) return 0;
-  if (NOTCHPAY_CURRENCY === "XAF") return Math.round(amount * NOTCHPAY_XAF_PER_EUR);
+  if (["XAF", "XOF"].includes(String(currency).toUpperCase())) {
+    return Math.round(amount * NOTCHPAY_XAF_PER_EUR);
+  }
   return Number(amount.toFixed(2));
 };
 
 const buildNotchPayReference = (transactionId) =>
   `ndp_${Date.now()}_${transactionId}_${crypto.randomBytes(4).toString("hex")}`;
+
+const normalizeMobileMoneyPhone = (rawPhone, countryCode) => {
+  const country = MOBILE_MONEY_COUNTRIES[countryCode];
+  if (!country) return "";
+  const digits = String(rawPhone ?? "").replace(/[^\d]/g, "");
+  if (!digits) return "";
+  if (digits.startsWith(country.dialCode)) return `+${digits}`;
+  if (countryCode === "CM" && /^6\d{8}$/.test(digits)) return `+237${digits}`;
+  if (countryCode === "CI" && /^(05|07)\d{8}$/.test(digits)) return `+225${digits}`;
+  if (countryCode === "SN" && /^77\d{7}$/.test(digits)) return `+221${digits}`;
+  return `+${digits}`;
+};
+
+const validateMobileMoneySelection = ({ country, provider, phone }) => {
+  const normalizedCountry = normalizeMobileMoneyCountry(country);
+  const normalizedProvider = normalizeMobileMoneyProvider(provider);
+  if (!normalizedCountry) {
+    return { ok: false, error: "Pays Mobile Money non pris en charge." };
+  }
+  const countryConfig = MOBILE_MONEY_COUNTRIES[normalizedCountry];
+  const providerConfig = countryConfig.providers[normalizedProvider];
+  if (!normalizedProvider || !providerConfig) {
+    return {
+      ok: false,
+      error: `Ce pays ne prend pas en charge ${normalizedProvider === "mtn" ? "MTN Mobile Money" : "Orange Money"} dans cette integration.`,
+    };
+  }
+  const normalizedPhone = normalizeMobileMoneyPhone(phone, normalizedCountry);
+  const digits = normalizedPhone.replace(/[^\d]/g, "");
+  if (!providerConfig.prefixes.some((pattern) => pattern.test(digits))) {
+    const otherProviderKey = Object.keys(countryConfig.providers).find((key) => key !== normalizedProvider);
+    const otherProvider = otherProviderKey ? countryConfig.providers[otherProviderKey] : null;
+    const belongsToOther = otherProvider?.prefixes?.some((pattern) => pattern.test(digits));
+    const selectedLabel = providerConfig.label;
+    const otherLabel = otherProvider?.label || "un autre operateur";
+    return {
+      ok: false,
+      error: belongsToOther
+        ? `Ce numero ne semble pas etre un numero ${selectedLabel}. Verifiez le numero ou selectionnez ${otherLabel}.`
+        : `Ce numero ne semble pas etre valide pour ${selectedLabel}. Verifiez le format et le pays selectionne.`,
+    };
+  }
+  return {
+    ok: true,
+    country: normalizedCountry,
+    provider: normalizedProvider,
+    phone: normalizedPhone,
+    channel: providerConfig.channel,
+    currency: countryConfig.currency,
+    providerLabel: providerConfig.label,
+    countryLabel: countryConfig.label,
+  };
+};
 
 const safeJson = (value) => {
   try {
@@ -415,8 +517,12 @@ const createNotchPayPayment = async ({
   plan,
   selectedCertifications,
   callbackBaseUrl,
+  currency = NOTCHPAY_CURRENCY,
+  lockedCountry = NOTCHPAY_LOCKED_COUNTRY,
+  phone,
 }) => {
-  const amount = eurToNotchPayAmount(amountEur);
+  const paymentCurrency = String(currency || NOTCHPAY_CURRENCY).toUpperCase();
+  const amount = eurToNotchPayAmount(amountEur, paymentCurrency);
   if (!amount) {
     const error = new Error("Invalid Notch Pay amount.");
     error.status = 400;
@@ -428,14 +534,14 @@ const createNotchPayPayment = async ({
   const callback = `${callbackRoot}?reference=${encodeURIComponent(reference)}`;
   const payload = {
     amount,
-    currency: NOTCHPAY_CURRENCY,
+    currency: paymentCurrency,
     email: user.email,
-    phone: String(user.phone || "").replace(/[^\d]/g, "") || undefined,
+    phone: phone || String(user.phone || "").replace(/[^\d]/g, "") || undefined,
     description: `N-Deutschprüfungen ${plan.level} ${plan.plan_name}`,
     reference,
     callback,
-    locked_currency: NOTCHPAY_CURRENCY,
-    locked_country: NOTCHPAY_LOCKED_COUNTRY,
+    locked_currency: paymentCurrency,
+    locked_country: lockedCountry,
     customer_meta: {
       userId: user.id,
       transactionId,
@@ -444,15 +550,26 @@ const createNotchPayPayment = async ({
       selectedCertifications,
       amountEur,
       amount,
-      currency: NOTCHPAY_CURRENCY,
+      currency: paymentCurrency,
     },
   };
   const session = await notchPayRequest("/payments", { method: "POST", body: payload });
-  return { ...session, callback };
+  return { ...session, callback, notchAmount: amount, notchCurrency: paymentCurrency };
 };
 
 const retrieveNotchPayPayment = async (reference) =>
   notchPayRequest(`/payments/${encodeURIComponent(reference)}`);
+
+const processNotchPayMobileMoneyPayment = async ({ reference, channel, phone }) =>
+  notchPayRequest(`/payments/${encodeURIComponent(reference)}`, {
+    method: "POST",
+    body: {
+      channel,
+      data: {
+        phone,
+      },
+    },
+  });
 
 const mergeTransactionMetadata = (metadata, next) => ({
   ...asPlainObject(metadata),
@@ -575,9 +692,11 @@ const activateSubscriptionFromTransaction = async ({ providerReference, provider
               pt.amount, pt.currency, pt.selected_certifications, pt.metadata,
               sp.level, sp.plan_key, sp.duration_days, sp.writing_simulator_attempts,
               sp.speaking_simulator_quota
-         FROM payment_transactions pt
+        FROM payment_transactions pt
          JOIN subscription_plans sp ON sp.id = pt.plan_id
         WHERE pt.provider_reference = $1
+           OR pt.metadata #>> '{notchpay,merchantReference}' = $1
+           OR pt.metadata #>> '{notchpay,reference}' = $1
         FOR UPDATE`,
       [reference]
     );
@@ -4795,12 +4914,84 @@ app.get("/api/subscriptions/access", requireAuth, async (req, res) => {
   }
 });
 
+const getCheckoutPlanAndQuote = async ({ level, planKey, selectedCertifications, country = "CM" }) => {
+  const planResult = await pool.query(
+    `SELECT id, level, plan_key, plan_name, duration_days, price_eur, currency,
+            writing_simulator_attempts, speaking_simulator_quota, certifications, unlocked_sections
+       FROM subscription_plans
+       WHERE level = $1 AND plan_key = $2 AND is_active = TRUE
+       LIMIT 1`,
+    [level, planKey]
+  );
+  const plan = planResult.rows[0];
+  if (!plan) return { plan: null, quote: null };
+  const countryCode = normalizeMobileMoneyCountry(country) || "CM";
+  const countryConfig = MOBILE_MONEY_COUNTRIES[countryCode] || MOBILE_MONEY_COUNTRIES.CM;
+  const basePriceEur = Number(plan.price_eur);
+  const selectedCertificationCount = selectedCertifications.length;
+  const finalPriceEur = Number((basePriceEur * selectedCertificationCount).toFixed(2));
+  const paymentCurrency = countryConfig.currency;
+  const paymentAmount = eurToNotchPayAmount(finalPriceEur, paymentCurrency);
+  return {
+    plan,
+    quote: {
+      level: plan.level,
+      planKey: plan.plan_key,
+      planName: plan.plan_name,
+      durationDays: Number(plan.duration_days),
+      basePriceEur,
+      selectedCertifications,
+      selectedCertificationCount,
+      finalPriceEur,
+      paymentAmount,
+      paymentCurrency,
+      country: countryCode,
+      countryLabel: countryConfig.label,
+      exchangeRate: NOTCHPAY_XAF_PER_EUR,
+      writingSimulatorAttempts: Number(plan.writing_simulator_attempts),
+      speakingSimulatorQuota: Number(plan.speaking_simulator_quota ?? 0),
+      unlockedSections: normalizeStringArray(plan.unlocked_sections, SUBSCRIPTION_SECTIONS),
+    },
+  };
+};
+
+app.post("/api/checkout/quote", requireAuth, async (req, res) => {
+  try {
+    const level = normalizeSubscriptionLevel(req.body?.level);
+    const planKey = normalizePlanKey(req.body?.planKey);
+    const rawSelectedCertifications = Array.isArray(req.body?.selectedCertifications)
+      ? req.body.selectedCertifications
+      : [];
+    const selectedCertifications = normalizeStringArray(rawSelectedCertifications, SUBSCRIPTION_CERTIFICATIONS);
+    if (!level || !planKey) return res.status(400).json({ ok: false, error: "Plan invalide." });
+    if (!selectedCertifications.length) {
+      return res.status(400).json({ ok: false, error: "Selectionnez au moins une certification." });
+    }
+    if (selectedCertifications.length !== rawSelectedCertifications.length) {
+      return res.status(400).json({ ok: false, error: "Une certification selectionnee est invalide." });
+    }
+    const { plan, quote } = await getCheckoutPlanAndQuote({
+      level,
+      planKey,
+      selectedCertifications,
+      country: req.body?.country,
+    });
+    if (!plan) return res.status(404).json({ ok: false, error: "Plan introuvable." });
+    return res.json({ ok: true, quote });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "La preparation du paiement a echoue." });
+  }
+});
+
 app.post("/api/checkout/session", requireAuth, async (req, res) => {
   try {
     const publicBaseUrl = getRequestPublicBaseUrl(req);
     const level = normalizeSubscriptionLevel(req.body?.level);
     const planKey = normalizePlanKey(req.body?.planKey);
     const provider = normalizePaymentProvider(req.body?.provider);
+    const paymentMethod = String(req.body?.paymentMethod || "mobile_money").trim().toLowerCase();
+    const idempotencyKey = String(req.body?.idempotencyKey || "").trim().slice(0, 120);
     const rawSelectedCertifications = Array.isArray(req.body?.selectedCertifications)
       ? req.body.selectedCertifications
       : [];
@@ -4814,32 +5005,70 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
     if (selectedCertifications.length !== rawSelectedCertifications.length) {
       return res.status(400).json({ ok: false, error: "One or more selected certifications are invalid" });
     }
-
-    const planResult = await pool.query(
-      `SELECT id, level, plan_key, plan_name, duration_days, price_eur, currency,
-              writing_simulator_attempts, speaking_simulator_quota, certifications, unlocked_sections
-       FROM subscription_plans
-       WHERE level = $1 AND plan_key = $2 AND is_active = TRUE
-       LIMIT 1`,
-      [level, planKey]
-    );
-    const plan = planResult.rows[0];
-    if (!plan) return res.status(404).json({ ok: false, error: "Pricing plan not found" });
-    const basePriceEur = Number(plan.price_eur);
-    const selectedCertificationCount = selectedCertifications.length;
-    const finalPriceEur = Number((basePriceEur * selectedCertificationCount).toFixed(2));
-    const transactionMetadata = {
-      level: plan.level,
-      planKey: plan.plan_key,
-      planName: plan.plan_name,
-      durationDays: Number(plan.duration_days),
-      basePriceEur,
+    if (paymentMethod !== "mobile_money") {
+      return res.status(400).json({ ok: false, error: "Ce moyen de paiement n'est pas encore actif." });
+    }
+    const mobileMoneyValidation = validateMobileMoneySelection({
+      country: req.body?.mobileMoney?.country || req.body?.country || "CM",
+      provider: req.body?.mobileMoney?.provider,
+      phone: req.body?.mobileMoney?.phone,
+    });
+    if (!mobileMoneyValidation.ok) {
+      return res.status(400).json({ ok: false, error: mobileMoneyValidation.error });
+    }
+    const { plan, quote } = await getCheckoutPlanAndQuote({
+      level,
+      planKey,
       selectedCertifications,
-      selectedCertificationCount,
-      finalPriceEur,
-      writingSimulatorAttempts: Number(plan.writing_simulator_attempts),
-      speakingSimulatorQuota: Number(plan.speaking_simulator_quota ?? 0),
+      country: mobileMoneyValidation.country,
+    });
+    if (!plan) return res.status(404).json({ ok: false, error: "Pricing plan not found" });
+    if (idempotencyKey) {
+      const existing = await pool.query(
+        `SELECT id, status, provider_reference, metadata
+           FROM payment_transactions
+          WHERE user_id = $1
+            AND provider = $2
+            AND metadata->>'idempotencyKey' = $3
+            AND status IN ('pending', 'processing', 'succeeded')
+          ORDER BY created_at DESC
+          LIMIT 1`,
+        [req.user.id, provider, idempotencyKey]
+      );
+      const existingTransaction = existing.rows[0];
+      if (existingTransaction) {
+        const existingMetadata = asPlainObject(existingTransaction.metadata);
+        return res.json({
+          ok: true,
+          duplicate: true,
+          checkoutSession: {
+            provider,
+            paymentMethod,
+            status: existingTransaction.status,
+            transactionId: existingTransaction.id,
+            providerReference: existingTransaction.provider_reference,
+            authorizationUrl: "",
+            ...(existingMetadata.quote || quote),
+            mobileMoney: existingMetadata.mobileMoney,
+            message: existingMetadata.customerMessage || "Paiement deja en cours. Verifiez votre telephone.",
+          },
+        });
+      }
+    }
+    const transactionMetadata = {
+      ...quote,
+      quote,
       requestedProvider: provider,
+      paymentMethod,
+      idempotencyKey: idempotencyKey || null,
+      mobileMoney: {
+        country: mobileMoneyValidation.country,
+        countryLabel: mobileMoneyValidation.countryLabel,
+        provider: mobileMoneyValidation.provider,
+        providerLabel: mobileMoneyValidation.providerLabel,
+        channel: mobileMoneyValidation.channel,
+        phone: mobileMoneyValidation.phone,
+      },
     };
 
     const transaction = await pool.query(
@@ -4850,8 +5079,8 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
         req.user.id,
         plan.id,
         provider,
-        finalPriceEur,
-        plan.currency,
+        quote.paymentAmount,
+        quote.paymentCurrency,
         JSON.stringify(selectedCertifications),
         safeJson(transactionMetadata),
       ]
@@ -4860,26 +5089,30 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
     let providerReference = "";
     let authorizationUrl = "";
     if (provider === "notchpay") {
-      providerReference = buildNotchPayReference(transactionId);
-      const notchAmount = eurToNotchPayAmount(finalPriceEur);
+      const merchantReference = buildNotchPayReference(transactionId);
       const notchPaySession = await createNotchPayPayment({
         user: req.user,
         transactionId,
-        reference: providerReference,
-        amountEur: finalPriceEur,
+        reference: merchantReference,
+        amountEur: quote.finalPriceEur,
         plan,
         selectedCertifications,
         callbackBaseUrl: publicBaseUrl,
+        currency: quote.paymentCurrency,
+        lockedCountry: mobileMoneyValidation.country,
+        phone: mobileMoneyValidation.phone,
       });
-      authorizationUrl = notchPaySession.authorization_url || notchPaySession.authorizationUrl || "";
-      if (!authorizationUrl) {
-        const error = new Error("Notch Pay did not return a checkout URL.");
-        error.status = 502;
-        throw error;
-      }
+      providerReference = getNotchPayReferenceFromPayload(notchPaySession) || merchantReference;
+      const processing = await processNotchPayMobileMoneyPayment({
+        reference: providerReference,
+        channel: mobileMoneyValidation.channel,
+        phone: mobileMoneyValidation.phone,
+      });
+      const providerStatus = getNotchPayStatusFromPayload(processing) || "processing";
       await pool.query(
         `UPDATE payment_transactions
             SET provider_reference = $2,
+                status = 'processing',
                 metadata = metadata || $3::jsonb,
                 updated_at = NOW()
           WHERE id = $1`,
@@ -4889,12 +5122,16 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
           safeJson({
             notchpay: {
               reference: providerReference,
-              amount: notchAmount,
-              currency: NOTCHPAY_CURRENCY,
+              merchantReference,
+              amount: notchPaySession.notchAmount,
+              currency: notchPaySession.notchCurrency,
               authorizationUrl,
               callbackUrl: notchPaySession.callback,
               transaction: getNotchPayTransactionObject(notchPaySession),
+              processing: getNotchPayTransactionObject(processing),
+              providerStatus,
             },
+            customerMessage: "Confirmez le paiement sur votre telephone pour terminer l'abonnement.",
           }),
         ]
       );
@@ -4904,26 +5141,18 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
       ok: true,
       checkoutSession: {
         provider,
-        status: transaction.rows[0].status,
+        paymentMethod,
+        status: "processing",
         transactionId,
         providerReference,
         authorizationUrl,
         planId: plan.id,
-        level: plan.level,
-        planKey: plan.plan_key,
-        planName: plan.plan_name,
-        amount: finalPriceEur,
-        basePriceEur,
-        selectedCertifications,
-        selectedCertificationCount,
-        finalPriceEur,
-        currency: plan.currency,
-        durationDays: Number(plan.duration_days),
-        writingSimulatorAttempts: Number(plan.writing_simulator_attempts),
-        speakingSimulatorQuota: Number(plan.speaking_simulator_quota ?? 0),
+        amount: quote.finalPriceEur,
+        ...quote,
         certifications: selectedCertifications,
         unlockedSections: normalizeStringArray(plan.unlocked_sections, SUBSCRIPTION_SECTIONS),
-        message: "Session de paiement securisee prete.",
+        mobileMoney: transactionMetadata.mobileMoney,
+        message: "Confirmez le paiement sur votre telephone pour terminer l'abonnement.",
       },
     });
   } catch (err) {
@@ -4939,6 +5168,77 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
       error: "La session de paiement n'a pas pu etre preparee. Veuillez reessayer dans quelques instants.",
       details: isProduction ? undefined : providerMessage,
     });
+  }
+});
+
+app.get("/api/checkout/session/:reference/status", requireAuth, async (req, res) => {
+  try {
+    const reference = String(req.params.reference || "").trim();
+    if (!reference) return res.status(400).json({ ok: false, error: "Reference de paiement manquante." });
+    const result = await pool.query(
+      `SELECT id, user_id, provider, provider_reference, status, amount, currency, metadata
+         FROM payment_transactions
+        WHERE user_id = $1
+          AND (
+            provider_reference = $2
+            OR metadata #>> '{notchpay,merchantReference}' = $2
+            OR metadata #>> '{notchpay,reference}' = $2
+          )
+        ORDER BY created_at DESC
+        LIMIT 1`,
+      [req.user.id, reference]
+    );
+    const transaction = result.rows[0];
+    if (!transaction) return res.status(404).json({ ok: false, error: "Paiement introuvable." });
+
+    let status = normalizePaymentStatus(transaction.status);
+    let providerStatus = "";
+    let activated = null;
+    if (transaction.provider === "notchpay" && ["pending", "processing"].includes(status)) {
+      try {
+        const payment = await retrieveNotchPayPayment(transaction.provider_reference || reference);
+        providerStatus = getNotchPayStatusFromPayload(payment);
+        if (isSuccessfulPaymentStatus(providerStatus)) {
+          activated = await activateSubscriptionFromTransaction({
+            providerReference: transaction.provider_reference || reference,
+            providerPayload: payment,
+            eventType: "status_check",
+          });
+          status = "succeeded";
+        } else if (isFailedPaymentStatus(providerStatus)) {
+          status = "failed";
+          await pool.query(
+            `UPDATE payment_transactions
+                SET status = 'failed',
+                    metadata = metadata || $2::jsonb,
+                    updated_at = NOW()
+              WHERE id = $1`,
+            [transaction.id, safeJson({ notchpayStatusCheck: payment, notchpayStatus: providerStatus })]
+          );
+        }
+      } catch (error) {
+        console.warn("Notch Pay status check failed", error?.message || error);
+      }
+    }
+
+    return res.json({
+      ok: true,
+      status,
+      providerStatus,
+      activated,
+      providerReference: transaction.provider_reference,
+      quote: asPlainObject(transaction.metadata).quote || null,
+      mobileMoney: asPlainObject(transaction.metadata).mobileMoney || null,
+      message:
+        status === "succeeded"
+          ? "Paiement confirme. Votre acces est active."
+          : status === "failed"
+            ? "Le paiement a echoue ou a ete annule."
+            : "Paiement en attente. Confirmez la demande sur votre telephone.",
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Impossible de verifier le paiement pour le moment." });
   }
 });
 
