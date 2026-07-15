@@ -458,10 +458,10 @@ const getNotchPayReferenceFromPayload = (payload = {}) => {
   return String(
     transaction.reference ||
       transaction.provider_reference ||
-      transaction.id ||
       body.reference ||
       body.transaction_reference ||
       body.payment_reference ||
+      transaction.id ||
       ""
   ).trim();
 };
@@ -624,7 +624,41 @@ const createNotchPayPayment = async ({
 const retrieveNotchPayPayment = async (reference) =>
   notchPayRequest(`/payments/${encodeURIComponent(reference)}`);
 
-const processNotchPayMobileMoneyPayment = async ({ reference, channel, phone }) =>
+const getRequestClientIp = (req) =>
+  String(req.get("cf-connecting-ip") || req.get("x-real-ip") || req.get("x-forwarded-for") || req.ip || "")
+    .split(",")[0]
+    .trim();
+
+const getNotchPayAuthorizationUrlFromPayload = (payload = {}) => {
+  const body = parseJsonBody(payload);
+  const transaction = getNotchPayTransactionObject(body);
+  const candidates = [
+    body.authorization_url,
+    body.authorizationUrl,
+    body.payment_url,
+    body.paymentUrl,
+    body.checkout_url,
+    body.checkoutUrl,
+    body.redirect_url,
+    body.redirectUrl,
+    body.link,
+    body.url,
+    body.data?.authorization_url,
+    body.data?.payment_url,
+    body.data?.checkout_url,
+    body.data?.redirect_url,
+    body.data?.link,
+    transaction.authorization_url,
+    transaction.payment_url,
+    transaction.checkout_url,
+    transaction.redirect_url,
+    transaction.link,
+    transaction.url,
+  ];
+  return candidates.map((item) => String(item || "").trim()).find(Boolean) || "";
+};
+
+const processNotchPayMobileMoneyPayment = async ({ reference, channel, phone, clientIp }) =>
   notchPayRequest(`/payments/${encodeURIComponent(reference)}`, {
     method: "PUT",
     body: {
@@ -634,6 +668,7 @@ const processNotchPayMobileMoneyPayment = async ({ reference, channel, phone }) 
         account_number: String(phone || "").replace(/[^\d]/g, ""),
         country: String(phone || "").replace(/[^\d]/g, "").startsWith("237") ? "CM" : undefined,
       },
+      client_ip: clientIp || undefined,
     },
   });
 
@@ -5277,6 +5312,12 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
       const existingTransaction = existing.rows[0];
       if (existingTransaction) {
         const existingMetadata = asPlainObject(existingTransaction.metadata);
+        const existingNotchPay = asPlainObject(existingMetadata.notchpay);
+        const existingReference =
+          existingTransaction.provider_reference ||
+          existingNotchPay.reference ||
+          existingNotchPay.merchantReference ||
+          existingTransaction.id;
         return res.json({
           ok: true,
           duplicate: true,
@@ -5285,8 +5326,9 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
             paymentMethod,
             status: existingTransaction.status,
             transactionId: existingTransaction.id,
-            providerReference: existingTransaction.provider_reference,
-            authorizationUrl: "",
+            providerReference: existingReference,
+            merchantReference: existingNotchPay.merchantReference || "",
+            authorizationUrl: existingNotchPay.authorizationUrl || "",
             ...(existingMetadata.quote || quote),
             mobileMoney: existingMetadata.mobileMoney,
             message: existingMetadata.customerMessage || "Paiement deja en cours. Verifiez votre telephone.",
@@ -5329,10 +5371,11 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
     );
     const transactionId = transaction.rows[0].id;
     let providerReference = "";
+    let merchantReference = "";
     let authorizationUrl = "";
     let checkoutCustomerMessage = "Confirmez le paiement sur votre telephone pour terminer l'abonnement.";
     if (provider === "notchpay") {
-      const merchantReference = buildNotchPayReference(transactionId);
+      merchantReference = buildNotchPayReference(transactionId);
       const notchPaySession = await createNotchPayPayment({
         user: req.user,
         transactionId,
@@ -5346,15 +5389,31 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
         phone: mobileMoneyValidation.phone,
       });
       providerReference = getNotchPayReferenceFromPayload(notchPaySession) || merchantReference;
+      authorizationUrl = getNotchPayAuthorizationUrlFromPayload(notchPaySession);
       let processing = null;
       let processingError = null;
       let providerStatus = "processing";
       try {
-        processing = await processNotchPayMobileMoneyPayment({
-          reference: providerReference,
-          channel: mobileMoneyValidation.channel,
-          phone: mobileMoneyValidation.phone,
-        });
+        const processReferences = [...new Set([providerReference, merchantReference].filter(Boolean))];
+        let lastProcessError = null;
+        for (let index = 0; index < processReferences.length; index += 1) {
+          const processReference = processReferences[index];
+          try {
+            processing = await processNotchPayMobileMoneyPayment({
+              reference: processReference,
+              channel: mobileMoneyValidation.channel,
+              phone: mobileMoneyValidation.phone,
+              clientIp: getRequestClientIp(req),
+            });
+            providerReference = processReference;
+            lastProcessError = null;
+            break;
+          } catch (err) {
+            lastProcessError = err;
+            if (index >= processReferences.length - 1) break;
+          }
+        }
+        if (lastProcessError) throw lastProcessError;
         providerStatus = getNotchPayStatusFromPayload(processing) || "processing";
       } catch (err) {
         processingError = {
@@ -5372,7 +5431,9 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
           message: processingError.message,
         });
         checkoutCustomerMessage =
-          "Paiement initialise. Si la notification Mobile Money n'apparait pas, verifiez le paiement dans quelques instants.";
+          processingError.message
+            ? `La demande Mobile Money n'a pas encore pu etre envoyee: ${processingError.message}. Vous pouvez verifier le paiement ou reessayer dans quelques instants.`
+            : "La demande Mobile Money n'a pas encore pu etre envoyee. Vous pouvez verifier le paiement ou reessayer dans quelques instants.";
       }
       await pool.query(
         `UPDATE payment_transactions
@@ -5411,6 +5472,7 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
         status: "processing",
         transactionId,
         providerReference,
+        merchantReference,
         authorizationUrl,
         planId: plan.id,
         amount: quote.finalPriceEur,
@@ -5449,6 +5511,7 @@ app.get("/api/checkout/session/:reference/status", requireAuth, async (req, res)
             provider_reference = $2
             OR metadata #>> '{notchpay,merchantReference}' = $2
             OR metadata #>> '{notchpay,reference}' = $2
+            OR id::text = $2
           )
         ORDER BY created_at DESC
         LIMIT 1`,
@@ -5461,14 +5524,21 @@ app.get("/api/checkout/session/:reference/status", requireAuth, async (req, res)
     let providerStatus = "";
     let providerMessage = "";
     let activated = null;
+    const transactionMetadata = asPlainObject(transaction.metadata);
+    const notchPayMetadata = asPlainObject(transactionMetadata.notchpay);
+    const providerLookupReference =
+      transaction.provider_reference ||
+      notchPayMetadata.reference ||
+      notchPayMetadata.merchantReference ||
+      reference;
     if (transaction.provider === "notchpay" && ["pending", "processing"].includes(status)) {
       try {
-        const payment = await retrieveNotchPayPayment(transaction.provider_reference || reference);
+        const payment = await retrieveNotchPayPayment(providerLookupReference);
         providerStatus = getNotchPayStatusFromPayload(payment);
         providerMessage = getNotchPayMessageFromPayload(payment);
         if (isSuccessfulPaymentStatus(providerStatus)) {
           activated = await activateSubscriptionFromTransaction({
-            providerReference: transaction.provider_reference || reference,
+            providerReference: providerLookupReference,
             providerPayload: payment,
             eventType: "status_check",
           });
@@ -5497,9 +5567,10 @@ app.get("/api/checkout/session/:reference/status", requireAuth, async (req, res)
       providerStatus,
       providerMessage,
       activated,
-      providerReference: transaction.provider_reference,
-      quote: asPlainObject(transaction.metadata).quote || null,
-      mobileMoney: asPlainObject(transaction.metadata).mobileMoney || null,
+      providerReference: providerLookupReference,
+      transactionId: transaction.id,
+      quote: transactionMetadata.quote || null,
+      mobileMoney: transactionMetadata.mobileMoney || null,
       user: status === "succeeded" ? await sanitizeUserWithSubscriptions(req.user) : null,
       message: responseMessage,
     });

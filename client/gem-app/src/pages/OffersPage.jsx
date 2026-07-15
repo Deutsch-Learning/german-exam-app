@@ -277,6 +277,11 @@ const CheckoutModalV2 = ({
   const paymentPending = ["pending", "processing"].includes(paymentStatus?.status);
   const paymentFailed = paymentStatus?.status === "failed";
   const paymentNotConfirmed = verificationChecked && !paymentSucceeded && (paymentPending || paymentFailed);
+  const displayedReference =
+    checkout?.checkoutSession?.providerReference ||
+    checkout?.checkoutSession?.merchantReference ||
+    checkout?.checkoutSession?.transactionId ||
+    "";
   const verificationButtonLabel = verifying
     ? "Vérification du paiement..."
     : verifyCooldown > 0
@@ -500,8 +505,8 @@ const CheckoutModalV2 = ({
               <Smartphone className={`pricing-processingIcon ${verifying ? "verifying" : ""}`} size={34} />
               <h3>{processingTitle}</h3>
               <p>{processingMessage}</p>
-              {checkout?.checkoutSession?.providerReference ? (
-                <small>Reference : {checkout.checkoutSession.providerReference}</small>
+              {displayedReference ? (
+                <small>Référence : {displayedReference}</small>
               ) : null}
             </div>
             {error ? <p className="pricing-modal-error">{error}</p> : null}
@@ -795,8 +800,9 @@ export default function OffersPage() {
   };
 
   const verifyPayment = async () => {
-    const reference = checkout?.checkoutSession?.providerReference;
-    if (!reference || verifyingPayment || verifyCooldown > 0) return;
+    if (verifyingPayment || verifyCooldown > 0) return;
+    const session = checkout?.checkoutSession || {};
+    const reference = session.providerReference || session.merchantReference || session.transactionId;
     setVerifyingPayment(true);
     setCheckoutError("");
     setCheckoutPaymentStatus((current) => ({
@@ -807,12 +813,25 @@ export default function OffersPage() {
     }));
     const startedAt = Date.now();
     try {
+      if (!reference) {
+        await wait(1400 - (Date.now() - startedAt));
+        setCheckoutPaymentStatus((current) => ({
+          ...(current || {}),
+          status: "processing",
+          checked: true,
+          message:
+            "La référence de paiement est introuvable. Relancez le paiement ou contactez le service client si votre compte a été débité.",
+        }));
+        setVerifyCooldown(8);
+        return;
+      }
       const result = await getCheckoutSessionStatus(reference);
       await wait(1400 - (Date.now() - startedAt));
       setCheckoutPaymentStatus({ ...result, checked: true });
       if (result.status === "succeeded") {
         if (result.user) updateStoredUser(result.user);
         setCheckoutError("");
+        window.setTimeout(() => navigate("/dashboard"), 1200);
       } else if (result.status === "failed") {
         setCheckoutError("");
         setVerifyCooldown(10);
