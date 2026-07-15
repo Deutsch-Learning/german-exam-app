@@ -107,6 +107,24 @@ const buildEstimatedQuote = (priceEur, countryKey) => {
 
 const wait = (ms) => new Promise((resolve) => window.setTimeout(resolve, Math.max(0, ms)));
 
+const scrollModalFirst = (event, modalElement) => {
+  if (!modalElement) return;
+  const deltaY = event.deltaY;
+  if (!deltaY) return;
+
+  const maxScrollTop = modalElement.scrollHeight - modalElement.clientHeight;
+  if (maxScrollTop <= 0) return;
+
+  const goingDown = deltaY > 0;
+  const canScrollDown = modalElement.scrollTop < maxScrollTop - 1;
+  const canScrollUp = modalElement.scrollTop > 1;
+
+  if ((goingDown && canScrollDown) || (!goingDown && canScrollUp)) {
+    event.preventDefault();
+    modalElement.scrollTop += deltaY;
+  }
+};
+
 // Kept temporarily as a compatibility reference while the payment modal is migrated.
 const CheckoutModal = ({
   plan,
@@ -234,6 +252,7 @@ const CheckoutModalV2 = ({
   onPayMobileMoney,
   onVerifyPayment,
 }) => {
+  const modalRef = useRef(null);
   if (!plan) return null;
 
   const isEnterprise = Boolean(plan.isEnterprise);
@@ -257,6 +276,7 @@ const CheckoutModalV2 = ({
   const paymentSucceeded = paymentStatus?.status === "succeeded";
   const paymentPending = ["pending", "processing"].includes(paymentStatus?.status);
   const paymentFailed = paymentStatus?.status === "failed";
+  const paymentNotConfirmed = verificationChecked && !paymentSucceeded && (paymentPending || paymentFailed);
   const verificationButtonLabel = verifying
     ? "Vérification du paiement..."
     : verifyCooldown > 0
@@ -278,13 +298,24 @@ const CheckoutModalV2 = ({
           : paymentStatus?.message || checkout?.checkoutSession?.message || "Une demande Mobile Money vient d'être envoyée. Validez-la sur votre téléphone.";
 
   return createPortal((
-    <div className="pricing-modal-backdrop" role="presentation" onMouseDown={onClose}>
+    <div
+      className="pricing-modal-backdrop"
+      role="presentation"
+      onMouseDown={onClose}
+      onWheel={(event) => {
+        if (event.target === event.currentTarget) {
+          scrollModalFirst(event, modalRef.current);
+        }
+      }}
+    >
       <section
+        ref={modalRef}
         className={`pricing-modal pricing-certification-modal pricing-step-${step}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="checkout-title"
         onMouseDown={(event) => event.stopPropagation()}
+        onWheel={(event) => scrollModalFirst(event, modalRef.current)}
       >
         <button className="pricing-modal-close" type="button" aria-label="Fermer" onClick={onClose}>
           <X size={18} />
@@ -475,7 +506,7 @@ const CheckoutModalV2 = ({
               <Link className="pricing-modal-button" to="/dashboard">Aller au dashboard</Link>
             ) : (
               <>
-                <button className="pricing-modal-button" type="button" disabled={verifying || verifyCooldown > 0} onClick={onVerifyPayment}>
+                <button className={`pricing-modal-button ${verifying ? "verifying" : ""}`} type="button" disabled={verifying || verifyCooldown > 0} onClick={onVerifyPayment}>
                   {verifying ? <span className="pricing-button-spinner" aria-hidden="true" /> : null}
                   {verificationButtonLabel}
                 </button>
@@ -484,8 +515,10 @@ const CheckoutModalV2 = ({
                     ? "La confirmation peut prendre un court instant. Vous pourrez vérifier à nouveau après ce délai."
                     : "Cliquez ici si le paiement a été effectué."}
                 </p>
-                {verificationChecked && (paymentFailed || paymentPending) ? (
-                  <div className="pricing-support-box">
+                {paymentNotConfirmed ? (
+                  <div className="pricing-verification-alert" role="status" aria-live="polite">
+                    <strong>Paiement non confirme</strong>
+                    <p>Nous n'avons pas encore recu votre paiement.</p>
                     <p>
                       Si vous avez effectué le paiement mais que votre accès n'a pas été activé, contactez le service client.
                     </p>
@@ -772,7 +805,7 @@ export default function OffersPage() {
     const startedAt = Date.now();
     try {
       const result = await getCheckoutSessionStatus(reference);
-      await wait(900 - (Date.now() - startedAt));
+      await wait(1400 - (Date.now() - startedAt));
       setCheckoutPaymentStatus({ ...result, checked: true });
       if (result.status === "succeeded") {
         if (result.user) updateStoredUser(result.user);
@@ -785,7 +818,7 @@ export default function OffersPage() {
         setVerifyCooldown(8);
       }
     } catch (err) {
-      await wait(900 - (Date.now() - startedAt));
+      await wait(1400 - (Date.now() - startedAt));
       setCheckoutError("");
       setCheckoutPaymentStatus((current) => ({
         ...(current || {}),

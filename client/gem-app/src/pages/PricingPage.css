@@ -578,6 +578,13 @@
   margin-top: 12px;
 }
 
+.pricing-modal-button.verifying {
+  cursor: wait;
+  background: linear-gradient(90deg, #b90913, #ef4444, #b90913);
+  background-size: 180% 100%;
+  animation: pricingButtonVerify 1s ease-in-out infinite;
+}
+
 .pricing-button-spinner {
   width: 18px;
   height: 18px;
@@ -866,6 +873,32 @@
   font-weight: 750;
 }
 
+.pricing-verification-alert {
+  margin-top: 10px;
+  border: 1px solid #fed7aa;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255, 247, 237, 0.98), rgba(255, 255, 255, 0.98));
+  padding: 12px;
+  box-shadow: 0 12px 30px rgba(154, 52, 18, 0.12);
+  animation: pricingResultIn 0.2s ease both;
+}
+
+.pricing-verification-alert strong {
+  display: block;
+  color: #9a3412;
+  font-size: 0.98rem;
+  font-weight: 950;
+  margin-bottom: 5px;
+}
+
+.pricing-verification-alert p {
+  margin: 0 0 7px;
+  color: #7c2d12;
+  font-size: 0.86rem;
+  line-height: 1.35;
+  font-weight: 750;
+}
+
 .pricing-processing h3 {
   margin: 0;
   font-size: 1.05rem;
@@ -1112,4 +1145,20 @@
 @keyframes pricingPulse {
   0%, 100% { transform: scale(1); opacity: 0.78; }
   50% { transform: scale(1.12); opacity: 1; }
+}
+
+@keyframes pricingButtonVerify {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 180% 50%; }
+}
+
+@keyframes pricingResultIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
