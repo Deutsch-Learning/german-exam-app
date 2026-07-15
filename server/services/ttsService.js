@@ -78,7 +78,7 @@ const normalizeSpeakerLabel = (value) => {
 
 const isProductionOnlyLabel = (value) =>
   /^(?:text|track|audio|teil)\s*\d*$/i.test(normalizeText(value)) ||
-  /^(?:(?:der|die|das)\s+.+|sie|script|dialog|dialogue|gespr[aä]ch|gespraech|monolog|monologue|interview|radio|thema|das thema|aufgabe|aufgaben|frage|fragen|multiple-choice|richtig\/falsch|richtig falsch|loesung|lösung|antwort|skript|geh[oö]rt|format|transkription|transcription|type de t[aâ]che|heute|und|dann|erstens|zweitens|drittens|au[ßs]erdem|überraschungen|ueberraschungen|kluft|weltbild|sprache|achtsamkeit|pakete|qualit[aä]tsfinanzierung|qualitaetsfinanzierung|vorteile|nachteile|optionen|zum abschluss)$/i.test(normalizeText(value));
+  /^(?:(?:der|die|das)\s+.+|sie|script|dialog|dialogue|gespr[aä]ch|gespraech|monolog|monologue|interview|radio|thema|das thema|aufgabe|aufgaben|frage|fragen|multiple-choice|richtig\/falsch|richtig falsch|loesung|lösung|antwort|skript|geh[oö]rt|format|transkription|transcription|type de t[aâ]che|beispiel|heute|und|dann|erstens|zweitens|drittens|au[ßs]erdem|überraschungen|ueberraschungen|kluft|weltbild|sprache|achtsamkeit|pakete|qualit[aä]tsfinanzierung|qualitaetsfinanzierung|hauptproblem|ziel|h[üu]rden|hu[eü]rden|anerkennungsfrist|unsere studie|paradox|jahre|graz|vorteile|nachteile|optionen|zum abschluss)$/i.test(normalizeText(value));
 
 const cleanMatchedSpeakerLabel = (label) => {
   const normalized = normalizeSpeakerLabel(label);
@@ -102,9 +102,14 @@ const splitSpeakerTurns = (text, trackIndex = 0) => {
         index: match.index + (labelOffset >= 0 ? labelOffset : match[1].length),
         end: match.index + match[0].length,
         label,
+        startsLine: match.index === 0 || /\n\s*$/.test(match[1]),
       };
     })
-    .filter((match) => !isProductionOnlyLabel(match.label));
+    .filter((match) => {
+      if (isProductionOnlyLabel(match.label)) return false;
+      if (/^(?:Herr|Frau|Dr\.?|Moderator|Moderatorin|Reporter|Reporterin|Sprecher|Sprecherin|Person|Mann|Frau)\b/i.test(match.label)) return true;
+      return match.startsLine;
+    });
   if (!matches.length) {
     return [{ trackIndex, speaker: "Narrator", text: stripProductionMarkers(normalized) }].filter((segment) => segment.text);
   }

@@ -146,9 +146,11 @@ const classifyItem = (item) => {
     item.instructions,
     item.admin_notes,
     transcript,
-    JSON.stringify(settings),
-    JSON.stringify(metadata),
   ].join(" ");
+  const parsedSpeakers = Array.from(new Set(parseSpeakerSegments({
+    transcript,
+    tracks: [{ transcript, audio: { transcript } }],
+  }).map((segment) => segment.speaker).filter((speaker) => speaker && speaker !== "Narrator")));
   if (isTemplateTranscript(rawTranscript) || isTemplateTranscript(transcript)) {
     return "unknown";
   }
@@ -156,15 +158,17 @@ const classifyItem = (item) => {
     .map((match) => match[1].trim())
     .filter((label) => !isIgnoredSpeakerLabel(label));
   const uniqueLabels = Array.from(new Set(labels.map(foldPlain).filter(Boolean)));
+  const dialogueSpeakerLabels = extractDialogueSpeakerLabels(item, transcript);
+  const speakerEvidenceCount = Math.max(parsedSpeakers.length, uniqueLabels.length, dialogueSpeakerLabels.length);
   if (/\b(?:kurztexte?|vortrag|monolog|monologue)\b/i.test(primaryText) && !/\b(?:radiointerview|radiogespr[aä]ch|radiogespraech|dialog|dialogue|interview|diskussion|discussion)\b/i.test(primaryText)) {
     return "monologue";
   }
-  if (/\b(?:radiointerview|radiogespr[aä]ch|radiogespraech|dialog|dialogue|interview|diskussion|discussion)\b/i.test(primaryText)) {
+  if (speakerEvidenceCount >= 2 && /\b(?:radiointerview|radiogespr[aä]ch|radiogespraech|dialog|dialogue|interview|diskussion|discussion)\b/i.test(primaryText)) {
     return "dialogue";
   }
   const dialogueHint =
-    uniqueLabels.length >= 2 ||
-    /\b(dialog|dialogue|gespr[aä]ch|gespraech|interview|radio|diskussion|discussion|moderator|moderatorin|reporter|reporterin|sprecher\s*[ab]|sprecherin\s*[ab])\b/i.test(text);
+    speakerEvidenceCount >= 2 &&
+    /\b(dialog|dialogue|gespr[aä]ch|gespraech|interview|diskussion|discussion|moderator|moderatorin|reporter|reporterin|sprecher\s*[ab]|sprecherin\s*[ab])\b/i.test(text);
   const monologueHint =
     /\b(monolog|monologue|vortrag|ansage|bericht|reportage|narration)\b/i.test(text) &&
     !/\b(interview|dialog|dialogue|diskussion|discussion|conversation)\b/i.test(text);
@@ -399,6 +403,9 @@ const main = async () => {
   const levels = parseList(flags.levels || flags.level, ["B1", "B2"]).map((level) => level.toUpperCase());
   const providers = parseList(flags.examProviders || flags.examProvider || flags.providers, [])
     .map((value) => value.toLowerCase());
+  const itemIds = parseList(flags.itemIds || flags.itemId || flags.ids, [])
+    .map((value) => Number(value))
+    .filter((value) => Number.isInteger(value) && value > 0);
   const dryRun = flags["dry-run"] === true || flags.dryRun === true;
   const candidates = (await pool.query(
     `SELECT *
@@ -406,17 +413,19 @@ const main = async () => {
       WHERE admin_transcript IS NOT NULL
         AND LENGTH(TRIM(admin_transcript)) >= 20
         AND (
+          ${itemIds.length ? "id = ANY($1::int[]) OR" : ""}
           generated_audio_asset_id IS NULL
           OR audio_generation_status IN ('draft', 'failed', 'queued', 'generating')
         )
       ORDER BY provider, level, series_number, part_number, item_number, id
       LIMIT 5000`,
-    []
+    itemIds.length ? [itemIds] : []
   )).rows;
   const items = candidates
     .map((item) => ({ ...item, target_kind: classifyItem(item) }))
     .filter((item) => !levels.length || levels.includes(String(item.level || "").toUpperCase()))
     .filter((item) => !providers.length || providers.includes(String(item.provider || "").toLowerCase()))
+    .filter((item) => !itemIds.length || itemIds.includes(Number(item.id)))
     .filter((item) => !kinds.length || kinds.includes(item.target_kind))
     .slice(0, limit);
 
@@ -428,6 +437,7 @@ const main = async () => {
     kinds,
     levels,
     providers,
+    itemIds,
     dryRun,
     candidates: candidates.length,
     selected: items.length,
