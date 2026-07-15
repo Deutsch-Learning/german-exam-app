@@ -5,6 +5,8 @@ const path = require("path");
 const { execFile } = require("child_process");
 const { promisify } = require("util");
 const mammoth = require("mammoth");
+const { parseGoetheB2LesenSeries } = require("./goetheB2LesenParser");
+const { parseB2StructuredLesenSeries } = require("./b2StructuredLesenParser");
 
 const execFileAsync = promisify(execFile);
 
@@ -18,6 +20,7 @@ const SECTION_LABELS = {
   speak: "Expression orale",
   sprach: "Sprachbausteine",
 };
+const LISTENING_STUDENT_INSTRUCTION = "Hören Sie den Audiotext und beantworten Sie die Aufgaben zu diesem Teil.";
 
 const normalizeText = (value) =>
   String(value ?? "")
@@ -155,6 +158,12 @@ const detectLevelFromFilename = (filename = "") => {
   return match ? match[1].toUpperCase() : null;
 };
 
+const normalizeListeningProvider = (value) => {
+  const provider = normalizeDetectedProvider(value);
+  if (["goethe", "telc", "ecl", "osd"].includes(provider)) return provider;
+  return provider || "custom";
+};
+
 const detectSectionTypeFromFilename = (filename = "") => {
   const normalized = slugify(filename);
   if (normalized.includes("sprachbausteine") || normalized.includes("sprachbaustein")) return "sprach";
@@ -214,6 +223,458 @@ const extractPoints = (value) => {
 };
 
 const trimForDb = (value, max = MAX_PROMPT_CHARS) => compactText(value).slice(0, max);
+
+const countMarker = (text, marker) => {
+  const regex = new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g");
+  return [...String(text ?? "").matchAll(regex)].length;
+};
+
+const buildListeningImportFoundation = async ({ buffer, filename, mimetype, provider, level }) => {
+  const raw = await mammoth.extractRawText({ buffer });
+  const text = normalizeText(raw.value || "");
+  const detectedProvider = normalizeListeningProvider(provider || detectProviderFromFilename(filename) || detectProvider(text));
+  const detectedLevel = String(level || detectLevelFromFilename(filename) || detectLevel(text) || "").toUpperCase() || null;
+  const validationWarnings = [];
+  const markers = {
+    adminOnlyTranscript: countMarker(text, "ADMIN_ONLY_TRANSCRIPT"),
+    audioEngineSettings: countMarker(text, "AUDIO_ENGINE_SETTINGS"),
+    studentVisibleQuestions: countMarker(text, "STUDENT_VISIBLE_QUESTIONS"),
+    correctionVisibleAfterSubmit: countMarker(text, "CORRECTION_VISIBLE_AFTER_SUBMIT"),
+  };
+
+  if (!text) validationWarnings.push("The uploaded DOCX did not produce readable text.");
+  if (!detectedProvider || detectedProvider === "custom") validationWarnings.push("Provider could not be confidently detected.");
+  if (!detectedLevel) validationWarnings.push("Level could not be confidently detected.");
+  if (!markers.adminOnlyTranscript) validationWarnings.push("ADMIN_ONLY_TRANSCRIPT marker was not detected.");
+  if (!markers.audioEngineSettings) validationWarnings.push("AUDIO_ENGINE_SETTINGS marker was not detected.");
+  if (!markers.studentVisibleQuestions) validationWarnings.push("STUDENT_VISIBLE_QUESTIONS marker was not detected.");
+  if (!markers.correctionVisibleAfterSubmit) validationWarnings.push("CORRECTION_VISIBLE_AFTER_SUBMIT marker was not detected.");
+
+  const teilMatches = [...text.matchAll(/\bTeil\s+(\d+)\b/gi)];
+  const textMatches = [...text.matchAll(/\bText\s+(\d+)\b/gi)];
+  const seriesMatches = [...text.matchAll(/\b(?:Sujet|Simulation|Modellpr.fung|Modellprüfung|Pr.fung|Prüfung)\s+(\d+)\b/gi)];
+  const duplicateCheck = new Set();
+  let duplicateIdentifiers = 0;
+  [...teilMatches, ...textMatches, ...seriesMatches].forEach((match) => {
+    const key = `${match[0].toLowerCase()}@${match.index}`;
+    if (duplicateCheck.has(key)) duplicateIdentifiers += 1;
+    duplicateCheck.add(key);
+  });
+
+  const draft = {
+    type: "listening_import_foundation",
+    parserVersion: `${IMPORT_ANALYZER_VERSION}.hoeren.foundation`,
+    filename,
+    mimetype,
+    metadata: {
+      provider: detectedProvider,
+      examType: detectExamType(text, detectedProvider, detectedLevel),
+      level: detectedLevel,
+      sectionType: "listen",
+      title: compactText(text).split("\n")[0] || filename,
+      globalDurationMinutes: extractDurationMinutes(text),
+    },
+    hierarchy: {
+      provider: detectedProvider,
+      level: detectedLevel,
+      seriesDetected: new Set(seriesMatches.map((match) => Number(match[1]))).size,
+      teileDetected: new Set(teilMatches.map((match) => Number(match[1]))).size,
+      audioTextBlocksDetected: new Set(textMatches.map((match) => Number(match[1]))).size,
+    },
+    markerCounts: markers,
+    validation: {
+      errors: [],
+      warnings: [
+        ...validationWarnings,
+        ...(duplicateIdentifiers ? [`${duplicateIdentifiers} duplicate marker identifiers need review.`] : []),
+      ],
+    },
+    rawTextPreview: text.slice(0, 1800),
+    sourceDocument: {
+      hash: hashBuffer(buffer),
+      filename,
+      sizeBytes: buffer.length,
+      mimetype,
+    },
+    note: "STEP 1 draft only. Full marker parsing starts in STEP 2.",
+  };
+
+  return {
+    documentHash: draft.sourceDocument.hash,
+    filename,
+    mimetype,
+    sizeBytes: buffer.length,
+    rawTextPreview: draft.rawTextPreview,
+    metadata: draft.metadata,
+    validation: draft.validation,
+    draft,
+  };
+};
+
+const normalizeHoerenLineText = (value) =>
+  String(value ?? "")
+    .replace(/\r/g, "\n")
+    .replace(/\u00a0/g, " ")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+const getLineMatches = (text, regex) => {
+  const matches = [];
+  const pattern = new RegExp(regex.source, regex.flags.includes("g") ? regex.flags : `${regex.flags}g`);
+  let match;
+  while ((match = pattern.exec(text))) {
+    matches.push(match);
+  }
+  return matches;
+};
+
+const sliceBetween = (text, start, end) => text.slice(Math.max(0, start), end == null ? text.length : Math.max(start, end));
+
+const makeBlockSlices = (text, matches) =>
+  matches.map((match, index) => ({
+    match,
+    start: match.index,
+    end: matches[index + 1]?.index ?? text.length,
+    text: sliceBetween(text, match.index, matches[index + 1]?.index ?? text.length).trim(),
+  }));
+
+const getFirstMatchIndex = (text, regexes) => {
+  const indexes = regexes
+    .map((regex) => {
+      const found = text.search(regex);
+      return found >= 0 ? found : null;
+    })
+    .filter((value) => value !== null);
+  return indexes.length ? Math.min(...indexes) : -1;
+};
+
+const getBlockAfterMarker = (text, markerRegex, endRegexes = []) => {
+  const match = text.match(markerRegex);
+  if (!match || match.index == null) return "";
+  const start = match.index + match[0].length;
+  const rest = text.slice(start);
+  const end = getFirstMatchIndex(rest, endRegexes);
+  return normalizeHoerenLineText(end >= 0 ? rest.slice(0, end) : rest);
+};
+
+const extractHoerenQuestions = (raw = "") => {
+  const lines = normalizeHoerenLineText(raw).split("\n").map((line) => line.trim()).filter(Boolean);
+  const questions = [];
+  lines.forEach((line) => {
+    const numbered = line.match(/^(\d{1,2})[\.)]\s+(.+)/);
+    if (numbered) {
+      questions.push({
+        number: Number(numbered[1]),
+        prompt: numbered[2].trim(),
+        type: /richtig|falsch/i.test(line) ? "true_false" : "question",
+      });
+      return;
+    }
+    const tableStatement = line.match(/^(\d{1,2})\s+(.+?)\s+(?:■|□|[A-Z]\s*\/)/u);
+    if (tableStatement && !/Lösung|LÖSUNG|Corrig/i.test(line)) {
+      questions.push({
+        number: Number(tableStatement[1]),
+        prompt: tableStatement[2].trim(),
+        type: "matching",
+      });
+      return;
+    }
+    const aufgabe = line.match(/^Aufgabe\s+(\d{1,2})(?:\s*\([^)]*\))?\s*:\s*(.+)/i);
+    if (aufgabe) {
+      questions.push({
+        number: Number(aufgabe[1]),
+        prompt: aufgabe[2].trim(),
+        type: /richtig|falsch/i.test(line) ? "true_false" : "question",
+      });
+      return;
+    }
+    const rf = line.match(/^Richtig\/Falsch\s*:\s*(.+)/i);
+    if (rf) {
+      questions.push({ number: questions.length + 1, prompt: rf[1].trim(), type: "true_false" });
+      return;
+    }
+    const mc = line.match(/^Multiple Choice\s*:\s*(.+)/i);
+    if (mc) {
+      questions.push({ number: questions.length + 1, prompt: mc[1].trim(), type: "multiple_choice" });
+    }
+  });
+  return questions;
+};
+
+const countHoerenCorrections = (raw = "", expectedCount = null) => {
+  const text = normalizeHoerenLineText(raw);
+  const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
+  const directRows = lines.filter((line) =>
+    /^\d{1,2}[\.)]?\s+(?:[A-C]\b|RICHTIG\b|FALSCH\b|Richtig\b|Falsch\b|[A-ZÄÖÜ][\p{L}.-]{1,40}\b)/u.test(line)
+  ).length;
+  if (directRows) return expectedCount ? Math.min(directRows, expectedCount) : directRows;
+  const splitRows = lines.filter((line, index) =>
+    /^\d{1,2}$/.test(line) && /^(?:[A-C]\b|Richtig\b|Falsch\b|[A-ZÄÖÜ][\p{L}.-]{1,40}\b)/u.test(lines[index + 1] || "")
+  ).length;
+  if (splitRows) return expectedCount ? Math.min(splitRows, expectedCount) : splitRows;
+  const rf = /\bRichtig\b|\bFalsch\b/i.test(text) ? 1 : 0;
+  const mc = /\bMC\s*:/i.test(text) ? 1 : 0;
+  const total = Math.max(rf, 0) + Math.max(mc, 0);
+  return expectedCount ? Math.min(total, expectedCount) : total;
+};
+
+const parseHoerenTeilNumber = (value, fallback = 1) => {
+  const match = String(value ?? "").match(/Teil\s*[_\s/-]*(\d+)/i);
+  return match ? Number(match[1]) : fallback;
+};
+
+const getHoerenSeriesMatches = (text, provider) => {
+  if (provider === "goethe") {
+    return getLineMatches(text, /^SUJET\s+(\d+)\s*\/\s*MODELLPRÜFUNG\s+\d+\s*$/gm);
+  }
+  if (provider === "telc") {
+    return getLineMatches(text, /^SIMULATION\s+(\d+)\s*[-–]\s*(.+)$/gim);
+  }
+  if (provider === "ecl") {
+    return getLineMatches(text, /^SUJET\s+0?(\d+)\s*\/\s*ECL\s+B1\s*[-–]\s*(.+)$/gim);
+  }
+  if (provider === "osd") {
+    const introEnd = text.search(/Each Prüfung contains four listening parts/i);
+    const body = introEnd >= 0 ? text.slice(introEnd) : text;
+    const offset = introEnd >= 0 ? introEnd : 0;
+    return getLineMatches(body, /^TEIL\s+1\s*$/gim).map((match, index) => {
+      match.index += offset;
+      match[1] = String(index + 1);
+      match[2] = `ÖSD Prüfung ${String(index + 1).padStart(2, "0")}`;
+      return match;
+    });
+  }
+  return [];
+};
+
+const buildHoerenAudioItems = ({ sectionBlock, sectionNumber }) => {
+  const textMatches = getLineMatches(sectionBlock, /^TEIL\s+\d+\s*\/\s*TEXT\s+(\d+)\s*$/gim);
+  const blocks = textMatches.length ? makeBlockSlices(sectionBlock, textMatches) : [{
+    match: [`Teil ${sectionNumber}`, String(sectionNumber)],
+    start: 0,
+    end: sectionBlock.length,
+    text: sectionBlock,
+  }];
+  const sectionQuestions = getBlockAfterMarker(sectionBlock, /STUDENT_VISIBLE_QUESTIONS[^\n]*/i, [
+    /CORRECTION_VISIBLE_AFTER_SUBMIT/i,
+    /^TEIL\s+\d+\s*\/\s*TEXT\s+\d+/im,
+  ]);
+  const sectionCorrection = getBlockAfterMarker(sectionBlock, /CORRECTION_VISIBLE_AFTER_SUBMIT[^\n]*/i, [
+    /^TEIL\s+\d+\b/im,
+  ]);
+  const sectionAudioSettings = getBlockAfterMarker(sectionBlock, /AUDIO_ENGINE_SETTINGS[^\n]*/i, [
+    /^TEIL\s+\d+\s*\/\s*TEXT\s+\d+/im,
+    /STUDENT_VISIBLE_QUESTIONS/i,
+    /CORRECTION_VISIBLE_AFTER_SUBMIT/i,
+  ]);
+
+  return blocks.map((block, index) => {
+    const itemNumber = Number(block.match?.[1]) || index + 1;
+    const adminTranscript = getBlockAfterMarker(block.text, /ADMIN_ONLY_TRANSCRIPT[^\n]*/i, [
+      /AUDIO_ENGINE_SETTINGS/i,
+      /STUDENT_VISIBLE_QUESTIONS/i,
+      /CORRECTION_VISIBLE_AFTER_SUBMIT/i,
+      /^TEIL\s+\d+\s*\/\s*TEXT\s+\d+/im,
+    ]) || getBlockAfterMarker(block.text, /ADMIN_ONLY_TRANSCRIPT_AND_AUDIO_ENGINE_SETTINGS[^\n]*/i, [
+      /STUDENT_VISIBLE_QUESTIONS/i,
+      /CORRECTION_VISIBLE_AFTER_SUBMIT/i,
+      /^TEIL\s+\d+\s*\/\s*TEXT\s+\d+/im,
+    ]);
+    const audioSettingsRaw = getBlockAfterMarker(block.text, /AUDIO_ENGINE_SETTINGS[^\n]*/i, [
+      /STUDENT_VISIBLE_QUESTIONS/i,
+      /CORRECTION_VISIBLE_AFTER_SUBMIT/i,
+      /^TEIL\s+\d+\s*\/\s*TEXT\s+\d+/im,
+    ]) || (/ADMIN_ONLY_TRANSCRIPT_AND_AUDIO_ENGINE_SETTINGS/i.test(block.text) ? adminTranscript : "") || sectionAudioSettings;
+    const itemQuestions = getBlockAfterMarker(block.text, /STUDENT_VISIBLE_QUESTIONS[^\n]*/i, [
+      /CORRECTION_VISIBLE_AFTER_SUBMIT/i,
+      /^TEIL\s+\d+\s*\/\s*TEXT\s+\d+/im,
+    ]);
+    const studentQuestions = itemQuestions || (textMatches.length ? "" : sectionQuestions);
+    const itemCorrection = getBlockAfterMarker(block.text, /CORRECTION_VISIBLE_AFTER_SUBMIT[^\n]*/i, [
+      /^TEIL\s+\d+\s*\/\s*TEXT\s+\d+/im,
+    ]);
+    const correction = itemCorrection || (textMatches.length ? "" : sectionCorrection);
+    const questions = extractHoerenQuestions(studentQuestions);
+    const correctionCount = countHoerenCorrections(correction, questions.length || null);
+    return {
+      itemNumber,
+      title: textMatches.length ? `Text ${itemNumber}` : `Teil ${sectionNumber}`,
+      adminTranscript,
+      audioEngineSettings: {
+        raw: audioSettingsRaw,
+      },
+      studentVisibleQuestions: studentQuestions,
+      correctionVisibleAfterSubmit: correction,
+      questions,
+      counts: {
+        questions: questions.length,
+        corrections: correctionCount,
+      },
+      validationWarnings: [
+        ...(!adminTranscript ? ["Missing admin transcript."] : []),
+        ...(!audioSettingsRaw ? ["Missing audio engine settings."] : []),
+        ...(!studentQuestions && !sectionQuestions ? ["Missing student-visible questions."] : []),
+        ...(!correction && !sectionCorrection ? ["Missing correction block."] : []),
+      ],
+    };
+  });
+};
+
+const buildHoerenSections = (seriesBlock) => {
+  const rawMatches = getLineMatches(
+    seriesBlock,
+    /^(?:TEIL_(\d+)_METADATA_AND_STUDENT_INSTRUCTIONS|(?:TEIL|Teil)\s+(\d+)(?:\s*[—–-][^\n]*)?)\s*$/gm
+  ).filter((match) => !/\/\s*TEXT/i.test(match[0]));
+  const sectionMatches = [];
+  rawMatches.forEach((match) => {
+    const partNumber = match[1] || match[2];
+    if (sectionMatches[sectionMatches.length - 1]?.partNumber === partNumber) return;
+    match[1] = partNumber;
+    match.partNumber = partNumber;
+    sectionMatches.push(match);
+  });
+  const sectionBlocks = makeBlockSlices(seriesBlock, sectionMatches);
+  return sectionBlocks.map((block, index) => {
+    const partNumber = Number(block.match?.[1]) || index + 1;
+    const instructions = getBlockAfterMarker(block.text, new RegExp(`TEIL_${partNumber}_METADATA_AND_STUDENT_INSTRUCTIONS[^\\n]*`, "i"), [
+      /ADMIN_ONLY_TRANSCRIPT/i,
+      /AUDIO_ENGINE_SETTINGS/i,
+      /^TEIL\s+\d+\s*\/\s*TEXT\s+\d+/im,
+    ]);
+    const audioItems = buildHoerenAudioItems({ sectionBlock: block.text, sectionNumber: partNumber });
+    const sectionQuestions = getBlockAfterMarker(block.text, /STUDENT_VISIBLE_QUESTIONS[^\n]*/i, [
+      /CORRECTION_VISIBLE_AFTER_SUBMIT/i,
+      /^TEIL\s+\d+\b/im,
+    ]);
+    const sectionCorrection = getBlockAfterMarker(block.text, /CORRECTION_VISIBLE_AFTER_SUBMIT[^\n]*/i, [
+      /^TEIL\s+\d+\b/im,
+    ]);
+    const itemQuestionCount = audioItems.reduce((sum, item) => sum + item.counts.questions, 0);
+    const itemCorrectionCount = audioItems.reduce((sum, item) => sum + item.counts.corrections, 0);
+    const questionCount = itemQuestionCount || extractHoerenQuestions(sectionQuestions).length;
+    const correctionCount = itemCorrectionCount || countHoerenCorrections(sectionCorrection, questionCount || null);
+    return {
+      partNumber,
+      title: `Teil ${partNumber}`,
+      instructions,
+      audioItems,
+      counts: {
+        audioItems: audioItems.length,
+        questions: questionCount,
+        corrections: correctionCount,
+      },
+      validationWarnings: [
+        ...(!audioItems.length ? ["No audio items detected."] : []),
+        ...(questionCount !== correctionCount ? [`Question/correction count mismatch (${questionCount}/${correctionCount}).`] : []),
+        ...audioItems.flatMap((item) => item.validationWarnings.map((warning) => `${item.title}: ${warning}`)),
+      ],
+    };
+  });
+};
+
+const buildHoerenParsedPreview = async ({ buffer, filename, mimetype, provider, level, maxSeries = null }) => {
+  const foundation = await buildListeningImportFoundation({ buffer, filename, mimetype, provider, level });
+  const raw = await mammoth.extractRawText({ buffer });
+  const text = normalizeText(raw.value || "");
+  const detectedProvider = foundation.metadata.provider;
+  const seriesMatches = getHoerenSeriesMatches(text, detectedProvider);
+  const seriesBlocks = makeBlockSlices(text, seriesMatches).slice(0, maxSeries || undefined);
+  const expectedByProvider = {
+    goethe: { sections: 4, audioItems: 8, questions: 30, corrections: 30 },
+    telc: { sections: 3, audioItems: 7, questions: 20, corrections: 20 },
+    ecl: { sections: 2, audioItems: 2, questions: 20, corrections: 20 },
+    osd: { sections: 4, audioItems: 8, questions: 30, corrections: 30 },
+  };
+  const series = seriesBlocks.map((block, index) => {
+    const seriesNumber = Number(block.match?.[1]) || index + 1;
+    const title = normalizeHoerenLineText(block.match?.[2] || block.match?.[0] || `Series ${seriesNumber}`);
+    const sections = buildHoerenSections(block.text);
+    const audioItemCount = sections.reduce((sum, section) => sum + section.counts.audioItems, 0);
+    const questionCount = sections.reduce((sum, section) => sum + section.counts.questions, 0);
+    const correctionCount = sections.reduce((sum, section) => sum + section.counts.corrections, 0);
+    const expected = expectedByProvider[detectedProvider] || null;
+    const expectationWarnings = expected
+      ? Object.entries(expected)
+          .filter(([key, value]) => Number(value) !== Number({
+            sections: sections.length,
+            audioItems: audioItemCount,
+            questions: questionCount,
+            corrections: correctionCount,
+          }[key]))
+          .map(([key, value]) => `Expected ${value} ${key}, detected ${{
+            sections: sections.length,
+            audioItems: audioItemCount,
+            questions: questionCount,
+            corrections: correctionCount,
+          }[key]}.`)
+      : [];
+    return {
+      seriesNumber,
+      title,
+      sourceLabel: `${detectedProvider.toUpperCase()} ${foundation.metadata.level || ""} Hören ${seriesNumber}`,
+      sections,
+      counts: {
+        sections: sections.length,
+        audioItems: audioItemCount,
+        questions: questionCount,
+        corrections: correctionCount,
+      },
+      validationWarnings: [
+        ...expectationWarnings,
+        ...(!sections.length ? ["No Teile detected."] : []),
+        ...(questionCount !== correctionCount ? [`Series question/correction count mismatch (${questionCount}/${correctionCount}).`] : []),
+        ...sections.flatMap((section) => section.validationWarnings.map((warning) => `Teil ${section.partNumber}: ${warning}`)),
+      ],
+    };
+  });
+  const validationWarnings = [
+    ...(foundation.validation.warnings || []),
+    ...(!series.length ? ["No Hören series detected."] : []),
+    ...series.flatMap((item) => item.validationWarnings.map((warning) => `Series ${item.seriesNumber}: ${warning}`)),
+  ];
+  const comparisonSummary = {
+    provider: detectedProvider,
+    level: foundation.metadata.level,
+    expectedStructure: {
+      goethe: "4 Teile; Teil 1 has 5 audio items; Teile 2-4 have one audio item each.",
+      telc: "3 Teile; Teil 1 has 5 audio items; Teile 2-3 have one audio item each.",
+      ecl: "2 Teile; each Teil has one audio item.",
+      osd: "4 Teile; Teil 1 has 5 audio items; Teile 2-4 have one audio item each.",
+    }[detectedProvider] || "Provider-specific structure.",
+    detected: {
+      series: series.length,
+      sections: series.reduce((sum, item) => sum + item.counts.sections, 0),
+      audioItems: series.reduce((sum, item) => sum + item.counts.audioItems, 0),
+      questions: series.reduce((sum, item) => sum + item.counts.questions, 0),
+      corrections: series.reduce((sum, item) => sum + item.counts.corrections, 0),
+      warnings: validationWarnings.length,
+    },
+  };
+  return {
+    ...foundation,
+    metadata: {
+      ...foundation.metadata,
+      parserMode: "hoeren_marker_preview",
+    },
+    draft: {
+      ...foundation.draft,
+      type: "listening_marker_preview",
+      parserVersion: `${IMPORT_ANALYZER_VERSION}.hoeren.marker-preview`,
+      series,
+      comparisonSummary,
+      validation: {
+        errors: [],
+        warnings: validationWarnings,
+      },
+      note: "STEP 2 draft preview only. Audio generation starts in STEP 3.",
+    },
+    validation: {
+      errors: [],
+      warnings: validationWarnings,
+    },
+  };
+};
 
 const buildFallbackQuestion = ({ sectionType, prompt, position, questionType = "compound" }) => ({
   questionType,
@@ -3053,6 +3514,454 @@ const parseB2NumberedSeries = (text, metadata) => {
     });
 };
 
+const normalizeB2HoerenAnswer = (value = "") => {
+  const text = compactText(value).replace(/[.;,]+$/, "");
+  if (/^(R|richtig|true|vrai)$/i.test(text)) return "Richtig";
+  if (/^(F|falsch|false|faux)$/i.test(text)) return "Falsch";
+  const letter = text.match(/^([A-J])\b/i)?.[1];
+  return letter ? letter.toUpperCase() : text;
+};
+
+const parseB2HoerenCorrectionMap = (text = "") => {
+  const answers = new Map();
+  const clean = normalizeHoerenLineText(text);
+  const add = (number, value) => {
+    const n = Number(number);
+    const normalized = normalizeB2HoerenAnswer(value);
+    if (n && normalized && !answers.has(n)) answers.set(n, normalized);
+  };
+
+  [...clean.matchAll(/Aufgabe\s+(\d{1,2})\s*:\s*(RICHTIG|FALSCH|[A-J])\b/gi)]
+    .forEach((match) => add(match[1], match[2]));
+  [...clean.matchAll(/(?:^|\n)\s*(\d{1,2})\.\s*(RICHTIG|FALSCH|[A-J])\b/gi)]
+    .forEach((match) => add(match[1], match[2]));
+  [...clean.matchAll(/(?:^|\n)\s*(\d{1,2})\s+(.{8,}?)\s+(R|F|RICHTIG|FALSCH)\b/gi)]
+    .forEach((match) => add(match[1], match[3]));
+  [...clean.matchAll(/(?:^|\s)(\d{1,2})\.\s*([A-J])(?:\s|$)/gi)]
+    .forEach((match) => add(match[1], match[2]));
+  [...clean.matchAll(/(?:^|\s)(\d{1,2})\s+(Richtig|Falsch|[A-J])(?:\s|$)/gi)]
+    .forEach((match) => add(match[1], match[2]));
+
+  return answers;
+};
+
+const getMarkerBlock = (text, markerRegex, endRegexes = []) =>
+  getBlockAfterMarker(text, markerRegex, [
+    /(?:^|\n)\s*(?:ADMIN_ONLY_TRANSCRIPT|AUDIO_ENGINE_SETTINGS|STUDENT_VISIBLE_(?:INSTRUCTIONS|QUESTIONS)(?:_FOR_THIS_AUDIO)?|STUDENT_VISIBLE_INSTRUCTIONS_AND_QUESTIONS|CORRECTION_VISIBLE_AFTER_SUBMIT)\b/i,
+    /(?:^|\n)\s*(?:TEIL|TEXTE|AUFGABE)\s+\d+\s*(?:\/|[-\u2010-\u2015])/i,
+    ...endRegexes,
+  ]);
+
+const parseB2HoerenOptions = (raw = "") => {
+  const options = [];
+  const seen = new Set();
+  [...String(raw || "").matchAll(/(?:^|\n)\s*([A-Ja-j])\)\s*(?:[A-Ja-j]\)\s*)?([^\n]+)/g)]
+    .forEach((match) => {
+      const value = match[1].toUpperCase();
+      const label = compactText(match[2]);
+      if (label && !seen.has(value)) {
+        seen.add(value);
+        options.push({ value, label });
+      }
+    });
+  return options;
+};
+
+const getB2HoerenItemNumber = (rawItem, fallback = 1) => {
+  const value = compactText(rawItem);
+  const alphaSuffix = value.match(/^\d+([A-Z])$/i)?.[1];
+  if (alphaSuffix) return alphaSuffix.toUpperCase().charCodeAt(0) - 64;
+  return Number(value.match(/\d+/)?.[0]) || fallback;
+};
+
+const splitB2HoerenNumberedSegments = (raw = "") => {
+  const text = normalizeHoerenLineText(raw)
+    .replace(/\[\s*_{2,}\s*\]/g, "[____]")
+    .replace(/\[\s*\]\s*\[\s*\]/g, "[____] [____]")
+    .replace(/(\[\s*____\s*\]\s+\[\s*____\s*\])\s+(\d{1,2})\s+/g, "$1\n$2 ");
+  let matches = getLineMatches(text, /(?:^|\n)\s*(\d{1,2})[\.)]?\s+/g);
+  const inlineMatches = getLineMatches(text, /(?:^|\n|\s)(\d{1,2})\s+(?=[A-ZÄÖÜ0-9])/g);
+  if (inlineMatches.length > matches.length && /\[\s*____\s*\]|\[\s*\]\s*\[\s*\]/.test(text)) {
+    const sequence = [];
+    inlineMatches.forEach((match) => {
+      const number = Number(match[1]);
+      const previous = Number(sequence[sequence.length - 1]?.[1] || 0);
+      if (number >= 1 && number <= 10 && (!sequence.length || number === previous + 1)) {
+        sequence.push(match);
+      }
+    });
+    if (sequence.length > matches.length) matches = sequence;
+  }
+  return matches.map((match, index) => {
+    const start = match.index + match[0].length;
+    const end = matches[index + 1]?.index ?? text.length;
+    return {
+      number: Number(match[1]),
+      body: compactText(text.slice(start, end)),
+    };
+  }).filter((item) => item.number && item.body);
+};
+
+const buildB2HoerenQuestion = ({ item, answers, transcript, audio, metadata, fallbackType = "" }) => {
+  const body = compactText(item.body);
+  const options = parseB2HoerenOptions(`\n${item.body}`);
+  const answer = answers.get(item.number) || "";
+  const baseMetadata = {
+    ...metadata,
+    sourceQuestionNumber: item.number,
+  };
+
+  if (options.length >= 2) {
+    const prompt = compactText(item.body.replace(/(?:^|\n)\s*[A-Ja-j]\)\s*(?:[A-Ja-j]\)\s*)?[^\n]+/g, ""));
+    return buildMultipleChoiceListeningQuestion({
+      prompt: prompt || body,
+      options,
+      answer,
+      position: item.number,
+      transcript,
+      audio,
+      metadata: baseMetadata,
+    });
+  }
+
+  if (/\[\s*_{2,}\s*\]|\[\s*\]\s*\[\s*\]|\bR\s+F\b|Richtig\s*\/\s*Falsch/i.test(body) || /^(Richtig|Falsch)$/i.test(answer)) {
+    return buildTrueFalseListeningQuestion({
+      prompt: body.replace(/\[\s*_{2,}\s*\]/g, "").replace(/\bR\s+F\b/gi, "").trim(),
+      answer,
+      position: item.number,
+      transcript,
+      audio,
+      metadata: baseMetadata,
+    });
+  }
+
+  if (/^[A-J]$/i.test(answer) || /associez|zuordnen|antwortkasten|options?\s*\([A-J]/i.test(fallbackType)) {
+    const bank = parseB2HoerenOptions(fallbackType);
+    return buildMatchingListeningQuestion({
+      prompt: body,
+      options: bank.length ? bank : "ABCDEFGHIJ".split("").map((value) => ({ value, label: value })),
+      answer,
+      position: item.number,
+      transcript,
+      audio,
+      metadata: baseMetadata,
+    });
+  }
+
+  return {
+    questionType: "blank",
+    prompt: trimForDb(body),
+    options: [],
+    correctAnswer: answer ? { value: answer } : {},
+    explanation: null,
+    position: item.number,
+    transcript,
+    audio,
+    scoring: { points: 1 },
+    metadata: baseMetadata,
+    sectionType: "listen",
+  };
+};
+
+const parseB2HoerenQuestions = ({ raw, answers, transcript, audio, metadata }) => {
+  const text = normalizeHoerenLineText(raw);
+  const questions = [];
+
+  const mcMatches = getLineMatches(text, /(?:^|\n)\s*(?:(\d{1,2})[\.)]\s*)?(?:Multiple-Choice|Multiple Choice)\s*:\s*([^\n]+)/gi);
+  mcMatches.forEach((match, index) => {
+    const next = mcMatches[index + 1];
+    const blockEnd = next?.index ?? text.length;
+    const block = text.slice(match.index, blockEnd);
+    const options = parseB2HoerenOptions(block);
+    const number = Number(match[1]) || (Number(metadata.sourceQuestionBase || 0) + index + 1) || (questions.length + 1);
+    questions.push(buildMultipleChoiceListeningQuestion({
+      prompt: compactText(match[2]),
+      options,
+      answer: answers.get(number) || "",
+      position: number,
+      transcript,
+      audio,
+      metadata: { ...metadata, sourceQuestionNumber: number },
+    }));
+  });
+
+  const rfMatches = getLineMatches(text, /(?:^|\n)\s*(?:(\d{1,2})[\.)]\s*)?Richtig\/Falsch\s*:\s*([^\n]+)/gi);
+  rfMatches.forEach((match, index) => {
+    const number = Number(match[1]) || (Number(metadata.sourceQuestionBase || 0) + mcMatches.length + index + 1) || (questions.length + 1);
+    questions.push(buildTrueFalseListeningQuestion({
+      prompt: compactText(match[2]),
+      answer: answers.get(number) || "",
+      position: number,
+      transcript,
+      audio,
+      metadata: { ...metadata, sourceQuestionNumber: number },
+    }));
+  });
+
+  if (!questions.length) {
+    const aufgabeMatches = getLineMatches(text, /(?:^|\n)\s*Aufgabe\s+(\d{1,2})\s*:\s*([\s\S]*?)(?=(?:\n\s*Aufgabe\s+\d{1,2}\s*:)|$)/gi);
+    aufgabeMatches.forEach((match) => {
+      const number = Number(match[1]) || (questions.length + 1);
+      const rawPrompt = compactText(String(match[2] || "").replace(/\[\s*_{2,}\s*\]/g, ""));
+      const answer = answers.get(number) || "";
+      if (!rawPrompt) return;
+      if (/^(Richtig|Falsch)$/i.test(answer) || /\[\s*_{2,}\s*\]/.test(match[2] || "")) {
+        questions.push(buildTrueFalseListeningQuestion({
+          prompt: rawPrompt,
+          answer,
+          position: number,
+          transcript,
+          audio,
+          metadata: { ...metadata, sourceQuestionNumber: number },
+        }));
+        return;
+      }
+      questions.push(buildB2HoerenQuestion({
+        item: { number, body: rawPrompt },
+        answers,
+        transcript,
+        audio,
+        metadata,
+        fallbackType: text,
+      }));
+    });
+  }
+
+  if (!questions.length) {
+    const bankStart = text.search(/(?:^|\n)\s*(?:OPTIONS|Antwort(?:kasten)?|L(?:o|\u00f6|oe)sungen)\b/i);
+    const questionText = bankStart >= 0 ? text.slice(0, bankStart) : text;
+    const bankText = bankStart >= 0 ? text.slice(bankStart) : "";
+    splitB2HoerenNumberedSegments(questionText)
+      .filter((item) => !/^questions?\s*\/|^nr\.?|^n[°o]\b|^item\b/i.test(item.body))
+      .forEach((item) => {
+        questions.push(buildB2HoerenQuestion({
+          item,
+          answers,
+          transcript,
+          audio,
+          metadata,
+          fallbackType: bankText || text,
+        }));
+      });
+  }
+
+  return questions
+    .filter((question) => compactText(question.prompt))
+    .sort((a, b) => (Number(a.position) || 0) - (Number(b.position) || 0));
+};
+
+const parseB2HoerenAudioSettings = (raw = "") => ({
+  raw: normalizeHoerenLineText(raw),
+  browserTtsFallback: true,
+  fallbackEngine: "browser-speech",
+  fallbackReason: "ElevenLabs MP3 generation skipped until credits are available",
+});
+
+const isManualReviewPlaceholder = (value = "") =>
+  !compactText(value) || /\(not found in source|manual review required\)/i.test(compactText(value));
+
+const extractB2HoerenNumberedTaskFallback = (value = "") => {
+  const lines = normalizeHoerenLineText(value).split("\n").map((line) => line.trim()).filter(Boolean);
+  const taskLines = [];
+  lines.forEach((line) => {
+    if (/^\d{1,2}[\.)]\s+.+/.test(line) && /(____|\[___|Sprecher\s*:|:\s*___|[?]$|R\s+F|\[\s*\]\s*\[\s*\])/i.test(line)) {
+      taskLines.push(line);
+    }
+  });
+  return taskLines.join("\n");
+};
+
+const parseB2HoerenAudioItem = ({ block, provider, partNumber, itemNumber, title, seriesTitle, answers, metadata, sourceQuestionBase = null }) => {
+  const transcript = getMarkerBlock(block, /ADMIN_ONLY_TRANSCRIPT[^\n]*/i, [/CORRECTION_VISIBLE_AFTER_SUBMIT/i])
+    || getBlockAfterMarker(block, /SCRIPT\s+AUDIO[^\n]*/i, [/PARAMETRES/i, /PARAMÈTRES/i, /CORRECTION_VISIBLE_AFTER_SUBMIT/i]);
+  const audioSettingsRaw = getMarkerBlock(block, /AUDIO_ENGINE_SETTINGS[^\n]*/i, [/ADMIN_ONLY_TRANSCRIPT/i, /STUDENT_VISIBLE_QUESTIONS/i]);
+  const questionRaw = getMarkerBlock(block, /STUDENT_VISIBLE_QUESTIONS(?:_FOR_THIS_AUDIO)?[^\n]*/i, [/CORRECTION_VISIBLE_AFTER_SUBMIT/i])
+    || getBlockAfterMarker(block, /STUDENT_VISIBLE_INSTRUCTIONS_AND_QUESTIONS[^\n]*/i, [/ADMIN_ONLY_TRANSCRIPT/i, /SCRIPT\s+AUDIO/i, /AUDIO_ENGINE_SETTINGS/i, /CORRECTION_VISIBLE_AFTER_SUBMIT/i]);
+  const correctionRaw = getMarkerBlock(block, /CORRECTION_VISIBLE_AFTER_SUBMIT[^\n]*/i);
+  const localAnswers = new Map([...answers, ...parseB2HoerenCorrectionMap(correctionRaw)]);
+  const production = audioSettingsRaw;
+  const audio = buildListeningAudioMetadata({
+    provider,
+    documentType: title,
+    situation: seriesTitle,
+    transcript,
+    production,
+    partNumber,
+    title,
+  });
+  audio.fallbackEngine = "browser-speech";
+  audio.productionLabel = "Browser TTS (no MP3)";
+  audio.audioEngineSettings = parseB2HoerenAudioSettings(audioSettingsRaw);
+
+  const questions = parseB2HoerenQuestions({
+    raw: isManualReviewPlaceholder(questionRaw) ? extractB2HoerenNumberedTaskFallback(block) : questionRaw,
+    answers: localAnswers,
+    transcript,
+    audio,
+    metadata: {
+      ...metadata,
+      partNumber,
+      audioItemNumber: itemNumber,
+      itemNumber,
+      textNumber: itemNumber,
+      sourceQuestionBase,
+    },
+  });
+
+  return {
+    itemNumber,
+    title,
+    adminTranscript: transcript,
+    audioEngineSettings: parseB2HoerenAudioSettings(audioSettingsRaw),
+    studentVisibleQuestions: questionRaw,
+    correctionVisibleAfterSubmit: correctionRaw,
+    listeningCount: /1\s*[×x]/i.test(title) || /Geh(?:o|\u00f6|oe)rt:\s*1/i.test(title) ? 1 : 2,
+    questions,
+    validationWarnings: [
+      ...(!transcript ? ["Missing admin transcript."] : []),
+      ...(!questionRaw ? ["Missing student-visible questions."] : []),
+      ...(!questions.length ? ["No questions detected for audio item."] : []),
+    ],
+  };
+};
+
+const getB2HoerenSeriesMatches = (text, provider) => {
+  if (provider === "goethe") {
+    return getLineMatches(text, /(?:^|\n)PR(?:Ü|UE)FUNG\s+0?(\d{1,2})\s*\/\s*GOETHE\s+B2\s*[-\u2010-\u2015]\s*([^\n]+)/giu);
+  }
+  if (provider === "telc") {
+    return getLineMatches(text, /(?:^|\n)SUJET\s+0?(\d{1,2})\s*\/\s*TELC\s+B2\s*[-\u2010-\u2015]\s*([^\n]+)/giu);
+  }
+  if (provider === "osd") {
+    return getLineMatches(text, /(?:^|\n)PR(?:Ü|UE)FUNG\s+0?(\d{1,2})\s*\/\s*(?:ÖSD|OESD|OSD)\s+B2\s*[-\u2010-\u2015]\s*([^\n]+)/giu);
+  }
+  if (provider === "ecl") {
+    return getLineMatches(text, /(?:^|\n)Serie:\s*0?(\d{1,2})\s+Title:\s*(.+?)\s+Exam:\s*ECL\s+B2/giu);
+  }
+  return [];
+};
+
+const getB2HoerenPartMatches = (seriesText, provider) => {
+  if (provider === "ecl") {
+    return getLineMatches(seriesText, /(?:^|\n)TEXTE\s+([12])\s*[-\u2010-\u2015]\s*([^\n]+)/giu);
+  }
+  if (provider === "osd") {
+    return getLineMatches(seriesText, /(?:^|\n)AUFGABE\s+([12])\s*-\s*([^\n]+)/giu)
+      .filter((match) => !/AUFGABE\s+\d+\s*\//i.test(match[0]));
+  }
+  return getLineMatches(seriesText, /(?:^|\n)TEIL\s+([1-4])\s*[-\u2010-\u2015]\s*([^\n]+)/giu)
+    .filter((match) => !/\//.test(match[0]));
+};
+
+const getB2HoerenAudioMatches = (sectionText, provider, partNumber) => {
+  if (provider === "goethe") {
+    return getLineMatches(sectionText, /(?:^|\n)TEIL\s+(\d+)\s*\/\s*TEXT\s+([0-9]+[A-Z]?)\s*[-\u2010-\u2015]\s*([^\n]+)/giu);
+  }
+  if (provider === "telc" && Number(partNumber) === 3) {
+    return getLineMatches(sectionText, /(?:^|\n)TEIL\s+3\s*\/\s*ANSAGE\s+(\d{1,2})\s*(?=\n|$)/giu);
+  }
+  if (provider === "osd" && Number(partNumber) === 1) {
+    return getLineMatches(sectionText, /(?:^|\n)AUFGABE\s+1\s*\/\s*TEXT\s+(\d+)\s*[-\u2010-\u2015]\s*([^\n]+)/giu);
+  }
+  return [];
+};
+
+const parseB2HoerenMarkerSeries = (text, metadata) => {
+  const provider = normalizeDetectedProvider(metadata.provider);
+  const clean = normalizeHoerenLineText(stripPdfPageMarkers(text));
+  const seriesMatches = getB2HoerenSeriesMatches(clean, provider);
+  if (!seriesMatches.length) return [];
+  const seriesBlocks = makeBlockSlices(clean, seriesMatches).slice(0, 20);
+
+  return seriesBlocks.map((seriesBlock, seriesIndex) => {
+    const seriesNumber = Number(seriesBlock.match[1]) || seriesIndex + 1;
+    const title = compactText(seriesBlock.match[2] || `${metadata.examType} ${seriesNumber}`);
+    const seriesAnswers = parseB2HoerenCorrectionMap(seriesBlock.text);
+    const partMatches = getB2HoerenPartMatches(seriesBlock.text, provider);
+    const partBlocks = makeBlockSlices(seriesBlock.text, partMatches);
+    const sections = partBlocks.map((partBlock, partIndex) => {
+      const partNumber = Number(partBlock.match[1]) || partIndex + 1;
+      const partTitle = compactText(partBlock.match[2] || `Teil ${partNumber}`);
+      const instructionMarker = /STUDENT_VISIBLE_INSTRUCTIONS(?:_AND_QUESTIONS)?[^\n]*/i;
+      const instructionsRaw = getMarkerBlock(partBlock.text, instructionMarker, [/ADMIN_ONLY_TRANSCRIPT/i, /AUDIO_ENGINE_SETTINGS/i]);
+      const sectionCorrection = getMarkerBlock(partBlock.text, /CORRECTION_VISIBLE_AFTER_SUBMIT[^\n]*/i);
+      const answers = new Map([...seriesAnswers, ...parseB2HoerenCorrectionMap(sectionCorrection)]);
+      const audioMatches = getB2HoerenAudioMatches(partBlock.text, provider, partNumber);
+      const audioBlocks = audioMatches.length ? makeBlockSlices(partBlock.text, audioMatches) : [{
+        match: partBlock.match,
+        start: 0,
+        end: partBlock.text.length,
+        text: partBlock.text,
+      }];
+      const audioItems = audioBlocks.map((audioBlock, audioIndex) => {
+        const rawItem = audioBlock.match?.[2] || audioBlock.match?.[1] || String(audioIndex + 1);
+        const itemNumber = getB2HoerenItemNumber(rawItem, audioIndex + 1);
+        const itemTitle = audioMatches.length
+          ? compactText(audioBlock.match?.[3] || audioBlock.match?.[2] || `${partTitle} Text ${itemNumber}`)
+          : partTitle;
+        return parseB2HoerenAudioItem({
+          block: audioBlock.text,
+          provider,
+          partNumber,
+          itemNumber,
+          title: audioMatches.length ? `Teil ${partNumber} - ${itemTitle}` : `Teil ${partNumber}: ${itemTitle}`,
+          seriesTitle: title,
+          answers,
+          metadata: { b2HoerenMarker: true, provider, seriesNumber },
+          sourceQuestionBase: provider === "goethe" && Number(partNumber) === 1 ? (itemNumber - 1) * 2 : 0,
+        });
+      });
+      const questions = audioItems.flatMap((item) => item.questions);
+      const sectionTranscript = audioItems.map((item) => item.adminTranscript).filter(Boolean).join("\n\n");
+      const sectionAudio = buildListeningAudioMetadata({
+        provider,
+        documentType: partTitle,
+        situation: title,
+        transcript: sectionTranscript,
+        production: audioItems.map((item) => item.audioEngineSettings?.raw).filter(Boolean).join("\n\n"),
+        partNumber,
+        title: partTitle,
+      });
+      sectionAudio.fallbackEngine = "browser-speech";
+      sectionAudio.productionLabel = "Browser TTS (no MP3)";
+
+      return {
+        sectionType: "listen",
+        partNumber,
+        title: provider === "osd" ? `Aufgabe ${partNumber}: ${partTitle}` : provider === "ecl" ? `Text ${partNumber}: ${partTitle}` : `Teil ${partNumber}: ${partTitle}`,
+        instructions: trimForDb(instructionsRaw || LISTENING_STUDENT_INSTRUCTION, 5000),
+        durationMinutes: Number(partNumber) === 1 && provider !== "ecl" ? 10 : 15,
+        points: questions.length || null,
+        scoring: { points: questions.length || null, listeningPasses: audioItems[0]?.listeningCount || 2 },
+        metadata: {
+          b2HoerenMarker: true,
+          listening: true,
+          transcript: sectionTranscript,
+          audio: sectionAudio,
+          audioItems: audioItems.map((item) => ({
+            itemNumber: item.itemNumber,
+            title: item.title,
+            listeningCount: item.listeningCount,
+            validationWarnings: item.validationWarnings,
+          })),
+        },
+        audioItems,
+        questions,
+      };
+    }).filter((section) => section.questions.length || section.metadata?.transcript);
+
+    return {
+      seriesNumber,
+      title,
+      sourceLabel: `${metadata.examType || "B2 H\u00f6ren"} ${String(seriesNumber).padStart(2, "0")}`,
+      instructions: `${metadata.examType || "B2"} H\u00f6ren: importierter Pr\u00fcfungssatz.`,
+      scoring: { totalPoints: sections.reduce((sum, section) => sum + (Number(section.points) || 0), 0) || null },
+      metadata: { ...metadata, b2HoerenMarker: true, listening: true },
+      sections,
+    };
+  }).filter((series) => series.sections?.some((section) => section.questions?.length));
+};
+
 const parseGenericSeries = (text, metadata) => [
   {
     seriesNumber: 1,
@@ -3087,9 +3996,27 @@ const parseStructuredContent = (text, metadata) => {
     const series = parseTelcSprachbausteineSeries(text, metadata);
     if (series.length) return series;
   }
+  if (metadata.level === "B2" && metadata.sectionType === "listen" && /ADMIN_ONLY_TRANSCRIPT|AUDIO_ENGINE_SETTINGS|STUDENT_VISIBLE_QUESTIONS/i.test(text)) {
+    const series = parseB2HoerenMarkerSeries(text, metadata);
+    if (series.length) return series;
+  }
   if (metadata.level === "B2" && metadata.sectionType === "listen") {
     const series = parseB2NumberedSeries(text, metadata);
     if (series.length > 1) return series;
+  }
+  if (provider === "goethe" && metadata.level === "B2" && metadata.sectionType === "read" && /DOCUMENT_USAGE_CONTRACT|IMPORT SCHEMA REFERENCE/i.test(text)) {
+    const series = parseGoetheB2LesenSeries(text, metadata);
+    if (series.length) return series;
+  }
+  if (
+    ["ecl", "telc", "osd"].includes(provider) &&
+    metadata.level === "B2" &&
+    metadata.sectionType === "read" &&
+    /DOCUMENT_USAGE_CONTRACT/i.test(text) &&
+    /IMPORT_SCHEMA_REFERENCE/i.test(text)
+  ) {
+    const series = parseB2StructuredLesenSeries(text, metadata);
+    if (series.length) return series;
   }
   if (provider === "telc" && metadata.level === "B2" && metadata.sectionType === "read") {
     const series = parseB2NumberedSeries(text, metadata);
@@ -3239,6 +4166,11 @@ const extractDocumentText = async ({ buffer, filename, mimetype }) => {
 
 const validateParsedDocument = (parsed) => {
   const warnings = [...(parsed.extraction?.warnings || [])];
+  parsed.series?.forEach((series) => {
+    if (Array.isArray(series.metadata?.sourceWarnings)) {
+      warnings.push(...series.metadata.sourceWarnings);
+    }
+  });
   if (!parsed.series.length) warnings.push("No exam series could be detected; fallback parser created one generic series.");
   const questionCount = parsed.series.reduce(
     (sum, series) => sum + series.sections.reduce((sectionSum, section) => sectionSum + section.questions.length, 0),
@@ -3496,6 +4428,55 @@ const ensureDocumentImportSchema = async (pool) => {
   await pool.query(`ALTER TABLE exam_questions ADD COLUMN IF NOT EXISTS audio JSONB NOT NULL DEFAULT '{}'::jsonb;`);
   await pool.query(`ALTER TABLE exam_questions ADD COLUMN IF NOT EXISTS scoring JSONB NOT NULL DEFAULT '{}'::jsonb;`);
   await pool.query(`ALTER TABLE exam_questions ADD COLUMN IF NOT EXISTS source_metadata JSONB NOT NULL DEFAULT '{}'::jsonb;`);
+  await pool.query(`ALTER TABLE exam_sections ADD COLUMN IF NOT EXISTS global_duration_minutes INTEGER;`);
+  await pool.query(`ALTER TABLE exam_sections ADD COLUMN IF NOT EXISTS listening_count INTEGER;`);
+  await pool.query(`ALTER TABLE exam_sections ADD COLUMN IF NOT EXISTS audio_generation_status TEXT NOT NULL DEFAULT 'draft';`);
+  await pool.query(`ALTER TABLE exam_sections ADD COLUMN IF NOT EXISTS source_metadata JSONB NOT NULL DEFAULT '{}'::jsonb;`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS exam_listening_audio_items (
+      id SERIAL PRIMARY KEY,
+      exam_id INTEGER NOT NULL REFERENCES exams(id) ON DELETE CASCADE,
+      section_id INTEGER REFERENCES exam_sections(id) ON DELETE CASCADE,
+      source_import_id INTEGER REFERENCES exam_document_imports(id) ON DELETE SET NULL,
+      provider TEXT NOT NULL,
+      level TEXT,
+      series_number INTEGER,
+      part_number INTEGER NOT NULL DEFAULT 1,
+      item_number INTEGER NOT NULL DEFAULT 1,
+      title TEXT NOT NULL,
+      instructions TEXT,
+      admin_transcript TEXT,
+      audio_engine_settings JSONB NOT NULL DEFAULT '{}'::jsonb,
+      listening_count INTEGER,
+      duration_seconds NUMERIC(10,2),
+      generated_audio_url TEXT,
+      generated_audio_asset_id INTEGER,
+      audio_generation_status TEXT NOT NULL DEFAULT 'draft'
+        CHECK (audio_generation_status IN ('draft', 'queued', 'generating', 'generated', 'approved', 'published', 'failed')),
+      validation_warnings JSONB NOT NULL DEFAULT '[]'::jsonb,
+      source_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      position INTEGER NOT NULL DEFAULT 0,
+      created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`ALTER TABLE exam_listening_audio_items ADD COLUMN IF NOT EXISTS source_import_id INTEGER REFERENCES exam_document_imports(id) ON DELETE SET NULL;`);
+  await pool.query(`ALTER TABLE exam_listening_audio_items ADD COLUMN IF NOT EXISTS generated_audio_asset_id INTEGER;`);
+  await pool.query(`ALTER TABLE exam_listening_audio_items ADD COLUMN IF NOT EXISTS validation_warnings JSONB NOT NULL DEFAULT '[]'::jsonb;`);
+  await pool.query(`ALTER TABLE exam_listening_audio_items ENABLE ROW LEVEL SECURITY;`);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS exam_listening_audio_items_lookup_idx
+      ON exam_listening_audio_items(exam_id, part_number, position, item_number);
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS exam_listening_audio_items_status_idx
+      ON exam_listening_audio_items(audio_generation_status, updated_at DESC);
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS exam_listening_audio_items_import_idx
+      ON exam_listening_audio_items(source_import_id);
+  `);
 };
 
 const summarizeOutline = (parsed = {}) => ({
@@ -3521,6 +4502,7 @@ const summarizeOutline = (parsed = {}) => ({
 const insertParsedExamsForImport = async ({ client, parsed, importRow, adminId = null, isActive = true }) => {
   const importedExams = [];
   for (const series of parsed.series) {
+      const explicitCode = series.examCode || series.metadata?.examCode || null;
       const codeParts = [
         parsed.metadata.provider,
         parsed.metadata.level || "level",
@@ -3528,7 +4510,7 @@ const insertParsedExamsForImport = async ({ client, parsed, importRow, adminId =
         `series-${String(series.seriesNumber).padStart(2, "0")}`,
         parsed.documentHash.slice(0, 8),
       ];
-      const code = codeParts.map(slugify).filter(Boolean).join("-");
+      const code = explicitCode || codeParts.map(slugify).filter(Boolean).join("-");
       const name = `${parsed.metadata.examType} - ${SECTION_LABELS[parsed.metadata.sectionType] || parsed.metadata.sectionType} - ${series.sourceLabel || `Serie ${series.seriesNumber}`}`;
       const exam = await client.query(
         `INSERT INTO exams (
@@ -3552,6 +4534,7 @@ const insertParsedExamsForImport = async ({ client, parsed, importRow, adminId =
             title: series.title,
             instructions: series.instructions,
             scoring: series.scoring,
+            ...(series.metadata || {}),
             documentHash: parsed.documentHash,
             parser: parsed.analyzerVersion || IMPORT_ANALYZER_VERSION,
           }),
@@ -3705,6 +4688,96 @@ const saveExamImportDraft = async ({ pool, parsed, adminId = null }) => {
   };
 };
 
+const saveListeningImportFoundationDraft = async ({ pool, foundation, adminId = null }) => {
+  await ensureDocumentImportSchema(pool);
+  const existing = await pool.query(`SELECT * FROM exam_document_imports WHERE document_hash = $1 LIMIT 1`, [
+    foundation.documentHash,
+  ]);
+  const existingRow = existing.rows[0];
+  if (existingRow && Array.isArray(existingRow.imported_exam_ids) && existingRow.imported_exam_ids.length) {
+    return {
+      duplicate: true,
+      import: existingRow,
+      draft: existingRow.draft_content && Object.keys(existingRow.draft_content).length
+        ? existingRow.draft_content
+        : foundation.draft,
+    };
+  }
+
+  const params = [
+    foundation.documentHash,
+    foundation.filename,
+    foundation.mimetype || null,
+    foundation.sizeBytes,
+    foundation.metadata.provider,
+    foundation.metadata.examType,
+    foundation.metadata.level,
+    Array.isArray(foundation.draft.series) ? foundation.draft.series.length : foundation.draft.hierarchy.seriesDetected || 0,
+    Array.isArray(foundation.draft.series)
+      ? foundation.draft.series.reduce((sum, series) => sum + (series.counts?.sections || 0), 0)
+      : foundation.draft.hierarchy.teileDetected || 0,
+    Array.isArray(foundation.draft.series)
+      ? foundation.draft.series.reduce((sum, series) => sum + (series.counts?.questions || 0), 0)
+      : 0,
+    JSON.stringify(foundation.validation.warnings || []),
+    JSON.stringify({
+      title: foundation.metadata.title,
+      hierarchy: foundation.draft.hierarchy,
+      markerCounts: foundation.draft.markerCounts,
+    }),
+    JSON.stringify(foundation.draft),
+    JSON.stringify({
+      providerDetected: foundation.metadata.provider !== "custom",
+      levelDetected: Boolean(foundation.metadata.level),
+      requiredMarkersDetected: foundation.draft.markerCounts,
+    }),
+    adminId,
+  ];
+
+  const result = existingRow
+    ? await pool.query(
+        `UPDATE exam_document_imports
+         SET filename = $2,
+             mime_type = $3,
+             size_bytes = $4,
+             provider = $5,
+             exam_type = $6,
+             level = $7,
+             section_type = 'listen',
+             total_series = $8,
+             total_sections = $9,
+             total_questions = $10,
+             extraction_method = 'docx-marker-preview',
+             parse_status = 'draft',
+             validation_warnings = $11::jsonb,
+             raw_outline = $12::jsonb,
+             draft_content = $13::jsonb,
+             confidence = $14::jsonb,
+             error_message = NULL,
+             updated_at = NOW()
+         WHERE document_hash = $1
+         RETURNING *`,
+        params.slice(0, 14)
+      )
+    : await pool.query(
+        `INSERT INTO exam_document_imports (
+           document_hash, filename, mime_type, size_bytes, provider, exam_type, level,
+           section_type, total_series, total_sections, total_questions, extraction_method,
+           parse_status, validation_warnings, raw_outline, draft_content, confidence, created_by, updated_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'listen', $8, $9, $10, 'docx-marker-preview',
+           'draft', $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15, NOW())
+         RETURNING *`,
+        params
+      );
+
+  return {
+    duplicate: false,
+    import: result.rows[0],
+    draft: foundation.draft,
+  };
+};
+
 const getExamImportDraft = async ({ pool, importId }) => {
   await ensureDocumentImportSchema(pool);
   const result = await pool.query(`SELECT * FROM exam_document_imports WHERE id = $1`, [importId]);
@@ -3793,6 +4866,19 @@ const publishExamImportDraft = async ({ pool, importId, adminId = null }) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    const replacePublishedScope = parsed.series?.some((series) => series.metadata?.replacePublishedScope === true);
+    if (replacePublishedScope) {
+      await client.query(
+        `UPDATE exams
+         SET is_active = FALSE,
+             updated_at = NOW()
+         WHERE LOWER(provider) = LOWER($1)
+           AND UPPER(COALESCE(level, '')) = UPPER($2)
+           AND section_type = $3
+           AND is_active = TRUE`,
+        [parsed.metadata?.provider, parsed.metadata?.level, parsed.metadata?.sectionType]
+      );
+    }
     const importedExams = await insertParsedExamsForImport({ client, parsed, importRow, adminId, isActive: true });
     const updated = await client.query(
       `UPDATE exam_document_imports
@@ -3852,11 +4938,14 @@ const importParsedExamDocument = async ({ pool, parsed, adminId = null }) => {
 
 module.exports = {
   analyzeExamDocument,
+  buildHoerenParsedPreview,
+  buildListeningImportFoundation,
   ensureDocumentImportSchema,
   getExamImportDraft,
   importParsedExamDocument,
   publishExamImportDraft,
   saveExamImportDraft,
+  saveListeningImportFoundationDraft,
   summarizeOutline,
   updateExamImportDraft,
   validateImportDraftContent,

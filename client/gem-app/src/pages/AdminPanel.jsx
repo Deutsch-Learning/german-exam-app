@@ -369,7 +369,10 @@ function AdminShell({ children }) {
   const links = [
     { to: "/admin/dashboard", label: "Dashboard", icon: BarChart3 },
     { to: "/admin/users", label: "Users", icon: Users },
+    { to: "/admin/subscriptions", label: "Subscriptions", icon: Shield },
+    { to: "/admin/testimonials", label: "Testimonials", icon: MessageSquareText },
     { to: "/admin/exams", label: "Exams", icon: FileJson },
+    { to: "/admin/hoeren-studio", label: "Hören Studio", icon: Headphones },
     { to: "/admin/api-usage", label: "API usage", icon: Activity },
     { to: "/admin/exports", label: "Exports", icon: Download },
   ];
@@ -389,10 +392,10 @@ function AdminShell({ children }) {
     <div className={styles.adminPage}>
       <div className={styles.layout}>
         <aside className={styles.sidebar}>
-          <div className={styles.brand}>
+          <Link className={styles.brand} to="/">
             <img src={logo} alt="" />
             <span>Admin</span>
-          </div>
+          </Link>
           <button
             type="button"
             className={styles.switchButton}
@@ -789,6 +792,226 @@ function UserAccessControl({ user, onUpdate }) {
   );
 }
 
+const CERTIFICATION_OPTIONS = [
+  { id: "goethe", label: "Goethe" },
+  { id: "osd", label: "ÖSD" },
+  { id: "telc", label: "TELC" },
+  { id: "ecl", label: "ECL" },
+];
+
+function AdminSubscriptions() {
+  const loader = useCallback(async () => {
+    const [subscriptionsRes, usersRes] = await Promise.all([
+      API.get("/api/admin/subscriptions"),
+      API.get("/api/admin/users"),
+    ]);
+    return { ...subscriptionsRes.data, users: usersRes.data.users ?? [] };
+  }, []);
+  const { data, loading, error, reload } = useAdminData(loader);
+  const [form, setForm] = useState({
+    userId: "",
+    planId: "",
+    startsAt: "",
+    expiresAt: "",
+    selectedCertifications: ["goethe"],
+    speakingSimulatorQuotaOverride: "",
+    grantReason: "",
+  });
+  const [status, setStatus] = useState("");
+
+  const selectedPlan = (data?.plans ?? []).find((plan) => String(plan.id) === String(form.planId));
+
+  useEffect(() => {
+    if (!form.planId && data?.plans?.[0]) {
+      setForm((current) => ({ ...current, planId: String(data.plans[0].id) }));
+    }
+    if (!form.userId && data?.users?.[0]) {
+      setForm((current) => ({ ...current, userId: String(data.users[0].id) }));
+    }
+  }, [data?.plans, data?.users, form.planId, form.userId]);
+
+  const toggleCertification = (certification) => {
+    setForm((current) => {
+      const selected = current.selectedCertifications.includes(certification)
+        ? current.selectedCertifications.filter((item) => item !== certification)
+        : [...current.selectedCertifications, certification];
+      return { ...current, selectedCertifications: selected };
+    });
+  };
+
+  const submitGrant = async (event) => {
+    event.preventDefault();
+    setStatus("");
+    await API.post("/api/admin/subscriptions/manual-grant", {
+      ...form,
+      userId: Number(form.userId),
+      planId: Number(form.planId),
+    });
+    setStatus("Manual subscription granted.");
+    await reload();
+  };
+
+  const revoke = async (subscription) => {
+    setStatus("");
+    await API.patch(`/api/admin/subscriptions/${subscription.id}/revoke`, { reason: "Revoked from admin panel" });
+    setStatus("Subscription revoked.");
+    await reload();
+  };
+
+  return (
+    <>
+      <Header title="Subscription Management" subtitle="Secure manual grants, plan quotas, and payment-ready subscription history." />
+      {status ? <p className={styles.status}>{status}</p> : null}
+      {error ? <p className={styles.error}>{error}</p> : null}
+      {loading ? <p>Loading...</p> : null}
+      <section className={styles.panel}>
+        <div className={styles.panelHeader}>
+          <div>
+            <h2>Manual grant</h2>
+            <p className={styles.panelHint}>{data?.paymentProviderStatus?.message}</p>
+          </div>
+        </div>
+        <form className={styles.formGrid} onSubmit={submitGrant}>
+          <label className={styles.field}>
+            User
+            <select value={form.userId} onChange={(event) => setForm((current) => ({ ...current, userId: event.target.value }))}>
+              {(data?.users ?? []).map((user) => <option key={user.id} value={user.id}>{user.email}</option>)}
+            </select>
+          </label>
+          <label className={styles.field}>
+            Plan
+            <select value={form.planId} onChange={(event) => setForm((current) => ({ ...current, planId: event.target.value }))}>
+              {(data?.plans ?? []).map((plan) => (
+                <option key={plan.id} value={plan.id}>{plan.level} {plan.planName} - {plan.durationDays} days</option>
+              ))}
+            </select>
+          </label>
+          <label className={styles.field}>
+            Start date
+            <input type="datetime-local" value={form.startsAt} onChange={(event) => setForm((current) => ({ ...current, startsAt: event.target.value }))} />
+          </label>
+          <label className={styles.field}>
+            End date override
+            <input type="datetime-local" value={form.expiresAt} onChange={(event) => setForm((current) => ({ ...current, expiresAt: event.target.value }))} />
+          </label>
+          <label className={styles.field}>
+            Speaking quota override
+            <input type="number" min="0" placeholder={String(selectedPlan?.speakingSimulatorQuota ?? "")} value={form.speakingSimulatorQuotaOverride} onChange={(event) => setForm((current) => ({ ...current, speakingSimulatorQuotaOverride: event.target.value }))} />
+          </label>
+          <label className={styles.field}>
+            Reason
+            <input value={form.grantReason} onChange={(event) => setForm((current) => ({ ...current, grantReason: event.target.value }))} placeholder="Manual school/client grant" />
+          </label>
+          <div className={styles.multiAccessGroup}>
+            <p>Certifications</p>
+            <div className={styles.multiAccessList}>
+              {CERTIFICATION_OPTIONS.map((item) => (
+                <label key={item.id} className={styles.checkOption}>
+                  <input type="checkbox" checked={form.selectedCertifications.includes(item.id)} onChange={() => toggleCertification(item.id)} />
+                  <span>{item.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+          <div className={styles.actions}>
+            <button className={styles.button} type="submit" disabled={!form.userId || !form.planId || !form.selectedCertifications.length}>
+              Grant access
+            </button>
+          </div>
+        </form>
+      </section>
+      <section className={styles.panel}>
+        <h2>Industrial offers</h2>
+        <div className={styles.tableWrap}>
+          <table className={styles.table}>
+            <thead><tr><th>Offer</th><th>Price</th><th>Access</th><th>Sprechen quota</th></tr></thead>
+            <tbody>
+              {(data?.industrialOffers ?? []).map((offer) => (
+                <tr key={offer.id}>
+                  <td>{offer.label}</td>
+                  <td>€{Number(offer.priceEur).toFixed(2)}</td>
+                  <td>{offer.accessMonths} months ({offer.billedMonths} billed)</td>
+                  <td>{offer.speakingSimulatorQuota}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section className={styles.panel}>
+        <h2>Recent subscriptions</h2>
+        <div className={styles.tableWrap}>
+          <table className={styles.table}>
+            <thead><tr><th>User</th><th>Plan</th><th>Status</th><th>Certifications</th><th>Dates</th><th>Quota</th><th>Actions</th></tr></thead>
+            <tbody>
+              {(data?.subscriptions ?? []).map((subscription) => (
+                <tr key={subscription.id}>
+                  <td>{subscription.email}</td>
+                  <td>{subscription.level} {subscription.planName}</td>
+                  <td><span className={`${styles.badge} ${subscription.status !== "active" ? styles.warn : ""}`}>{subscription.status}</span></td>
+                  <td>{subscription.selectedCertifications?.join(", ") || "-"}</td>
+                  <td>{formatDate(subscription.startsAt)}<br />{formatDate(subscription.expiresAt)}</td>
+                  <td>{subscription.speakingSimulatorQuota}</td>
+                  <td>{subscription.status === "active" ? <button className={styles.dangerButton} type="button" onClick={() => revoke(subscription)}>Revoke</button> : "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </>
+  );
+}
+
+function AdminTestimonials() {
+  const loader = useCallback(async () => {
+    const res = await API.get("/api/admin/testimonials");
+    return res.data.testimonials ?? [];
+  }, []);
+  const { data: testimonials, loading, error, reload } = useAdminData(loader);
+  const [status, setStatus] = useState("");
+
+  const updateTestimonial = async (testimonial, payload) => {
+    setStatus("");
+    await API.patch(`/api/admin/testimonials/${testimonial.id}`, payload);
+    setStatus("Testimonial updated.");
+    await reload();
+  };
+
+  return (
+    <>
+      <Header title="Testimonial Moderation" subtitle="Review, approve, reject, or lightly edit public student comments." />
+      {status ? <p className={styles.status}>{status}</p> : null}
+      {error ? <p className={styles.error}>{error}</p> : null}
+      {loading ? <p>Loading...</p> : null}
+      <section className={styles.panel}>
+        <div className={styles.tableWrap}>
+          <table className={styles.table}>
+            <thead><tr><th>Author</th><th>Rating</th><th>Comment</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody>
+              {(testimonials ?? []).map((item) => (
+                <tr key={item.id}>
+                  <td>{item.display_name}<br /><span>{item.user_email ?? item.role_label ?? "-"}</span></td>
+                  <td>{item.rating}/5</td>
+                  <td>{item.comment}</td>
+                  <td><span className={`${styles.badge} ${item.status !== "approved" ? styles.warn : ""}`}>{item.status}</span></td>
+                  <td>
+                    <div className={styles.actions}>
+                      <button className={styles.button} type="button" onClick={() => updateTestimonial(item, { status: "approved" })}>Approve</button>
+                      <button className={styles.secondaryButton} type="button" onClick={() => updateTestimonial(item, { status: "pending" })}>Pending</button>
+                      <button className={styles.dangerButton} type="button" onClick={() => updateTestimonial(item, { status: "rejected" })}>Reject</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </>
+  );
+}
+
 function AdminApiUsage() {
   const loader = useCallback(async () => {
     const res = await API.get("/api/admin/api-usage");
@@ -904,7 +1127,9 @@ function AdminExams() {
   const [sectionDraft, setSectionDraft] = useState(null);
   const [questionDraft, setQuestionDraft] = useState(null);
   const [examAudio, setExamAudio] = useState(null);
+  const [listeningAudioItems, setListeningAudioItems] = useState([]);
   const [examAudioLoading, setExamAudioLoading] = useState(false);
+  const [examValidation, setExamValidation] = useState(null);
   const [stylePanel, setStylePanel] = useState(null);
   const [stylePreview, setStylePreview] = useState(null);
   const [styleBusy, setStyleBusy] = useState("");
@@ -1013,6 +1238,7 @@ function AdminExams() {
     () => exams.find((exam) => String(exam.id) === String(selectedExamId)) ?? visibleExams[0] ?? null,
     [exams, selectedExamId, visibleExams]
   );
+  const selectedExamNumericId = selectedExam?.id ?? null;
   const selectedExamIsListening = String(selectedExam?.section_type ?? "").toLowerCase() === "listen";
 
   const selectedSections = useMemo(
@@ -1025,29 +1251,83 @@ function AdminExams() {
     setExamDraft(selectedExam ? makeExamDraft(selectedExam) : null);
     setSectionDraft(null);
     setQuestionDraft(null);
+    setExamValidation(null);
   }, [selectedExam]);
 
   const loadSelectedExamAudio = useCallback(async () => {
-    if (!selectedExam || !selectedExamIsListening) {
+    if (!selectedExamNumericId || !selectedExamIsListening) {
       setExamAudio(null);
+      setListeningAudioItems([]);
       return;
     }
     setExamAudioLoading(true);
     try {
-      const res = await API.get(`/api/admin/exams/${selectedExam.id}/audio`);
-      setExamAudio(res.data);
+      const [audioRes, itemsRes] = await Promise.all([
+        API.get(`/api/admin/exams/${selectedExamNumericId}/audio`),
+        API.get(`/api/admin/listening-audio/${selectedExamNumericId}/items`),
+      ]);
+      setExamAudio(audioRes.data);
+      setListeningAudioItems((itemsRes.data?.items ?? []).map((item) => ({
+        ...item,
+        titleDraft: item.title ?? "",
+        transcriptDraft: item.admin_transcript ?? "",
+        listeningCountDraft: item.listening_count ?? 2,
+      })));
     } catch (err) {
       setExamAudio({
         error: err.response?.data?.error ?? "Production audio status could not be loaded.",
       });
+      setListeningAudioItems([]);
     } finally {
       setExamAudioLoading(false);
     }
-  }, [selectedExam?.id, selectedExamIsListening]);
+  }, [selectedExamNumericId, selectedExamIsListening]);
 
   useEffect(() => {
     loadSelectedExamAudio();
   }, [loadSelectedExamAudio]);
+
+  const runSelectedExamValidation = async () => {
+    if (!selectedExam) return;
+    setBusyAction("validate-exam");
+    setDocumentError("");
+    try {
+      const res = await API.get(`/api/admin/exams/${selectedExam.id}/validation`);
+      setExamValidation(res.data.validation);
+      const counts = res.data.validation?.counts ?? {};
+      setStatus(`Validation complete: ${counts.errors ?? 0} error(s), ${counts.warnings ?? 0} warning(s).`);
+    } catch (err) {
+      setDocumentError(err.response?.data?.error ?? "Exam validation failed.");
+    } finally {
+      setBusyAction("");
+    }
+  };
+
+  const updateListeningAudioItemDraft = (itemId, patch) => {
+    setListeningAudioItems((current) =>
+      current.map((item) => (item.id === itemId ? { ...item, ...patch } : item))
+    );
+  };
+
+  const saveListeningAudioItem = async (item) => {
+    setBusyAction(`save-audio-item-${item.id}`);
+    setDocumentError("");
+    try {
+      await API.put(`/api/admin/listening-audio/items/${item.id}`, {
+        title: item.titleDraft,
+        transcript: item.transcriptDraft,
+        listeningCount: Number(item.listeningCountDraft) || item.listening_count,
+        audioEngineSettings: item.audio_engine_settings || {},
+        validationWarnings: item.validation_warnings || [],
+      });
+      setStatus("Listening transcript saved. Regenerate and publish audio if the spoken text changed.");
+      await loadSelectedExamAudio();
+    } catch (err) {
+      setDocumentError(err.response?.data?.error ?? "Could not save listening audio item.");
+    } finally {
+      setBusyAction("");
+    }
+  };
 
   const runAction = async (label, action, successMessage) => {
     setBusyAction(label);
@@ -1781,8 +2061,30 @@ function AdminExams() {
                     <Edit3 size={16} />
                     Save exam
                   </button>
+                  <button className={styles.secondaryButton} type="button" onClick={runSelectedExamValidation} disabled={busyAction === "validate-exam"}>
+                    <ClipboardList size={16} />
+                    {busyAction === "validate-exam" ? "Checking..." : "Run validation"}
+                  </button>
                 </div>
               </form>
+
+              {examValidation ? (
+                <section className={styles.validationPanel}>
+                  <strong>Quality flags</strong>
+                  <p>{examValidation.counts?.errors ?? 0} error(s), {examValidation.counts?.warnings ?? 0} warning(s)</p>
+                  {examValidation.flags?.length ? (
+                    <ul>
+                      {examValidation.flags.slice(0, 20).map((flag, index) => (
+                        <li key={`${flag.code}-${flag.entityId ?? "exam"}-${index}`}>
+                          [{flag.severity}] {flag.message}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p>No content quality flags found.</p>
+                  )}
+                </section>
+              ) : null}
 
               {selectedExamIsListening ? (
                 <section className={styles.editorPanel}>
@@ -1828,6 +2130,57 @@ function AdminExams() {
                   {examAudio?.error ? <p className={styles.error}>{examAudio.error}</p> : null}
                   {providerStatusLoaded && !anyTtsProviderConfigured ? (
                     <p className={styles.warningList}>No TTS provider key is configured on the backend yet. Add ELEVENLABS_API_KEY or another provider key before generating production audio.</p>
+                  ) : null}
+                  {listeningAudioItems.length ? (
+                    <div className={styles.audioItemEditorList}>
+                      {listeningAudioItems.map((item) => (
+                        <article className={styles.audioItemEditor} key={item.id}>
+                          <div className={styles.panelHeader}>
+                            <div>
+                              <h4>Teil {item.part_number} - Audio {item.item_number}</h4>
+                              <p className={styles.panelHint}>
+                                Status: {item.audio_generation_status} - {item.asset_status || "no MP3"}
+                              </p>
+                            </div>
+                            <button
+                              className={styles.button}
+                              type="button"
+                              disabled={busyAction === `save-audio-item-${item.id}`}
+                              onClick={() => saveListeningAudioItem(item)}
+                            >
+                              Save transcript
+                            </button>
+                          </div>
+                          <div className={styles.formGrid}>
+                            <label className={styles.field}>
+                              Title
+                              <input
+                                value={item.titleDraft}
+                                onChange={(event) => updateListeningAudioItemDraft(item.id, { titleDraft: event.target.value })}
+                              />
+                            </label>
+                            <label className={styles.field}>
+                              Listening count
+                              <input
+                                type="number"
+                                min="1"
+                                max="3"
+                                value={item.listeningCountDraft}
+                                onChange={(event) => updateListeningAudioItemDraft(item.id, { listeningCountDraft: event.target.value })}
+                              />
+                            </label>
+                          </div>
+                          <label className={styles.field}>
+                            Admin transcript
+                            <textarea
+                              value={item.transcriptDraft}
+                              onChange={(event) => updateListeningAudioItemDraft(item.id, { transcriptDraft: event.target.value })}
+                              rows={8}
+                            />
+                          </label>
+                        </article>
+                      ))}
+                    </div>
                   ) : null}
                   {productionAudioReady ? (
                     <div className={styles.audioPreviewPanel}>
@@ -2459,15 +2812,15 @@ function ImportWizardPanel({
   onLoadImport,
 }) {
   const [audioTarget, setAudioTarget] = useState({ seriesIndex: 0, sectionIndex: 0 });
-  const draft = wizard?.draft || {};
   const parsedWizardJson = useMemo(() => {
+    const draft = wizard?.draft || {};
     if (!wizardJson?.trim()) return { value: draft, error: "" };
     try {
       return { value: JSON.parse(wizardJson), error: "" };
     } catch (err) {
       return { value: draft, error: err.message || "Invalid JSON" };
     }
-  }, [draft, wizardJson]);
+  }, [wizard?.draft, wizardJson]);
   const editableDraft = parsedWizardJson.value || {};
   const draftSeries = Array.isArray(editableDraft.series) ? editableDraft.series : [];
   const validation = analysis?.validation || {};
@@ -3853,6 +4206,169 @@ function QuestionForm({ draft, exam, sections, onChange, onSubmit, onCancel, bus
   );
 }
 
+function AdminHoerenStudio() {
+  const [file, setFile] = useState(null);
+  const [provider, setProvider] = useState("");
+  const [level, setLevel] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [result, setResult] = useState(null);
+
+  const submitFoundation = async (event) => {
+    event.preventDefault();
+    if (!file) return;
+    setBusy(true);
+    setError("");
+    setResult(null);
+    try {
+      const formData = new FormData();
+      formData.append("document", file);
+      if (provider) formData.append("provider", provider);
+      if (level) formData.append("level", level);
+      const res = await API.post("/api/admin/hoeren-import/foundation", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+        timeout: 120000,
+      });
+      setResult(res.data);
+    } catch (err) {
+      setError(err.response?.data?.error ?? "Hören foundation upload failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const draft = result?.draft;
+  const markerCounts = draft?.markerCounts ?? {};
+  const hierarchy = draft?.hierarchy ?? {};
+  const comparison = draft?.comparisonSummary?.detected ?? {};
+  const series = Array.isArray(draft?.series) ? draft.series : [];
+  const warnings = draft?.validation?.warnings ?? [];
+
+  return (
+    <>
+      <Header
+        title="Hören Import & Audio Studio"
+        subtitle="STEP 2 preview: upload a DOCX, parse the Hören hierarchy, validate marker counts, and save a safe draft."
+      />
+      {error ? <p className={styles.error}>{error}</p> : null}
+      <section className={styles.panel}>
+        <div className={styles.panelHeader}>
+          <div>
+            <h2>DOCX foundation upload</h2>
+            <p className={styles.panelHint}>
+              This screen does not publish exams, generate audio, or expose transcripts to students. Audio work begins in STEP 3.
+            </p>
+          </div>
+          <span className={styles.badge}>
+            <Headphones size={14} />
+            Admin only
+          </span>
+        </div>
+        <form className={styles.hoerenFoundationForm} onSubmit={submitFoundation}>
+          <label className={styles.field}>Hören DOCX
+            <input
+              type="file"
+              accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              onChange={(event) => {
+                setFile(event.target.files?.[0] ?? null);
+                setResult(null);
+                setError("");
+              }}
+            />
+          </label>
+          <label className={styles.field}>Provider override
+            <select value={provider} onChange={(event) => setProvider(event.target.value)}>
+              <option value="">Auto-detect</option>
+              <option value="goethe">Goethe</option>
+              <option value="osd">ÖSD</option>
+              <option value="telc">telc</option>
+              <option value="ecl">ECL</option>
+            </select>
+          </label>
+          <label className={styles.field}>Level override
+            <select value={level} onChange={(event) => setLevel(event.target.value)}>
+              <option value="">Auto-detect</option>
+              {LEVEL_OPTIONS.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+          </label>
+          <button className={styles.button} type="submit" disabled={!file || busy}>
+            <Upload size={16} />
+            {busy ? "Saving draft..." : "Create preview draft"}
+          </button>
+        </form>
+      </section>
+
+      {draft ? (
+        <section className={styles.panel}>
+          <div className={styles.panelHeader}>
+            <div>
+              <h2>Marker preview</h2>
+              <p className={styles.panelHint}>
+                Draft #{result.import?.id ?? "-"} · {result.duplicate ? "Existing draft reused" : "New draft saved"}
+              </p>
+            </div>
+            <span className={styles.badge}>{draft.metadata?.provider ?? "-"} {draft.metadata?.level ?? ""}</span>
+          </div>
+          <div className={styles.hoerenSummaryGrid}>
+            <span><strong>Provider</strong>{draft.metadata?.provider ?? "-"}</span>
+            <span><strong>Level</strong>{draft.metadata?.level ?? "-"}</span>
+            <span><strong>Series detected</strong>{comparison.series ?? hierarchy.seriesDetected ?? 0}</span>
+            <span><strong>Teile detected</strong>{comparison.sections ?? hierarchy.teileDetected ?? 0}</span>
+            <span><strong>Audio items</strong>{comparison.audioItems ?? hierarchy.audioTextBlocksDetected ?? 0}</span>
+            <span><strong>Questions</strong>{comparison.questions ?? 0}</span>
+            <span><strong>Corrections</strong>{comparison.corrections ?? 0}</span>
+            <span><strong>Global duration</strong>{draft.metadata?.globalDurationMinutes ?? "-"} min</span>
+          </div>
+          <div className={styles.hoerenMarkerGrid}>
+            {[
+              ["ADMIN_ONLY_TRANSCRIPT", markerCounts.adminOnlyTranscript],
+              ["AUDIO_ENGINE_SETTINGS", markerCounts.audioEngineSettings],
+              ["STUDENT_VISIBLE_QUESTIONS", markerCounts.studentVisibleQuestions],
+              ["CORRECTION_VISIBLE_AFTER_SUBMIT", markerCounts.correctionVisibleAfterSubmit],
+            ].map(([label, count]) => (
+              <span key={label} className={Number(count) > 0 ? styles.markerOk : styles.markerMissing}>
+                <strong>{label}</strong>
+                {count ?? 0}
+              </span>
+            ))}
+          </div>
+          {warnings.length ? (
+            <ul className={styles.warningList}>
+              {warnings.map((warning) => <li key={warning}>{warning}</li>)}
+            </ul>
+          ) : (
+            <p className={styles.status}>No preview warnings detected.</p>
+          )}
+          <div className={styles.hoerenPreviewTree}>
+            {series.slice(0, 4).map((item) => (
+              <article key={`${item.seriesNumber}-${item.title}`}>
+                <header>
+                  <strong>Series {item.seriesNumber}: {item.title}</strong>
+                  <span>
+                    {item.counts?.sections ?? 0} Teile · {item.counts?.audioItems ?? 0} audio items · {item.counts?.questions ?? 0} questions
+                  </span>
+                </header>
+                <div>
+                  {(item.sections ?? []).map((section) => (
+                    <p key={`${item.seriesNumber}-${section.partNumber}`}>
+                      <strong>Teil {section.partNumber}</strong>
+                      {section.counts?.audioItems ?? 0} audio · {section.counts?.questions ?? 0} questions · {section.counts?.corrections ?? 0} corrections
+                    </p>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+          <div className={styles.hoerenPreviewBox}>
+            <strong>Raw text preview</strong>
+            <pre>{draft.rawTextPreview}</pre>
+          </div>
+        </section>
+      ) : null}
+    </>
+  );
+}
+
 // eslint-disable-next-line no-unused-vars
 function AdminExamsLegacy() {
   const loader = useCallback(async () => {
@@ -4205,7 +4721,10 @@ export default function AdminPanel() {
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<AdminDashboard />} />
         <Route path="users" element={<AdminUsers />} />
+        <Route path="subscriptions" element={<AdminSubscriptions />} />
+        <Route path="testimonials" element={<AdminTestimonials />} />
         <Route path="exams" element={<AdminExams />} />
+        <Route path="hoeren-studio" element={<AdminHoerenStudio />} />
         <Route path="api-usage" element={<AdminApiUsage />} />
         <Route path="exports" element={<AdminExports />} />
         <Route path="*" element={<AdminDashboard />} />

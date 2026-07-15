@@ -1,6 +1,6 @@
 const crypto = require("crypto");
 
-const DEFAULT_PROVIDER = "openai";
+const DEFAULT_PROVIDER = "elevenlabs";
 const DEFAULT_MIME_TYPE = "audio/mpeg";
 const MAX_TTS_CHARS = 3800;
 const TTS_MAX_ATTEMPTS = Math.max(1, Number(process.env.TTS_MAX_ATTEMPTS) || 3);
@@ -44,6 +44,18 @@ const normalizeText = (value) =>
     .replace(/[ \t]{2,}/g, " ")
     .trim();
 
+const stripProductionMarkers = (value) =>
+  normalizeText(value)
+    .replace(/^\s*(?:teil\s*\d+\s*[—-]\s*)?(?:script\s*)?\((?:dialog|dialogue|gespr[aä]ch|gespraech|monolog|monologue|interview|radio)\)\s*/i, " ")
+    .replace(/\[(?:pause|stille|silence)\s*[0-9.,]*\s*(?:s|sec|secondes|sekunden)?\]/gi, " ")
+    .replace(/\((?:pause|stille|silence)\s*[0-9.,]*\s*(?:s|sec|secondes|sekunden)?\)/gi, " ")
+    .replace(/\b(?:pause|stille|silence)\s*[0-9.,]+\s*(?:s|sec|secondes|sekunden)\b/gi, " ")
+    .replace(/\b(?:wiederholung|repeat|repetition)\s*:?.*$/gim, " ")
+    .replace(/[•*#_`~|<>]+/g, " ")
+    .replace(/\s+([,.;:!?])/g, "$1")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
 const normalizeKey = (value) =>
   normalizeText(value)
     .toLowerCase()
@@ -55,6 +67,62 @@ const normalizeKey = (value) =>
 const parseTextNumbers = (value) =>
   Array.from(String(value ?? "").matchAll(/\btexts?\s*([0-9,\s-]+)/gi))
     .flatMap((match) => String(match[1]).split(/[^0-9]+/).filter(Boolean).map(Number));
+
+const normalizeSpeakerLabel = (value) => {
+  const label = normalizeText(value)
+    .replace(/^\s*(?:teil\s*\d+\s*[—-]\s*)?(?:script\s*)?\((?:dialog|dialogue|gespr[aä]ch|gespraech|monolog|monologue|interview|radio)\)\s*/i, "")
+    .replace(/^\s*(?:text|track|audio|teil)\s*\d+\s*[—:.-]\s*/i, "")
+    .trim();
+  return label || "Narrator";
+};
+
+const isProductionOnlyLabel = (value) =>
+  /^(?:text|track|audio|teil)\s*\d*$/i.test(normalizeText(value)) ||
+  /^(?:(?:der|die|das)\s+.+|sie|script|dialog|dialogue|gespr[aä]ch|gespraech|monolog|monologue|interview|radio|thema|das thema|aufgabe|aufgaben|frage|fragen|multiple-choice|richtig\/falsch|richtig falsch|loesung|lösung|antwort|skript|geh[oö]rt|format|transkription|transcription|type de t[aâ]che|beispiel|heute|und|dann|erstens|zweitens|drittens|au[ßs]erdem|überraschungen|ueberraschungen|kluft|weltbild|sprache|achtsamkeit|pakete|qualit[aä]tsfinanzierung|qualitaetsfinanzierung|hauptproblem|ziel|h[üu]rden|hu[eü]rden|anerkennungsfrist|unsere studie|paradox|jahre|graz|vorteile|nachteile|optionen|zum abschluss)$/i.test(normalizeText(value));
+
+const cleanMatchedSpeakerLabel = (label) => {
+  const normalized = normalizeSpeakerLabel(label);
+  const protectedText = normalized.replace(/\bDr\.\s+/g, "Dr__DOT__ ");
+  const parts = protectedText.split(/[.!?]\s+/).map((part) => part.replace(/Dr__DOT__/g, "Dr.").trim()).filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : normalized.replace(/Dr__DOT__/g, "Dr.");
+};
+
+const splitSpeakerTurns = (text, trackIndex = 0) => {
+  let normalized = stripProductionMarkers(text);
+  if (!normalized) return [];
+  normalized = normalized.replace(/^\s*(?:format|transkription|transcription)\s*:\s*/i, "").trim();
+  if (/^\s*(?:(?:der|die|das)\s+[^:]+|sie|thema|das thema|aufgabe|aufgaben|frage|fragen|multiple-choice|richtig\/falsch|richtig falsch|loesung|lösung|antwort|skript|format|transkription|transcription|type de t[aâ]che|heute|und|dann|erstens|zweitens|drittens|au[ßs]erdem|überraschungen|ueberraschungen|kluft|weltbild|sprache|achtsamkeit|pakete|qualit[aä]tsfinanzierung|qualitaetsfinanzierung|vorteile|nachteile|optionen|zum abschluss)\s*:/i.test(normalized)) {
+    return [];
+  }
+  const matches = Array.from(normalized.matchAll(/(^|[\s.!?\n])((?:Herr|Frau|Dr\.?|Moderator|Moderatorin|Reporter|Reporterin|Sprecher|Sprecherin|Person|Mann|Frau|[A-ZÄÖÜ][\p{Ll}.'-]+)(?:\s+(?:[A-ZÄÖÜ][\p{Ll}.'-]+|[A-Z]|\d+)){0,4})\s*:\s*/gu))
+    .map((match) => {
+      const label = cleanMatchedSpeakerLabel(match[2]);
+      const labelOffset = match[0].lastIndexOf(label);
+      return {
+        index: match.index + (labelOffset >= 0 ? labelOffset : match[1].length),
+        end: match.index + match[0].length,
+        label,
+        startsLine: match.index === 0 || /\n\s*$/.test(match[1]),
+      };
+    })
+    .filter((match) => {
+      if (isProductionOnlyLabel(match.label)) return false;
+      if (/^(?:Herr|Frau|Dr\.?|Moderator|Moderatorin|Reporter|Reporterin|Sprecher|Sprecherin|Person|Mann|Frau)\b/i.test(match.label)) return true;
+      return match.startsLine;
+    });
+  if (!matches.length) {
+    return [{ trackIndex, speaker: "Narrator", text: stripProductionMarkers(normalized) }].filter((segment) => segment.text);
+  }
+  return matches.map((match, index) => {
+    const start = match.end;
+    const end = index + 1 < matches.length ? matches[index + 1].index : normalized.length;
+    return {
+      trackIndex,
+      speaker: normalizeSpeakerLabel(match.label),
+      text: stripProductionMarkers(normalized.slice(start, end)),
+    };
+  }).filter((segment) => segment.text);
+};
 
 const parseSpeed = (value, fallback = 1) => {
   const match = String(value ?? "").match(/([0-9.]+)\s*x/i);
@@ -114,17 +182,13 @@ const parseSpeakerSegments = (audio = {}) => {
     if (!text) return;
     const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
     lines.forEach((line) => {
-      const match = line.match(/^([^:\n]{2,48})\s*:\s*(.+)$/);
-      if (match) {
-        trackSegments.push({
-          trackIndex,
-          speaker: match[1].trim(),
-          text: normalizeText(match[2]),
-        });
+      const segments = splitSpeakerTurns(line, trackIndex);
+      if (segments.length > 1 || segments[0]?.speaker !== "Narrator") {
+        trackSegments.push(...segments);
       } else if (trackSegments.length) {
-        trackSegments[trackSegments.length - 1].text = normalizeText(`${trackSegments[trackSegments.length - 1].text} ${line}`);
+        trackSegments[trackSegments.length - 1].text = stripProductionMarkers(`${trackSegments[trackSegments.length - 1].text} ${line}`);
       } else {
-        trackSegments.push({ trackIndex, speaker: "Narrator", text: line });
+        trackSegments.push(...segments);
       }
     });
   });
@@ -136,12 +200,14 @@ const parseSpeakerSegments = (audio = {}) => {
   const lines = transcript.split("\n").map((line) => line.trim()).filter(Boolean);
   const segments = [];
   lines.forEach((line, index) => {
-    const match = line.match(/^([^:\n]{2,48})\s*:\s*(.+)$/);
-    segments.push({
-      trackIndex: 0,
-      speaker: match ? match[1].trim() : "Narrator",
-      text: normalizeText(match ? match[2] : line),
-    });
+    const turns = splitSpeakerTurns(line, 0);
+    if (turns.length > 1 || turns[0]?.speaker !== "Narrator") {
+      segments.push(...turns);
+    } else if (segments.length) {
+      segments[segments.length - 1].text = stripProductionMarkers(`${segments[segments.length - 1].text} ${line}`);
+    } else {
+      segments.push(...turns);
+    }
   });
   return segments.filter((segment) => segment.text);
 };
@@ -154,10 +220,81 @@ const findSpeakerSettings = (audio, speakerName) => {
     const labels = [speaker.speaker, speaker.voiceName, speaker.id, speaker.role]
       .map(normalizeKey)
       .filter(Boolean);
-    if (labels.some((label) => folded && (label === folded || folded.includes(label) || label.includes(folded)))) return true;
+    if (labels.some((label) => folded && (label === folded || folded.includes(label)))) return true;
     if (textNumber && labels.some((label) => parseTextNumbers(label).includes(textNumber))) return true;
     return false;
   }) || speakers[0] || {};
+};
+
+let voiceProfileSchemaPromise = null;
+
+const ensureVoiceProfileSchema = async (pool) => {
+  if (voiceProfileSchemaPromise) return voiceProfileSchemaPromise;
+  voiceProfileSchemaPromise = (async () => {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS tts_voice_profiles (
+        id SERIAL PRIMARY KEY,
+        profile_key TEXT NOT NULL UNIQUE,
+        label TEXT NOT NULL,
+        provider TEXT NOT NULL DEFAULT 'elevenlabs',
+        voice_id TEXT,
+        gender TEXT NOT NULL CHECK (gender IN ('female', 'male', 'neutral')),
+        role TEXT NOT NULL DEFAULT 'speaker',
+        style TEXT,
+        settings JSONB NOT NULL DEFAULT '{}'::jsonb,
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    await pool.query(`ALTER TABLE tts_voice_profiles ENABLE ROW LEVEL SECURITY;`);
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+          REVOKE ALL ON TABLE tts_voice_profiles FROM anon;
+        END IF;
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+          REVOKE ALL ON TABLE tts_voice_profiles FROM authenticated;
+        END IF;
+      END $$;
+    `);
+    await pool.query(`
+      INSERT INTO tts_voice_profiles (profile_key, label, provider, voice_id, gender, role, style, settings)
+      VALUES
+        ('de_female_1', 'Deutsch weiblich 1', 'elevenlabs', 'Xb7hH8MSUJpSbSDYk0k2', 'female', 'speaker', 'klar, freundlich', '{"stability":0.62,"similarity":0.78}'::jsonb),
+        ('de_female_2', 'Deutsch weiblich 2', 'elevenlabs', 'XrExE9yKIg1WjnnlVkGX', 'female', 'speaker', 'natuerlich, ruhig', '{"stability":0.58,"similarity":0.76}'::jsonb),
+        ('de_female_3', 'Deutsch weiblich 3', 'elevenlabs', 'pFZP5JQG7iQjIQuC4Bku', 'female', 'speaker', 'warm, professionell', '{"stability":0.60,"similarity":0.77}'::jsonb),
+        ('de_male_1', 'Deutsch maennlich 1', 'elevenlabs', 'onwK4e9ZLuTAKqWW03F9', 'male', 'speaker', 'klar, neutral', '{"stability":0.62,"similarity":0.78}'::jsonb),
+        ('de_male_2', 'Deutsch maennlich 2', 'elevenlabs', 'iP95p4xoKVk53GoZ742B', 'male', 'speaker', 'natuerlich, warm', '{"stability":0.58,"similarity":0.76}'::jsonb),
+        ('de_male_3', 'Deutsch maennlich 3', 'elevenlabs', 'cjVigY5qzO86Huf0OWal', 'male', 'speaker', 'ruhig, vertrauenswuerdig', '{"stability":0.60,"similarity":0.77}'::jsonb)
+      ON CONFLICT (profile_key) DO UPDATE SET
+        label = EXCLUDED.label,
+        provider = EXCLUDED.provider,
+        voice_id = EXCLUDED.voice_id,
+        gender = EXCLUDED.gender,
+        role = EXCLUDED.role,
+        style = EXCLUDED.style,
+        settings = tts_voice_profiles.settings || EXCLUDED.settings,
+        updated_at = NOW();
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS tts_voice_profiles_active_idx ON tts_voice_profiles(provider, gender, is_active);`);
+  })().catch((err) => {
+    voiceProfileSchemaPromise = null;
+    throw err;
+  });
+  return voiceProfileSchemaPromise;
+};
+
+const getVoiceProfiles = async (pool) => {
+  await ensureVoiceProfileSchema(pool);
+  const result = await pool.query(
+    `SELECT profile_key, label, provider, voice_id, gender, role, style, settings, is_active
+       FROM tts_voice_profiles
+      WHERE is_active = TRUE
+      ORDER BY CASE gender WHEN 'female' THEN 1 WHEN 'male' THEN 2 ELSE 3 END, profile_key`
+  );
+  return result.rows;
 };
 
 const buildPromptedText = (segment, audio, speaker) => {
@@ -556,7 +693,7 @@ const synthesizeAudio = async ({ audio, provider = getConfiguredProvider() }) =>
   for (const segment of segments) {
     const speaker = findSpeakerSettings(audio, segment.speaker);
     const { text, instructions } = buildPromptedText(segment, audio, speaker);
-    const chunks = splitLongText(text);
+    const chunks = splitLongText(stripProductionMarkers(text));
     for (const chunk of chunks) {
       const result = await synthesizeWithRetry({
         adapter,
@@ -717,13 +854,16 @@ const getProviderStatus = () => {
 module.exports = {
   buildAudioContentHash,
   ensureAudioAssetSchema,
+  ensureVoiceProfileSchema,
   generateAndStoreExamAudio,
   getAudioAssetById,
   getAudioAssetForExam,
   getConfiguredProvider,
   getProviderStatus,
+  getVoiceProfiles,
   normalizeProvider,
   parseSpeakerSegments,
+  stripProductionMarkers,
   TtsConfigurationError,
   TtsProviderError,
 };

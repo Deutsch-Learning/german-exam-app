@@ -828,6 +828,10 @@
   background-color: var(--color-primary-hover);
 }
 
+.mobileFloatingCta {
+  display: none;
+}
+
 /* --- Responsive Layout --- */
 @media (max-width: 1200px) {
   .dashboardGrid {
@@ -905,7 +909,29 @@
     gap: 16px;
   }
 
-  .menuOpen .floatingCta {
+  .floatingCta {
+    display: none;
+  }
+
+  .mobileFloatingCta {
+    display: flex;
+    position: fixed;
+    inset-inline: 18px;
+    top: auto;
+    bottom: max(18px, env(safe-area-inset-bottom, 0px));
+    width: auto;
+    min-height: 54px;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    padding: 15px 22px;
+    z-index: 2147483000;
+    transform: translateZ(0);
+    backface-visibility: hidden;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .mobileFloatingCtaHidden {
     opacity: 0;
     transform: translate3d(0, 12px, 0);
     pointer-events: none;
@@ -929,17 +955,16 @@
   }
 
   .contentArea {
-    padding: 24px 16px;
+    padding: 24px 16px calc(112px + env(safe-area-inset-bottom, 0px));
   }
 
   .dashboardGrid {
     grid-template-columns: 1fr;
   }
 
-  .floatingCta {
-    bottom: 24px;
-    right: 24px;
-    left: 24px;
+  .mobileFloatingCta {
+    inset-inline: 16px;
+    bottom: max(16px, env(safe-area-inset-bottom, 0px));
     padding: 16px;
     font-size: 0.9rem;
     text-align: center;

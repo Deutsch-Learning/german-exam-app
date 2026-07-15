@@ -23,34 +23,36 @@ export default function SeriesSelectionPage() {
   const { examId } = useParams();
   const location = useLocation();
   const exam = getExamSimulation(examId);
-  const [importedState, setImportedState] = useState({ examId: "", series: [] });
+  const [importedState, setImportedState] = useState({ examId: "", series: [], error: "" });
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
 
     fetchImportedSeries(examId)
       .then((items) => {
-        if (!cancelled) setImportedState({ examId, series: items });
+        if (!cancelled) setImportedState({ examId, series: items, error: "" });
       })
       .catch(() => {
-        if (!cancelled) setImportedState({ examId, series: [] });
+        if (!cancelled) setImportedState({ examId, series: [], error: "Die Serien konnten nicht geladen werden." });
       });
 
     return () => {
       cancelled = true;
     };
-  }, [examId]);
+  }, [examId, retryKey]);
 
   const importedMatchesRoute = importedState.examId === examId;
   const importedSeries = importedMatchesRoute ? importedState.series : [];
   const loadingImported = Boolean(examId && !importedMatchesRoute);
   const series = importedSeries;
+  const loadError = importedMatchesRoute ? importedState.error : "";
 
   if (!exam) {
     return <NotFoundPage message="Die geoeffnete Testserie ist nicht verfuegbar." />;
   }
 
-  if (!loadingImported && !hasPlayableImportedSeries(series)) {
+  if (!loadingImported && !loadError && !hasPlayableImportedSeries(series)) {
     return <ComingSoonPage examId={examId} />;
   }
 
@@ -73,7 +75,16 @@ export default function SeriesSelectionPage() {
           <p>{loadingImported ? <LoadingDots /> : "Waehlen Sie eine Serie, um fortzufahren."}</p>
         </header>
 
-        <section className="series-minimal-grid" aria-label={`${exam.name}-Serien`}>
+        {loadError ? (
+          <section className="simple-card status-panel" role="alert">
+            <p>{loadError}</p>
+            <button type="button" className="simple-button" onClick={() => setRetryKey((value) => value + 1)}>
+              Erneut versuchen
+            </button>
+          </section>
+        ) : null}
+
+        {!loadError ? <section className="series-minimal-grid" aria-label={`${exam.name}-Serien`}>
           {loadingImported ? Array.from({ length: 6 }).map((_, index) => (
             <span className="series-box series-box-skeleton" key={index}>
               <LoadingDots />
@@ -98,7 +109,7 @@ export default function SeriesSelectionPage() {
               </Link>
             );
           })}
-        </section>
+        </section> : null}
       </main>
     </div>
   );

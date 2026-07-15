@@ -1,9 +1,7 @@
 import styles from "./ContactPage.module.css";
 import BackButton from "../components/BackButton";
 import { useLanguage } from "../context/LanguageContext";
-
-const WHATSAPP_URL = "https://wa.me/237000000000";
-const SUPPORT_EMAIL = "appgerman989@gmail.com";
+import { SUPPORT_EMAIL, SUPPORT_WHATSAPP_URL } from "../config/support";
 
 export default function ContactPage() {
   const { t } = useLanguage();
@@ -16,7 +14,7 @@ export default function ContactPage() {
         <p>{t.contactPage.subtitle}</p>
 
         <div className={styles.cards}>
-          <a className={styles.card} href={WHATSAPP_URL} target="_blank" rel="noreferrer">
+          <a className={styles.card} href={SUPPORT_WHATSAPP_URL} target="_blank" rel="noreferrer">
             <h3>WhatsApp</h3>
             <p>{t.contactPage.whatsapp}</p>
           </a>

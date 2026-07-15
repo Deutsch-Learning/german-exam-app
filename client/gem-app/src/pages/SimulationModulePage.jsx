@@ -1,5 +1,6 @@
 /* eslint-disable react-hooks/set-state-in-effect */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   AlertCircle,
@@ -31,7 +32,6 @@ import {
   Timer,
   TimerReset,
   Trophy,
-  Volume2,
   WandSparkles,
   X,
   XCircle,
@@ -52,7 +52,6 @@ import {
   getMicrophoneConstraints,
   getPreferredRecorderOptions,
 } from "../utils/audio";
-import { createListeningAmbienceMixer } from "../utils/listeningAmbience";
 import { createListeningSpeechFallback } from "../utils/listeningSpeechFallback";
 import NotFoundPage from "./NotFoundPage";
 import ComingSoonPage from "./ComingSoonPage";
@@ -63,7 +62,7 @@ import { stripQuestionMaterial } from "../utils/examText";
 const LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"];
 const PASS_SCORE = 70;
 const MOBILE_AUDIO_UNSUPPORTED_MESSAGE =
-  "Audio playback is not supported by this browser on this device. Please try Chrome, update your browser, or use another device. If an audio file is available for this test, it will be played instead.";
+  "Fuer diese Hoeren-Aufgabe ist noch keine freigegebene Audiodatei verfuegbar. Bitte versuchen Sie es spaeter erneut.";
 const PART_TRANSITION_SECONDS = 10;
 
 const ImportedLoadingDots = ({ label = "Importierte Aufgaben werden geladen" }) => (
@@ -1182,6 +1181,20 @@ const MODULES = {
       "Relances plus spontanées",
     ],
   },
+  sprach: {
+    id: "sprach",
+    title: "Sprachbausteine",
+    eyebrow: "Sprachbausteine",
+    examPart: "Sprachbausteine",
+    accent: "#b91c1c",
+    soft: "#fff1f1",
+    Icon: BookOpen,
+    simulationSeconds: 30 * 60,
+    tasks: [],
+    passage: { title: "Sprachbausteine", intro: "", paragraphs: [] },
+    focus: ["Lueckentext", "Grammatik", "Wortschatz", "Antwortkasten"],
+    advancement: ["Offizielle TELC-Struktur", "Zwei Teile", "20 Luecken", "Antwortbank"],
+  },
 };
 
 const GERMAN_MODULE_OVERRIDES = {
@@ -1217,6 +1230,12 @@ const GERMAN_MODULE_OVERRIDES = {
     tasks: withGermanTaskCopy(speakingTasks),
     focus: ["Aussprache", "Fluessigkeit", "Interaktion", "Gedanken ordnen"],
     advancement: ["Laengere Antworten", "Kuerzere Vorbereitungszeit", "Abstraktere Themen", "Spontanere Nachfragen"],
+  },
+  sprach: {
+    title: "Sprachbausteine",
+    eyebrow: "Sprachbausteine",
+    focus: ["Lueckentext", "Grammatik", "Wortschatz", "Antwortkasten"],
+    advancement: ["Offizielle TELC-Struktur", "Zwei Teile", "20 Luecken", "Antwortbank"],
   },
 };
 
@@ -1303,7 +1322,6 @@ const getProtectedChoiceLabel = (task, option, index = 0) =>
     `Option ${index + 1}`
   );
 
-const AUDIO_REPLAY_LIMIT = 5;
 const AUDIO_WORDS_PER_MINUTE = 132;
 
 const normalizeText = (value) =>
@@ -1312,6 +1330,14 @@ const normalizeText = (value) =>
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
+
+const normalizeStrictGermanAnswer = (value, trimTerminalPunctuation = false) => {
+  const normalized = String(value ?? "")
+    .trim()
+    .toLocaleLowerCase("de-DE")
+    .replace(/\s+/g, " ");
+  return trimTerminalPunctuation ? normalized.replace(/[.!?;,]+$/g, "").trim() : normalized;
+};
 
 const formatTime = (seconds) => {
   const safeSeconds = Math.max(0, Number(seconds) || 0);
@@ -1412,13 +1438,6 @@ const getTaskDuration = (module, task) => {
   return typeBase + levelExtra;
 };
 
-const getPartDurationSeconds = (module, part) => {
-  if (part?.durationMinutes) return Math.max(1, Number(part.durationMinutes)) * 60;
-  const taskIndexes = Array.isArray(part?.taskIndexes) ? part.taskIndexes : [];
-  const taskTotal = taskIndexes.reduce((sum, taskIndex) => sum + getTaskDuration(module, module.tasks[taskIndex]), 0);
-  return taskTotal || module.tasks.reduce((sum, task) => sum + getTaskDuration(module, task), 0);
-};
-
 const normalizePartKey = (value, fallback = "part-1") => {
   const text = String(value ?? "").trim().toLowerCase();
   const partMatch = text.match(/(?:teil|part)\s*(\d+)/i);
@@ -1456,6 +1475,7 @@ const buildExamParts = (module) => {
       instructions: part.instructions || part.text || "",
       durationMinutes: part.durationMinutes,
       points: part.points,
+      sourceMetadata: part.sourceMetadata || {},
       taskIndexes: [],
     });
   });
@@ -1470,6 +1490,7 @@ const buildExamParts = (module) => {
         instructions: task.partInstructions || "",
         durationMinutes: task.partDurationMinutes,
         points: task.partPoints,
+        sourceMetadata: task.partSourceMetadata || {},
         taskIndexes: [],
       });
     }
@@ -1478,6 +1499,12 @@ const buildExamParts = (module) => {
     if (!part.instructions && task.partInstructions) part.instructions = task.partInstructions;
     if (!part.durationMinutes && task.partDurationMinutes) part.durationMinutes = task.partDurationMinutes;
     if (!part.points && task.partPoints) part.points = task.partPoints;
+    if (
+      (!part.sourceMetadata?.goetheB2Lesen && task.partSourceMetadata?.goetheB2Lesen) ||
+      (!part.sourceMetadata?.structuredB2Lesen && task.partSourceMetadata?.structuredB2Lesen)
+    ) {
+      part.sourceMetadata = task.partSourceMetadata;
+    }
   });
 
   return [...partMap.values()]
@@ -1554,6 +1581,19 @@ const isAnswerCorrect = (task, answer) => {
   if (!isQuestionAnswered(task, answer)) return false;
 
   if (task.type === "blank") {
+    if (String(task.answerNormalization || "").startsWith("strict-german")) {
+      if (task.sourcePrefixMismatch) return false;
+      const trimPunctuation = task.answerNormalization === "strict-german-terminal-punctuation";
+      const normalized = normalizeStrictGermanAnswer(answer, trimPunctuation);
+      const accepted = [task.correct, ...(task.alternatives ?? [])]
+        .map((value) => normalizeStrictGermanAnswer(value, trimPunctuation))
+        .filter(Boolean);
+      if (accepted.includes(normalized)) return true;
+      const requiredConcepts = (task.requiredConcepts || [])
+        .map((value) => normalizeStrictGermanAnswer(value, trimPunctuation))
+        .filter(Boolean);
+      return requiredConcepts.length > 0 && requiredConcepts.every((concept) => normalized.includes(concept));
+    }
     const normalized = normalizeText(answer);
     const accepted = [task.correct, ...(task.alternatives ?? [])].map(normalizeText);
     return accepted.includes(normalized);
@@ -1646,6 +1686,20 @@ const calculateModuleScore = (module, answers) => {
   if (module.id === "speak") {
     const total = module.tasks.reduce((sum, task, index) => sum + evaluateSpeaking(task, answers[index]), 0);
     return Math.round(total / module.tasks.length);
+  }
+
+  const pointWeights = module.tasks.map((task) => Number(task.points));
+  const hasConfiguredPoints = pointWeights.some((points) => Number.isFinite(points) && points >= 0);
+  if (hasConfiguredPoints) {
+    const maxPoints = pointWeights.reduce((sum, points) => sum + (Number.isFinite(points) && points > 0 ? points : 0), 0);
+    if (maxPoints > 0) {
+      const earnedPoints = module.tasks.reduce((sum, task, index) => {
+        const points = Number(task.points);
+        if (!Number.isFinite(points) || points <= 0) return sum;
+        return sum + (isAnswerCorrect(task, answers[index]) ? points : 0);
+      }, 0);
+      return Math.round((earnedPoints / maxPoints) * 100);
+    }
   }
 
   const correct = module.tasks.filter((task, index) => isAnswerCorrect(task, answers[index])).length;
@@ -1803,6 +1857,7 @@ const buildSeriesModule = (baseModule, content, series) => {
       passage: content.passage ?? baseModule.passage,
       parts: content.parts ?? baseModule.parts,
       audio: content.audio ?? baseModule.audio,
+      globalDurationMinutes: content.globalDurationMinutes ?? baseModule.globalDurationMinutes,
       focus: content.focus ?? baseModule.focus,
       advancement: content.advancement ?? baseModule.advancement,
       seriesContext: {
@@ -1927,15 +1982,21 @@ const buildResultSummary = (module, answers) => {
     }
 
     const isCorrect = isAnswerCorrect(task, answers[index]);
+    const requiresManualReview = Boolean(
+      isQuestionAnswered(task, answers[index]) && !isCorrect && task.manualReviewOnMismatch
+    );
     return {
       id: task.id,
       number: index + 1,
       title: toPlainDisplayText(task.question, `Aufgabe ${index + 1}`),
       typeLabel: toPlainDisplayText(task.typeLabel),
-      isCorrect,
+      isCorrect: requiresManualReview ? null : isCorrect,
       userAnswer: getAnswerLabel(task, answers[index]),
       correctAnswer: getCorrectLabel(task),
-      explanation: toPlainDisplayText(task.explanation),
+      explanation: requiresManualReview
+        ? "Diese Antwort wird manuell geprueft; sie wird nicht automatisch als falsch bewertet."
+        : toPlainDisplayText(task.explanation),
+      requiresManualReview,
     };
   });
 
@@ -1952,14 +2013,15 @@ function FeedbackBox({ task, answer }) {
   if (!isQuestionAnswered(task, answer)) return null;
 
   const correct = isAnswerCorrect(task, answer);
+  const requiresManualReview = !correct && task.manualReviewOnMismatch;
 
   if (task?.id) {
     return (
-      <div className={`${styles.feedbackBox} ${correct ? styles.feedbackCorrect : styles.feedbackWrong}`}>
-        {correct ? <CheckCircle2 size={20} /> : <XCircle size={20} />}
+      <div className={`${styles.feedbackBox} ${correct ? styles.feedbackCorrect : requiresManualReview ? "" : styles.feedbackWrong}`}>
+        {correct ? <CheckCircle2 size={20} /> : requiresManualReview ? <WandSparkles size={20} /> : <XCircle size={20} />}
         <div>
-          <strong>{correct ? "Richtig" : "Noch einmal pruefen"}</strong>
-          <p>{task.explanation}</p>
+          <strong>{correct ? "Richtig" : requiresManualReview ? "Manuelle Pruefung" : "Noch einmal pruefen"}</strong>
+          <p>{requiresManualReview ? "Die Antwort wird manuell geprueft und nicht automatisch als falsch markiert." : task.explanation}</p>
         </div>
       </div>
     );
@@ -2041,7 +2103,13 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     : module.id;
   const progressKey = getProgressKey(progressScopeId);
   const totalExamDuration = useMemo(
-    () => module.tasks.reduce((sum, task) => sum + getTaskDuration(module, task), 0),
+    () => {
+      const configuredMinutes = Number(module.globalDurationMinutes);
+      if (Number.isFinite(configuredMinutes) && configuredMinutes > 0) {
+        return Math.round(configuredMinutes * 60);
+      }
+      return module.tasks.reduce((sum, task) => sum + getTaskDuration(module, task), 0);
+    },
     [module]
   );
   const seriesRoute = selectedSeries
@@ -2078,7 +2146,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const [audioSessionActive, setAudioSessionActive] = useState(false);
   const [audioError, setAudioError] = useState("");
   const [listeningAudioDuration, setListeningAudioDuration] = useState(0);
-  const [replaysUsed, setReplaysUsed] = useState(0);
   const [prepRemaining, setPrepRemaining] = useState(speakingTasks[0].prepSeconds);
   const [prepActive, setPrepActive] = useState(false);
   const [speakingPhase, setSpeakingPhase] = useState("prep");
@@ -2086,6 +2153,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [recordError, setRecordError] = useState("");
   const [restoredKey, setRestoredKey] = useState("");
+  const [exitConfirmationOpen, setExitConfirmationOpen] = useState(false);
 
   const mediaRecorderRef = useRef(null);
   const mediaStreamRef = useRef(null);
@@ -2093,9 +2161,9 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const listeningAudioRef = useRef(null);
   const listeningAmbienceRef = useRef(null);
   const listeningSpeechFallbackRef = useRef(null);
+  const audioDebugRef = useRef(null);
   const audioSessionRef = useRef(false);
   const audioTimestampRef = useRef(0);
-  const audioDebugRef = useRef(null);
   const timerDeadlineRef = useRef(null);
   const timerExpiredRef = useRef(false);
   const timerSecondsRef = useRef(totalExamDuration);
@@ -2107,8 +2175,68 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const recordingTaskIndexRef = useRef(0);
   const fallbackRecordingRef = useRef(false);
   const levelActivityKeyRef = useRef("");
+  const writingTextareaRef = useRef(null);
+  const listeningPlayerAnchorRef = useRef(null);
+  const previousScrollTargetRef = useRef({ partId: "", taskId: "" });
+  const visitedScrollTargetsRef = useRef(new Set());
+  const exitGuardBypassRef = useRef(false);
+  const exitHistoryIndexRef = useRef(0);
 
-  const currentTask = module.tasks[Math.min(currentIndex, totalTasks - 1)];
+  useEffect(() => {
+    if (
+      completed ||
+      module.unavailable ||
+      (params.seriesId && !selectedSeriesContent) ||
+      typeof window === "undefined"
+    ) return undefined;
+    const guardId = `${currentRoute}:${Date.now()}`;
+    exitHistoryIndexRef.current = Number(window.history.state?.idx) || 0;
+    const guardState = { ...(window.history.state || {}), simulationGuard: guardId };
+    if (window.history.state?.simulationGuard !== guardId) {
+      window.history.pushState(guardState, "", window.location.href);
+    }
+
+    const requestConfirmation = () => {
+      if (exitGuardBypassRef.current) return;
+      window.history.pushState(guardState, "", window.location.href);
+      setExitConfirmationOpen(true);
+    };
+    const preventUnload = (event) => {
+      if (exitGuardBypassRef.current) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("popstate", requestConfirmation);
+    window.addEventListener("beforeunload", preventUnload);
+    return () => {
+      window.removeEventListener("popstate", requestConfirmation);
+      window.removeEventListener("beforeunload", preventUnload);
+    };
+  }, [completed, currentRoute, module.unavailable, params.seriesId, selectedSeriesContent]);
+
+  const leaveSimulation = () => {
+    exitGuardBypassRef.current = true;
+    setExitConfirmationOpen(false);
+    if (exitHistoryIndexRef.current > 0 && window.history.length > 2) {
+      window.history.go(-2);
+      return;
+    }
+    navigate(seriesRoute, { replace: true, state: { fromSimulationExit: true } });
+  };
+
+  const currentTask = module.tasks[Math.min(currentIndex, Math.max(totalTasks - 1, 0))] ?? {
+    id: `${module.id}-loading-task`,
+    title: "",
+    question: "",
+    type: "multiple",
+    typeLabel: "",
+    hint: "",
+    options: [],
+    correct: null,
+    prepSeconds: speakingTasks[0].prepSeconds,
+    responseSeconds: speakingTasks[0].responseSeconds,
+    checklist: [],
+  };
   const currentAnswer = answers[currentIndex];
   const examParts = useMemo(() => buildExamParts(module), [module]);
   const currentPartIndex = Math.max(
@@ -2118,13 +2246,22 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const currentPart = examParts[currentPartIndex] ?? examParts[0];
   const currentPartQuestionIndex = currentPart ? Math.max(0, currentPart.taskIndexes.indexOf(currentIndex)) : 0;
   const currentPartQuestionTotal = currentPart?.taskIndexes.length ?? totalTasks;
+  const isGoetheB2LesenCurrentPart =
+    module.id === "read" &&
+    Boolean(currentPart?.sourceMetadata?.goetheB2Lesen?.partType || currentTask?.sourceMetadata?.goetheB2Lesen);
+  const isStructuredB2LesenCurrentPart =
+    module.id === "read" &&
+    Boolean(currentPart?.sourceMetadata?.structuredB2Lesen?.partType || currentTask?.sourceMetadata?.structuredB2Lesen);
+  const usesFullPartNavigation = module.id === "sprach" || isGoetheB2LesenCurrentPart || isStructuredB2LesenCurrentPart;
   const moduleItemSingular = isTopicModule(module.id) ? "Thema" : "Frage";
   const moduleItemPlural = getModuleCountLabel(module.id);
   const currentTaskDuration = getTaskDuration(module, currentTask);
+  const currentListeningAudio = module.id === "listen" ? (currentTask?.audio || module.audio || null) : null;
+  const isBrowserSpeechAudio = currentListeningAudio?.fallbackEngine === "browser-speech";
   const currentAudioDuration = module.id === "listen"
-    ? Math.round(Number(module.audio?.durationSeconds) || listeningAudioDuration || getEstimatedAudioDuration(module.audio))
+    ? Math.round(Number(currentListeningAudio?.durationSeconds) || listeningAudioDuration || getEstimatedAudioDuration(currentListeningAudio))
     : 0;
-  const listeningAudioUrl = module.audio?.audioUrl || "";
+  const listeningAudioUrl = currentListeningAudio?.audioUrl || "";
   const answeredCount = module.tasks.filter((task, index) => getTaskAnswered(module, task, answers[index])).length;
   const remainingCount = Math.max(0, totalTasks - answeredCount);
   const completedPartCount = examParts.filter((part) =>
@@ -2146,63 +2283,91 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       // Starting-level tracking is helpful but should never block an exercise.
     });
   }, [auth?.id, level, module.id, module.unavailable, progressScopeId]);
-  const audioAtSessionEnd = module.id === "listen" && audioTimestamp >= currentAudioDuration;
-  const audioReplayBlocked = module.id === "listen" && replaysUsed >= AUDIO_REPLAY_LIMIT && (!audioSessionActive || audioAtSessionEnd);
+  useEffect(() => {
+    previousScrollTargetRef.current = { partId: "", taskId: "" };
+    visitedScrollTargetsRef.current = new Set();
+  }, [module.id, progressScopeId]);
 
   useEffect(() => {
     listeningAmbienceRef.current?.dispose();
     listeningAmbienceRef.current = null;
     listeningSpeechFallbackRef.current?.dispose();
     listeningSpeechFallbackRef.current = null;
+    if (listeningAudioRef.current) {
+      listeningAudioRef.current.pause();
+      listeningAudioRef.current.currentTime = 0;
+    }
+    setAudioPlaying(false);
+    setAudioTimestamp(0);
+    audioTimestampRef.current = 0;
+    audioSessionRef.current = false;
+    setAudioSessionActive(false);
+    setListeningAudioDuration(0);
+    setAudioError("");
     return () => {
       listeningAmbienceRef.current?.dispose();
       listeningAmbienceRef.current = null;
       listeningSpeechFallbackRef.current?.dispose();
       listeningSpeechFallbackRef.current = null;
     };
-  }, [module.audio]);
+  }, [currentListeningAudio?.id, listeningAudioUrl]);
 
-  const startListeningAmbience = useCallback(async () => {
-    if (module.id !== "listen" || !module.audio) return;
-    if (!listeningAmbienceRef.current) {
-      listeningAmbienceRef.current = createListeningAmbienceMixer(module.audio);
+  useEffect(() => {
+    if (module.id !== "listen" || typeof Audio === "undefined") return undefined;
+    const nextAudioUrl = module.tasks[currentIndex + 1]?.audio?.audioUrl;
+    if (!nextAudioUrl || nextAudioUrl === listeningAudioUrl) return undefined;
+    const preloadAudio = new Audio();
+    preloadAudio.preload = "metadata";
+    preloadAudio.src = nextAudioUrl;
+    return () => {
+      preloadAudio.removeAttribute("src");
+      preloadAudio.load();
+    };
+  }, [currentIndex, listeningAudioUrl, module.id, module.tasks]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const partId = String(currentPart?.id || currentPart?.number || "part-1");
+    const taskId = String(currentTask?.id || currentIndex);
+    const audioKey = module.id === "listen"
+      ? String(listeningAudioUrl || currentListeningAudio?.id || currentListeningAudio?.title || currentListeningAudio?.speaker || "")
+      : "";
+    const previous = previousScrollTargetRef.current;
+    const visitedKey = `${partId}:${taskId}`;
+    const visitedBefore = visitedScrollTargetsRef.current.has(visitedKey);
+    const firstRender = !previous.partId && !previous.taskId;
+    const movedToNewPart = Boolean(previous.partId && previous.partId !== partId);
+    const listeningAudioChanged = module.id === "listen" && Boolean(audioKey) && previous.audioKey !== audioKey;
+    const fullPageTaskChanged = previous.taskId && previous.taskId !== taskId && !["read", "sprach", "listen"].includes(module.id);
+    const shouldResetScroll = module.id === "listen"
+      ? firstRender || listeningAudioChanged
+      : firstRender || movedToNewPart || (fullPageTaskChanged && !visitedBefore);
+
+    previousScrollTargetRef.current = { partId, taskId, audioKey };
+    visitedScrollTargetsRef.current.add(visitedKey);
+
+    if (!shouldResetScroll) return;
+    if (module.id === "listen") {
+      window.requestAnimationFrame(() => {
+        const target = listeningPlayerAnchorRef.current;
+        if (target) {
+          target.scrollIntoView({ behavior: firstRender ? "auto" : "smooth", block: "start" });
+        }
+      });
+      return;
     }
-    await listeningAmbienceRef.current?.start();
-  }, [module.audio, module.id]);
+    window.scrollTo({ top: 0, behavior: firstRender ? "auto" : "smooth" });
+  }, [currentIndex, currentPart?.id, currentPart?.number, currentListeningAudio?.id, currentListeningAudio?.speaker, currentListeningAudio?.title, currentTask?.id, listeningAudioUrl, module.id]);
 
   const stopListeningAmbience = useCallback((immediate = false) => {
     listeningAmbienceRef.current?.stop(immediate);
   }, []);
 
-  const playProductionAudioFallback = useCallback(async ({ resetTime = true } = {}) => {
-    const productionAudio = listeningAudioRef.current;
-    if (!productionAudio || !listeningAudioUrl) return false;
-    try {
-      if (resetTime) productionAudio.currentTime = 0;
-      await productionAudio.play();
-      void startListeningAmbience().catch(() => {
-        // Saved audio is the important fallback; ambience should never block it.
-      });
-      setAudioPlaying(true);
-      audioSessionRef.current = true;
-      setAudioSessionActive(true);
-      setAudioError("");
-      return true;
-    } catch (error) {
-      audioDebugRef.current = {
-        ...(audioDebugRef.current || {}),
-        type: "mp3-fallback-error",
-        error: error?.message || "production-audio-failed",
-      };
-      return false;
-    }
-  }, [listeningAudioUrl, startListeningAmbience]);
-
   const getListeningSpeechFallback = useCallback(() => {
-    if (!module.audio) return null;
+    if (!isBrowserSpeechAudio || !currentListeningAudio) return null;
     if (!listeningSpeechFallbackRef.current) {
       listeningSpeechFallbackRef.current = createListeningSpeechFallback({
-        audio: module.audio,
+        audio: currentListeningAudio,
         onTime: (seconds) => {
           audioTimestampRef.current = seconds;
           setAudioTimestamp(seconds);
@@ -2212,28 +2377,24 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           audioTimestampRef.current = duration;
           setAudioTimestamp(duration);
           setAudioPlaying(false);
-          stopListeningAmbience();
           audioSessionRef.current = false;
           setAudioSessionActive(false);
         },
         onError: (error) => {
           setAudioPlaying(false);
-          stopListeningAmbience(true);
           audioSessionRef.current = false;
           setAudioSessionActive(false);
           audioDebugRef.current = {
             ...(audioDebugRef.current || {}),
-            type: "speech-error",
+            type: "browser-tts-error",
             error,
           };
-          void playProductionAudioFallback().then((playedFallback) => {
-            if (!playedFallback) setAudioError(MOBILE_AUDIO_UNSUPPORTED_MESSAGE);
-          });
+          setAudioError("Browser-TTS konnte auf diesem Geraet nicht gestartet werden.");
         },
         onDebug: (event) => {
           audioDebugRef.current = event;
           if (import.meta.env.DEV && event?.type && event.type !== "voices-ready") {
-            console.debug("[listening-audio]", event);
+            console.debug("[listening-browser-tts]", event);
           }
         },
       });
@@ -2242,7 +2403,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       }
     }
     return listeningSpeechFallbackRef.current;
-  }, [currentAudioDuration, module.audio, playProductionAudioFallback, stopListeningAmbience]);
+  }, [currentAudioDuration, currentListeningAudio, isBrowserSpeechAudio]);
+
 
   const armExamTimer = useCallback((seconds, { running = false } = {}) => {
     const safeSeconds = Math.max(0, Math.round(Number(seconds) || 0));
@@ -2292,13 +2454,11 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setNotes(stored?.notes ?? {});
     setElapsedSeconds(Number(stored?.elapsedSeconds) || 0);
     const restoredTask = module.tasks[restoredIndex] ?? module.tasks[0];
-    const restoredPart = examParts.find((part) => part.taskIndexes.includes(restoredIndex)) ?? examParts[0];
-    const restoredPartDuration = restoredPart ? getPartDurationSeconds(module, restoredPart) : totalExamDuration;
     const savedTimer = Number(stored?.timerSeconds);
     const restoredTimerSeconds =
-      stored?.currentPartId === restoredPart?.id && Number.isFinite(savedTimer) && savedTimer > 0
+      Number.isFinite(savedTimer) && savedTimer > 0
         ? savedTimer
-        : restoredPartDuration;
+        : totalExamDuration;
     const restoredPartIntroVisible = stored?.completed ? false : stored?.partIntroVisible ?? restoredIndex === 0;
     armExamTimer(restoredTimerSeconds, {
       running: !stored?.completed && !restoredPartIntroVisible,
@@ -2310,7 +2470,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     const restoredAudioTimestamp = Number(stored?.audioTimestamp) || 0;
     setAudioTimestamp(restoredAudioTimestamp);
     audioTimestampRef.current = restoredAudioTimestamp;
-    setReplaysUsed(Number(stored?.replaysUsed) || 0);
     const restoredPrepActive = module.id === "speak" && !stored?.completed && !restoredPartIntroVisible && (stored?.prepActive ?? true);
     setSpeakingPhase(stored?.speakingPhase ?? "prep");
     setPrepActive(restoredPrepActive);
@@ -2498,7 +2657,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       simulationMode,
       completed,
       audioTimestamp,
-      replaysUsed,
       prepRemaining,
       prepActive,
       speakingPhase,
@@ -2527,7 +2685,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       progressPercent,
       remainingCount,
       progressScopeId,
-      replaysUsed,
       selectedSeries,
       simulationMode,
       skipped,
@@ -2639,6 +2796,16 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     [currentIndex]
   );
 
+  const setAnswerForIndex = useCallback((taskIndex, value) => {
+    setAnswers((previous) => ({ ...previous, [taskIndex]: value }));
+    setSkipped((previous) => {
+      if (!previous[taskIndex]) return previous;
+      const next = { ...previous };
+      delete next[taskIndex];
+      return next;
+    });
+  }, []);
+
   const startSimulation = useCallback(() => {
     setCurrentIndex(0);
     setAnswers({});
@@ -2646,7 +2813,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setFlagged({});
     setNotes({});
     setElapsedSeconds(0);
-    armExamTimer(examParts[0] ? getPartDurationSeconds(module, examParts[0]) : totalExamDuration, { running: false });
+    armExamTimer(totalExamDuration, { running: false });
     setSimulationMode(true);
     setCompleted(false);
     setPartIntroVisible(true);
@@ -2661,7 +2828,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     audioSessionRef.current = false;
     setAudioSessionActive(false);
     setListeningAudioDuration(0);
-    setReplaysUsed(0);
     setAudioPlaying(false);
     setSpeakingPhase("prep");
     armPrepTimer(module.tasks[0]?.prepSeconds ?? speakingTasks[0].prepSeconds, { running: false });
@@ -2676,13 +2842,15 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       listeningAudioRef.current.pause();
       listeningAudioRef.current.currentTime = 0;
     }
-  }, [armExamTimer, armPrepTimer, examParts, module, stopListeningAmbience, totalExamDuration]);
+  }, [armExamTimer, armPrepTimer, module, stopListeningAmbience, totalExamDuration]);
 
   const beginPart = useCallback((part, startIndex, { logStart = true } = {}) => {
     const safeIndex = part?.firstIndex ?? startIndex ?? currentIndex;
     setCurrentIndex(safeIndex);
     setPartIntroVisible(false);
-    armExamTimer(part ? getPartDurationSeconds(module, part) : totalExamDuration, { running: true });
+    if (!timerDeadlineRef.current) {
+      timerDeadlineRef.current = Date.now() + Math.max(0, timerSecondsRef.current || totalExamDuration) * 1000;
+    }
     setSpeakingPhase("prep");
     armPrepTimer(module.tasks[safeIndex]?.prepSeconds ?? speakingTasks[0].prepSeconds, {
       running: module.id === "speak" && simulationMode,
@@ -2693,7 +2861,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     if (logStart) {
       persistProgress(`Teil ${part?.number ?? currentPartIndex + 1} demarree a ${formatClock()}`);
     }
-  }, [armExamTimer, armPrepTimer, currentIndex, currentPartIndex, module, persistProgress, simulationMode, totalExamDuration]);
+  }, [armPrepTimer, currentIndex, currentPartIndex, module, persistProgress, simulationMode, totalExamDuration]);
 
   const startPartTransition = useCallback((nextPart, nextIndex, message = "") => {
     if (!nextPart) return false;
@@ -2720,13 +2888,24 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   }, [beginPart, partTransition]);
 
   const goToNext = useCallback(() => {
+    if (usesFullPartNavigation) {
+      const nextPart = examParts[currentPartIndex + 1] || null;
+      if (!nextPart) {
+        finishModule();
+        return;
+      }
+      if (startPartTransition(nextPart, nextPart.firstIndex)) return;
+      setCurrentIndex(nextPart.firstIndex);
+      setPartIntroVisible(false);
+      return;
+    }
     if (currentIndex >= totalTasks - 1) {
       finishModule();
       return;
     }
     const nextPart = currentPart && currentIndex >= currentPart.lastIndex ? examParts[currentPartIndex + 1] : null;
     const nextIndex = nextPart ? nextPart.firstIndex : Math.min(totalTasks - 1, currentIndex + 1);
-    if (startPartTransition(nextPart, nextIndex)) return;
+    if (module.id !== "listen" && startPartTransition(nextPart, nextIndex)) return;
     setCurrentIndex(nextIndex);
     setPartIntroVisible(false);
     setSpeakingPhase("prep");
@@ -2736,70 +2915,67 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setPrepActive(module.id === "speak" && simulationMode);
     setRecordingSeconds(0);
     recordingSecondsRef.current = 0;
-  }, [armPrepTimer, currentIndex, currentPart, currentPartIndex, examParts, finishModule, module, simulationMode, startPartTransition, totalTasks]);
+  }, [armPrepTimer, currentIndex, currentPart, currentPartIndex, examParts, finishModule, module, simulationMode, startPartTransition, totalTasks, usesFullPartNavigation]);
 
   const goToPrevious = useCallback(() => {
+    if (usesFullPartNavigation) {
+      const previousPart = examParts[currentPartIndex - 1] || null;
+      if (!previousPart) return;
+      setCurrentIndex(previousPart.firstIndex);
+      setPartIntroVisible(false);
+      return;
+    }
     const previousIndex = Math.max(0, currentIndex - 1);
-    const previousPart = examParts.find((part) => part.taskIndexes.includes(previousIndex));
     setCurrentIndex(previousIndex);
     setPartIntroVisible(false);
-    if (previousPart?.id !== currentPart?.id) {
-      armExamTimer(getPartDurationSeconds(module, previousPart), { running: true });
-    }
-  }, [armExamTimer, currentIndex, currentPart?.id, examParts, module]);
+  }, [currentIndex, currentPartIndex, examParts, usesFullPartNavigation]);
 
   const jumpToQuestion = useCallback((targetIndex) => {
     if (isRecording) return;
     const safeIndex = Math.min(Math.max(0, targetIndex), totalTasks - 1);
-    const targetPart = examParts.find((part) => part.taskIndexes.includes(safeIndex));
     setCurrentIndex(safeIndex);
     setPartIntroVisible(false);
-    if (targetPart?.id !== currentPart?.id) {
-      armExamTimer(getPartDurationSeconds(module, targetPart), { running: true });
-    }
     setNavPanelOpen(false);
-  }, [armExamTimer, currentPart?.id, examParts, isRecording, module, totalTasks]);
+  }, [isRecording, totalTasks]);
 
   const playListeningAudio = useCallback(async () => {
     if (module.id !== "listen") return;
-    const replayLimit = AUDIO_REPLAY_LIMIT;
     const startingFresh = audioTimestamp <= 0 || audioTimestamp >= currentAudioDuration || !audioSessionActive;
 
     if (startingFresh) {
-      if (replaysUsed >= replayLimit) {
-        setSaveStatus("Limite de 5 ecoutes atteinte pour ce module.");
-        return;
-      }
-      setReplaysUsed((value) => value + 1);
       setAudioTimestamp(0);
       audioTimestampRef.current = 0;
       audioSessionRef.current = true;
       setAudioSessionActive(true);
     }
 
-    const localSpeech = getListeningSpeechFallback();
-    if (localSpeech) {
-      try {
-        setAudioError("");
-        await localSpeech.play();
-        setAudioPlaying(true);
-        void startListeningAmbience().catch(() => {
-          // Ambience is decorative; speech playback should continue if mobile browsers block Web Audio.
-        });
-      } catch {
-        stopListeningAmbience(true);
-        localSpeech.reset();
+    if (isBrowserSpeechAudio && !listeningAudioUrl) {
+      const speech = getListeningSpeechFallback();
+      if (!speech) {
+        setAudioError("Browser-TTS ist auf diesem Geraet nicht verfuegbar.");
         setAudioPlaying(false);
         audioSessionRef.current = false;
         setAudioSessionActive(false);
-        const playedFallback = await playProductionAudioFallback();
-        if (!playedFallback) setAudioError(MOBILE_AUDIO_UNSUPPORTED_MESSAGE);
+        return;
+      }
+      try {
+        setAudioError("");
+        await speech.play();
+        setAudioPlaying(true);
+      } catch {
+        setAudioPlaying(false);
+        audioSessionRef.current = false;
+        setAudioSessionActive(false);
+        setAudioError("Browser-TTS konnte auf diesem Geraet nicht gestartet werden.");
       }
       return;
     }
 
-    if (!module.audio?.audioUrl) {
+    if (!listeningAudioUrl) {
       setAudioError(MOBILE_AUDIO_UNSUPPORTED_MESSAGE);
+      setAudioPlaying(false);
+      audioSessionRef.current = false;
+      setAudioSessionActive(false);
       return;
     }
 
@@ -2813,16 +2989,14 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     try {
       setAudioError("");
       await audioElement.play();
-      await startListeningAmbience();
       setAudioPlaying(true);
     } catch {
-      stopListeningAmbience(true);
       setAudioPlaying(false);
       audioSessionRef.current = false;
       setAudioSessionActive(false);
-      setAudioError("Production audio cannot be played on this device right now.");
+      setAudioError("Die Audiodatei konnte auf diesem Geraet nicht abgespielt werden.");
     }
-  }, [audioSessionActive, audioTimestamp, currentAudioDuration, getListeningSpeechFallback, module.audio, module.id, playProductionAudioFallback, replaysUsed, startListeningAmbience, stopListeningAmbience]);
+  }, [audioSessionActive, audioTimestamp, currentAudioDuration, getListeningSpeechFallback, isBrowserSpeechAudio, listeningAudioUrl, module.id]);
 
   const pauseListeningAudio = useCallback(() => {
     setAudioPlaying(false);
@@ -2864,6 +3038,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     audioTimestampRef.current = finalDuration;
     setAudioPlaying(false);
     stopListeningAmbience();
+    listeningSpeechFallbackRef.current?.reset();
     audioSessionRef.current = false;
     setAudioSessionActive(false);
   }, [currentAudioDuration, stopListeningAmbience]);
@@ -2873,7 +3048,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     stopListeningAmbience(true);
     audioSessionRef.current = false;
     setAudioSessionActive(false);
-    setAudioError("Production audio is not available yet.");
+    setAudioError("Die freigegebene Audiodatei ist noch nicht verfuegbar.");
   }, [stopListeningAmbience]);
 
   const saveWritingVersion = useCallback(() => {
@@ -3033,37 +3208,13 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
     persistProgress(`Auto-sauvegarde a ${formatClock()}`);
 
-    if (currentIndex >= totalTasks - 1) {
-      finishModule();
-      return;
-    }
-
-    const nextPart = currentPart && currentIndex >= currentPart.lastIndex ? examParts[currentPartIndex + 1] : null;
-    const nextIndex = nextPart ? nextPart.firstIndex : Math.min(totalTasks - 1, currentIndex + 1);
-    if (startPartTransition(nextPart, nextIndex, `Zeit abgelaufen. Teil ${nextPart?.number ?? currentPartIndex + 2} beginnt gleich.`)) return;
-    setCurrentIndex(nextIndex);
-    setPartIntroVisible(false);
-    setSpeakingPhase("prep");
-    armPrepTimer(module.tasks[nextIndex]?.prepSeconds ?? speakingTasks[0].prepSeconds, {
-      running: module.id === "speak" && simulationMode,
-    });
-    setPrepActive(module.id === "speak" && simulationMode);
-    setRecordingSeconds(0);
-    recordingSecondsRef.current = 0;
+    setResultStatus("Zeit abgelaufen. Die Antworten werden angezeigt.");
+    finishModule();
   }, [
-    armPrepTimer,
-    currentIndex,
-    currentPart,
-    currentPartIndex,
-    examParts,
     finishModule,
     isRecording,
-    module,
     persistProgress,
-    simulationMode,
-    startPartTransition,
     stopRecording,
-    totalTasks,
   ]);
 
   const finishCurrentTimedSection = useCallback(() => {
@@ -3075,24 +3226,14 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     }
     persistProgress(`Temps termine a ${formatClock()}`);
 
-    const nextPart = currentPart ? examParts[currentPartIndex + 1] : null;
-    if (nextPart) {
-      startPartTransition(nextPart, nextPart.firstIndex, `Zeit abgelaufen. Teil ${nextPart.number ?? currentPartIndex + 2} beginnt gleich.`);
-      return;
-    }
-
     setResultStatus("Zeit abgelaufen. Die Antworten werden angezeigt.");
     finishModule();
   }, [
     audioPlaying,
-    currentPart,
-    currentPartIndex,
-    examParts,
     finishModule,
     isRecording,
     pauseListeningAudio,
     persistProgress,
-    startPartTransition,
     stopRecording,
   ]);
 
@@ -3124,7 +3265,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     }, 250);
 
     return () => window.clearInterval(interval);
-  }, [completed, currentPart?.id, finishCurrentTimedSection, module.unavailable, partIntroVisible, partTransition, simulationMode]);
+  }, [completed, finishCurrentTimedSection, module.unavailable, partIntroVisible, partTransition, simulationMode]);
 
   useEffect(() => {
     if (module.id !== "speak" || !simulationMode || !prepActive || completed || partIntroVisible || partTransition) {
@@ -3470,12 +3611,12 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           <p className={styles.sectionLabel}>Teil {currentPart?.number ?? currentPartIndex + 1}</p>
           <h2>{currentPart?.displayTitle ?? "Einleitung zum Teil"}</h2>
           <p className={styles.examTextIntroInstruction}>
-            Lesen Sie zuerst die Anweisungen und das Quellenmaterial. Wenn Sie bereit sind, starten Sie die {moduleItemPlural} dieses Teils.
+            Lesen Sie die Anweisungen aufmerksam. Der Timer laeuft fuer das gesamte Modul und wird zwischen den Teilen nicht neu gestartet.
           </p>
         </div>
         <div className={styles.partMetaStack}>
           <span><ClipboardCheck size={16} /> {currentPartQuestionTotal} {currentPartQuestionTotal === 1 ? moduleItemSingular : moduleItemPlural}</span>
-          {currentPart?.durationMinutes ? <span><Clock3 size={16} /> {currentPart.durationMinutes} min</span> : null}
+          <span><Clock3 size={16} /> Gesamtzeit {formatExamTime(totalExamDuration)}</span>
           {currentPart?.points ? <span><ShieldCheck size={16} /> {currentPart.points} pts</span> : null}
         </div>
       </div>
@@ -3486,7 +3627,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
       <div className={styles.partIntroActions}>
         <button type="button" className={styles.primaryButton} onClick={startCurrentPart}>
-          {moduleItemPlural} starten
+          Test starten
           <ChevronRight size={16} />
         </button>
       </div>
@@ -3733,7 +3874,642 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     return null;
   };
 
+  const isTelcSprachbausteineModule = module.id === "sprach" && /telc/i.test(String(selectedSeries?.examId || selectedSeries?.examName || ""));
+
+  const getCurrentPartTasks = () =>
+    (currentPart?.taskIndexes || []).map((taskIndex) => ({ taskIndex, task: module.tasks[taskIndex] })).filter((item) => item.task);
+
+  const getGapTask = (number) =>
+    getCurrentPartTasks().find(({ task }) => Number(task.sourceQuestionNumber || task.sourceQuestionId || task.partNumber) === Number(number));
+
+  const isAnswerBankLine = (line) => /^\s*[a-o]\)\s+/i.test(line);
+
+  const splitTelcSprachPartMaterial = (part) => {
+    const lines = String(part?.instructions || part?.sourceText || "")
+      .replace(/\r/g, "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const optionStart = lines.findIndex((line) => /^\d{1,2}\.\s*a\)/i.test(line));
+    const answerBankStart = lines.findIndex((line) => isAnswerBankLine(line));
+    const splitIndex = [optionStart, answerBankStart].filter((index) => index >= 0).sort((a, b) => a - b)[0] ?? lines.length;
+    return {
+      textLines: lines.slice(0, splitIndex),
+      answerBankLines: answerBankStart >= 0 ? lines.slice(answerBankStart) : [],
+    };
+  };
+
+  const renderTelcGapControl = ({ taskIndex, task, compact = false }) => {
+    const answer = answers[taskIndex] ?? "";
+    const options = Array.isArray(task.options) ? task.options : [];
+    return (
+      <label className={compact ? styles.sprachInlineGapCompact : styles.sprachInlineGap}>
+        <span className={styles.sprachGapNumber}>{task.sourceQuestionNumber ?? taskIndex + 1}</span>
+        <select
+          value={answer}
+          onChange={(event) => {
+            setCurrentIndex(taskIndex);
+            setAnswerForIndex(taskIndex, event.target.value);
+          }}
+          aria-label={`Lücke ${task.sourceQuestionNumber ?? taskIndex + 1}`}
+        >
+          <option value="">—</option>
+          {options.map((option) => (
+            <option key={option.value} value={option.value} translate="no">
+              {compact ? option.value : `${option.value}) ${getProtectedChoiceLabel(task, option)}`}
+            </option>
+          ))}
+        </select>
+      </label>
+    );
+  };
+
+  const renderTelcSprachLine = (line, lineIndex) => {
+    const parts = [];
+    let cursor = 0;
+    const gapPattern = /\((1[0-9]|20|[1-9])\)/g;
+    for (const match of line.matchAll(gapPattern)) {
+      const number = Number(match[1]);
+      const gap = getGapTask(number);
+      if (!gap) continue;
+      if (match.index > cursor) parts.push(line.slice(cursor, match.index));
+      parts.push(
+        <Fragment key={`gap-${lineIndex}-${number}`}>
+          {renderTelcGapControl({ ...gap, compact: currentPart?.number === 2 })}
+        </Fragment>
+      );
+      cursor = match.index + match[0].length;
+    }
+    if (cursor < line.length) parts.push(line.slice(cursor));
+
+    const isHeader = lineIndex <= 1 || /^Lesen Sie\b/.test(line) || /^Text\.$/.test(line);
+    const isTitle = !isHeader && lineIndex > 1 && line.length < 80 && !/[.!?:,]$/.test(line) && currentPart?.number === 2;
+    return (
+      <p
+        key={`sprach-line-${lineIndex}`}
+        className={isTitle ? styles.sprachArticleTitle : isHeader ? styles.sprachInstructionLine : styles.sprachTextLine}
+        translate="no"
+      >
+        {parts.length ? parts : line}
+      </p>
+    );
+  };
+
+  const renderTelcPart1Options = () => {
+    const tasks = getCurrentPartTasks();
+    return (
+      <div className={styles.sprachOptionsGrid}>
+        {tasks.map(({ taskIndex, task }) => (
+          <fieldset key={task.id} className={styles.sprachOptionGroup}>
+            <legend>Lücke {task.sourceQuestionNumber ?? taskIndex + 1}</legend>
+            <div className={styles.sprachOptionChoices}>
+              {(task.options || []).map((option) => {
+                const selected = answers[taskIndex] === option.value;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={selected ? styles.sprachOptionSelected : styles.sprachOptionButton}
+                    onClick={() => {
+                      setCurrentIndex(taskIndex);
+                      setAnswerForIndex(taskIndex, option.value);
+                    }}
+                  >
+                    <span>{option.value})</span>
+                    <strong translate="no">{getProtectedChoiceLabel(task, option)}</strong>
+                  </button>
+                );
+              })}
+            </div>
+          </fieldset>
+        ))}
+      </div>
+    );
+  };
+
+  const renderTelcAnswerBank = () => {
+    const tasks = getCurrentPartTasks();
+    const firstTask = tasks[0]?.task;
+    const options = Array.isArray(firstTask?.options) ? firstTask.options : [];
+    return (
+      <section className={styles.sprachAnswerBank} aria-label="Antwortkasten">
+        <h3>Antwortkasten</h3>
+        <div className={styles.sprachAnswerBankGrid}>
+          {options.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={styles.sprachBankItem}
+              onClick={() => {
+                const firstEmpty = tasks.find(({ taskIndex }) => !answers[taskIndex]);
+                if (firstEmpty) {
+                  setCurrentIndex(firstEmpty.taskIndex);
+                  setAnswerForIndex(firstEmpty.taskIndex, option.value);
+                }
+              }}
+            >
+              <span>{option.value})</span>
+              <strong translate="no">{getProtectedChoiceLabel(firstTask, option)}</strong>
+            </button>
+          ))}
+        </div>
+      </section>
+    );
+  };
+
+  const renderTelcSprachbausteine = () => {
+    const partMaterial = splitTelcSprachPartMaterial(currentPart);
+    const currentPartTasks = getCurrentPartTasks();
+    const answeredInPart = currentPartTasks.filter(({ taskIndex, task }) => getTaskAnswered(module, task, answers[taskIndex])).length;
+
+    return (
+      <div className={styles.sprachExamLayout}>
+        <section className={styles.sprachExamPane} onWheel={handleReadableWheel}>
+          <div className={styles.sectionLabel}>
+            <BookOpen size={18} />
+            TELC B2 Sprachbausteine
+          </div>
+          <div className={styles.sprachExamHeader}>
+            <div>
+              <h2 translate="no">{currentPart?.displayTitle ?? "Sprachbausteine"}</h2>
+              <p>{answeredInPart}/{currentPartTasks.length} Lücken bearbeitet</p>
+            </div>
+            <span>{currentPart?.points ?? currentPartTasks.length} Punkte</span>
+          </div>
+
+          <article className={styles.sprachArticle}>
+            {partMaterial.textLines.map((line, index) => renderTelcSprachLine(line, index))}
+          </article>
+
+          {currentPart?.number === 1 ? renderTelcPart1Options() : renderTelcAnswerBank()}
+
+          {!simulationMode ? (
+            <div className={styles.sprachFeedbackGrid}>
+              {currentPartTasks.map(({ taskIndex, task }) => (
+                <FeedbackBox key={task.id} task={task} answer={answers[taskIndex]} />
+              ))}
+            </div>
+          ) : null}
+        </section>
+      </div>
+    );
+  };
+
+  const isGoetheB2LesenModule =
+    module.id === "read" &&
+    Boolean(currentPart?.sourceMetadata?.goetheB2Lesen?.partType || currentTask?.sourceMetadata?.goetheB2Lesen);
+
+  const getGoethePartMeta = () =>
+    currentPart?.sourceMetadata?.goetheB2Lesen || currentPart?.sourceMetadata?.structuredB2Lesen || {};
+
+  const setGoetheAnswer = (taskIndex, value) => {
+    const meta = getGoethePartMeta();
+    const partIndexes = currentPart?.taskIndexes || [];
+    setCurrentIndex(taskIndex);
+    setAnswers((previous) => {
+      const next = { ...previous };
+      if (meta.uniqueAnswers && value) {
+        partIndexes.forEach((index) => {
+          if (index !== taskIndex && next[index] === value) delete next[index];
+        });
+      }
+      next[taskIndex] = value;
+      return next;
+    });
+    setSkipped((previous) => {
+      if (!previous[taskIndex]) return previous;
+      const next = { ...previous };
+      delete next[taskIndex];
+      return next;
+    });
+  };
+
+  const renderGoetheSelect = ({ taskIndex, task, compact = false }) => {
+    const answer = answers[taskIndex] ?? "";
+    return (
+      <label className={compact ? styles.goetheInlineSelect : styles.goetheSelectField}>
+        {!compact ? <span>Aufgabe {task.sourceQuestionNumber ?? taskIndex + 1}</span> : null}
+        <select
+          value={answer}
+          onChange={(event) => setGoetheAnswer(taskIndex, event.target.value)}
+          aria-label={`Aufgabe ${task.sourceQuestionNumber ?? taskIndex + 1}`}
+        >
+          <option value="">-</option>
+          {(task.options || []).map((option) => (
+            <option key={option.value} value={option.value} translate="no">
+              {compact ? option.value.toUpperCase() : `${option.value.toUpperCase()} - ${getProtectedChoiceLabel(task, option)}`}
+            </option>
+          ))}
+        </select>
+      </label>
+    );
+  };
+
+  const renderGoetheTextBlocks = (text, keyPrefix = "goethe-text") =>
+    String(text || "")
+      .replace(/\r/g, "")
+      .split(/\n{2,}/)
+      .map((block) => block.trim())
+      .filter(Boolean)
+      .map((block, index) => {
+        const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
+        if (lines.length === 1 && lines[0].length < 90 && !/[.!?]$/.test(lines[0])) {
+          return <h3 key={`${keyPrefix}-${index}`} className={styles.goetheArticleTitle} translate="no">{lines[0]}</h3>;
+        }
+        return (
+          <div key={`${keyPrefix}-${index}`} className={styles.goetheTextBlock}>
+            {lines.map((line, lineIndex) => (
+              <p key={`${keyPrefix}-${index}-${lineIndex}`} translate="no">{line}</p>
+            ))}
+          </div>
+        );
+      });
+
+  const getGoetheTaskByNumber = (number) =>
+    getCurrentPartTasks().find(({ task }) => Number(task.sourceQuestionNumber) === Number(number));
+
+  const renderGoetheArticleWithGaps = (article) => {
+    const lines = String(article || "").replace(/\r/g, "").split(/\n{2,}/).map((line) => line.trim()).filter(Boolean);
+    return lines.map((block, blockIndex) => {
+      const elements = [];
+      let cursor = 0;
+      const pattern = /\[\s*(\d{1,2})\s*\]\s*_{5,}/g;
+      for (const match of block.matchAll(pattern)) {
+        const number = Number(match[1]);
+        const gap = getGoetheTaskByNumber(number);
+        if (match.index > cursor) elements.push(block.slice(cursor, match.index));
+        elements.push(
+          <Fragment key={`goethe-gap-${number}`}>
+            <span className={styles.goetheGapNumber}>[{number}]</span>
+            {gap ? renderGoetheSelect({ ...gap, compact: true }) : <span className={styles.goetheMissingGap}>_____</span>}
+          </Fragment>
+        );
+        cursor = match.index + match[0].length;
+      }
+      if (cursor < block.length) elements.push(block.slice(cursor));
+      const isTitle = blockIndex === 0 && block.length < 90 && !/[.!?]$/.test(block);
+      return isTitle
+        ? <h3 key={`goethe-article-${blockIndex}`} className={styles.goetheArticleTitle} translate="no">{block}</h3>
+        : <p key={`goethe-article-${blockIndex}`} className={styles.goetheInlineArticle} translate="no">{elements}</p>;
+    });
+  };
+
+  const renderGoetheBank = (items, title = "Auswahl") => (
+    <section className={styles.goetheBank} aria-label={title}>
+      <h3>{title}</h3>
+      <div className={styles.goetheBankGrid}>
+        {(items || []).map((item) => (
+          <article key={item.value} className={styles.goetheBankItem}>
+            <strong>{String(item.value).toUpperCase()}</strong>
+            <span translate="no">{item.label}</span>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+
+  const renderGoetheFeedback = (tasks) =>
+    !simulationMode ? (
+      <div className={styles.sprachFeedbackGrid}>
+        {tasks.map(({ taskIndex, task }) => (
+          <FeedbackBox key={task.id} task={task} answer={answers[taskIndex]} />
+        ))}
+      </div>
+    ) : null;
+
+  const renderGoetheB2Lesen = () => {
+    const meta = getGoethePartMeta();
+    const tasks = getCurrentPartTasks();
+    const answeredInPart = tasks.filter(({ taskIndex, task }) => getTaskAnswered(module, task, answers[taskIndex])).length;
+
+    const header = (
+      <div className={styles.goethePartHeader}>
+        <div>
+          <div className={styles.sectionLabel}>
+            <BookOpen size={18} />
+            Goethe B2 Lesen
+          </div>
+          <h2 translate="no">{currentPart?.displayTitle ?? "Teil"}</h2>
+          <p translate="no">{meta.instruction}</p>
+        </div>
+        <span>{answeredInPart}/{tasks.length} bearbeitet</span>
+      </div>
+    );
+
+    if (meta.partType === "person_matching") {
+      return (
+        <div className={styles.goetheExamLayout}>
+          <section className={styles.goetheExamPane} onWheel={handleReadableWheel}>
+            {header}
+            <div className={styles.goethePersonGrid}>
+              {(meta.persons || []).map((person) => (
+                <article key={person.value} className={styles.goethePersonCard}>
+                  <h3 translate="no">{person.title}</h3>
+                  <p translate="no">{person.text}</p>
+                </article>
+              ))}
+            </div>
+            <div className={styles.goetheQuestionList}>
+              {tasks.map(({ taskIndex, task }) => (
+                <article key={task.id} className={styles.goetheQuestionRow}>
+                  <p translate="no"><strong>{task.sourceQuestionNumber}.</strong> {task.question}</p>
+                  {renderGoetheSelect({ taskIndex, task })}
+                </article>
+              ))}
+            </div>
+            {renderGoetheFeedback(tasks)}
+          </section>
+        </div>
+      );
+    }
+
+    if (meta.partType === "inline_sentence_gap") {
+      return (
+        <div className={styles.goetheExamLayout}>
+          <section className={styles.goetheExamPane} onWheel={handleReadableWheel}>
+            {header}
+            <article className={styles.goetheArticle}>{renderGoetheArticleWithGaps(meta.article)}</article>
+            {renderGoetheBank(meta.bank, "Satzbank A-H")}
+            {renderGoetheFeedback(tasks)}
+          </section>
+        </div>
+      );
+    }
+
+    if (meta.partType === "single_choice") {
+      return (
+        <div className={styles.goetheExamLayout}>
+          <section className={styles.goetheExamPane} onWheel={handleReadableWheel}>
+            {header}
+            <article className={styles.goetheArticle}>{renderGoetheTextBlocks(meta.readingText, "goethe-teil3")}</article>
+            <div className={styles.goetheChoiceList}>
+              {tasks.map(({ taskIndex, task }) => (
+                <fieldset key={task.id} className={styles.goetheChoiceGroup}>
+                  <legend translate="no">{task.sourceQuestionNumber}. {task.question}</legend>
+                  <div className={styles.goetheChoiceButtons}>
+                    {(task.options || []).map((option) => {
+                      const selected = answers[taskIndex] === option.value;
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          className={selected ? styles.sprachOptionSelected : styles.sprachOptionButton}
+                          onClick={() => setGoetheAnswer(taskIndex, option.value)}
+                        >
+                          <span>{option.value})</span>
+                          <strong translate="no">{getProtectedChoiceLabel(task, option)}</strong>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </fieldset>
+              ))}
+            </div>
+            {renderGoetheFeedback(tasks)}
+          </section>
+        </div>
+      );
+    }
+
+    if (meta.partType === "heading_matching_with_unmatched_opinion") {
+      return (
+        <div className={styles.goetheExamLayout}>
+          <section className={styles.goetheExamPane} onWheel={handleReadableWheel}>
+            {header}
+            {renderGoetheBank([...(meta.headingBank || []), { value: "X", label: "Keine passende Ueberschrift" }], "Ueberschriften a-f und X")}
+            <div className={styles.goetheQuestionList}>
+              {tasks.map(({ taskIndex, task }) => (
+                <article key={task.id} className={styles.goetheQuestionRow}>
+                  <p translate="no"><strong>{task.sourceQuestionNumber}.</strong> {task.question}</p>
+                  {renderGoetheSelect({ taskIndex, task })}
+                </article>
+              ))}
+            </div>
+            {renderGoetheFeedback(tasks)}
+          </section>
+        </div>
+      );
+    }
+
+    return (
+      <div className={styles.goetheExamLayout}>
+        <section className={styles.goetheExamPane} onWheel={handleReadableWheel}>
+          {header}
+          <article className={styles.goetheArticle}>
+            {meta.documentTitle ? <h3 className={styles.goetheArticleTitle} translate="no">{meta.documentTitle}</h3> : null}
+            {(meta.sections || []).map((section) => (
+              <p key={section.number} className={styles.goetheTextBlock} translate="no">{section.prompt}</p>
+            ))}
+          </article>
+          {renderGoetheBank(meta.headingBank, "Ueberschriften a-g")}
+          <div className={styles.goetheQuestionList}>
+            {tasks.map(({ taskIndex, task }) => (
+              <article key={task.id} className={styles.goetheQuestionRow}>
+                <p translate="no"><strong>Abschnitt {task.sourceQuestionNumber}</strong></p>
+                {renderGoetheSelect({ taskIndex, task })}
+              </article>
+            ))}
+          </div>
+          {renderGoetheFeedback(tasks)}
+        </section>
+      </div>
+    );
+  };
+
+  const isStructuredB2LesenModule =
+    module.id === "read" &&
+    Boolean(currentPart?.sourceMetadata?.structuredB2Lesen?.partType || currentTask?.sourceMetadata?.structuredB2Lesen);
+
+  const getStructuredB2Meta = () => currentPart?.sourceMetadata?.structuredB2Lesen || {};
+
+  const renderStructuredChoiceGroup = ({ taskIndex, task }) => (
+    <fieldset key={task.id} className={styles.goetheChoiceGroup}>
+      <legend translate="no">{task.sourceQuestionNumber}. {task.question}</legend>
+      <div className={styles.goetheChoiceButtons}>
+        {(task.options || []).map((option) => {
+          const selected = answers[taskIndex] === option.value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              className={selected ? styles.sprachOptionSelected : styles.sprachOptionButton}
+              onClick={() => setGoetheAnswer(taskIndex, option.value)}
+              aria-pressed={selected}
+            >
+              <span>{String(option.value).toUpperCase()}</span>
+              <strong translate="no">{getProtectedChoiceLabel(task, option)}</strong>
+            </button>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
+
+  const renderStructuredTextInput = ({ taskIndex, task, compact = false, prefix = "" }) => (
+    <label className={compact ? styles.structuredInlineInput : styles.structuredAnswerField}>
+      {!compact ? <span>Aufgabe {task.sourceQuestionNumber ?? taskIndex + 1}</span> : null}
+      {prefix ? <strong translate="no">{prefix}</strong> : null}
+      <input
+        type="text"
+        value={answers[taskIndex] ?? ""}
+        onChange={(event) => setAnswerForIndex(taskIndex, event.target.value)}
+        onFocus={() => setCurrentIndex(taskIndex)}
+        aria-label={`Aufgabe ${task.sourceQuestionNumber ?? taskIndex + 1}`}
+        autoComplete="off"
+        spellCheck={false}
+      />
+    </label>
+  );
+
+  const renderNumberedGapArticle = (article, pattern, keyPrefix, renderGap) =>
+    String(article || "")
+      .replace(/\r/g, "")
+      .split(/\n{2,}/)
+      .map((block) => block.trim())
+      .filter(Boolean)
+      .map((block, blockIndex) => {
+        const elements = [];
+        let cursor = 0;
+        const regex = new RegExp(pattern.source, pattern.flags);
+        for (const match of block.matchAll(regex)) {
+          if (match.index > cursor) elements.push(block.slice(cursor, match.index));
+          elements.push(renderGap(Number(match[1]), match, `${keyPrefix}-${blockIndex}-${match.index}`));
+          cursor = match.index + match[0].length;
+        }
+        if (cursor < block.length) elements.push(block.slice(cursor));
+        const isTitle = blockIndex === 0 && block.length < 90 && !/[.!?]$/.test(block);
+        return isTitle
+          ? <h3 key={`${keyPrefix}-${blockIndex}`} className={styles.goetheArticleTitle} translate="no">{elements}</h3>
+          : <p key={`${keyPrefix}-${blockIndex}`} className={styles.goetheInlineArticle} translate="no">{elements}</p>;
+      });
+
+  const renderStructuredB2Lesen = () => {
+    const meta = getStructuredB2Meta();
+    const tasks = getCurrentPartTasks();
+    const provider = String(meta.provider || selectedSeries?.provider || "").toUpperCase();
+    const answeredInPart = tasks.filter(({ taskIndex, task }) => getTaskAnswered(module, task, answers[taskIndex])).length;
+    const header = (
+      <div className={styles.goethePartHeader}>
+        <div>
+          <div className={styles.sectionLabel}><BookOpen size={18} />{provider} B2 Lesen</div>
+          <h2 translate="no">{currentPart?.displayTitle ?? "Lesen"}</h2>
+          <p translate="no">{meta.instruction}</p>
+        </div>
+        <span>{answeredInPart}/{tasks.length} bearbeitet</span>
+      </div>
+    );
+    const frame = (content) => (
+      <div className={styles.goetheExamLayout}>
+        <section className={styles.goetheExamPane} onWheel={handleReadableWheel}>
+          {header}
+          {content}
+          {renderGoetheFeedback(tasks)}
+        </section>
+      </div>
+    );
+
+    if (meta.partType === "inline_letter_gap" || meta.partType === "inline_sentence_gap") {
+      const isEcl = meta.partType === "inline_letter_gap";
+      const pattern = isEcl ? /\[\s*(\d{1,2})\s*\]\s*_{3,}/g : /_{2,}\s*(1[6-9]|20)\s*_{2,}/g;
+      const article = renderNumberedGapArticle(meta.article, pattern, `${provider}-gaps`, (number, _match, key) => {
+        if (number === 0) {
+          return <span key={key} className={styles.structuredLockedExample}>[0] {meta.example?.value || "I"}</span>;
+        }
+        const gap = getGoetheTaskByNumber(number);
+        return (
+          <Fragment key={key}>
+            <span className={styles.goetheGapNumber}>{isEcl ? `[${number}]` : number}</span>
+            {gap ? renderGoetheSelect({ ...gap, compact: true }) : <span className={styles.goetheMissingGap}>_____</span>}
+          </Fragment>
+        );
+      });
+      return frame(<>
+        <article className={styles.goetheArticle}>{article}</article>
+        {isEcl && meta.example ? <p className={styles.structuredExample}>Beispiel [0]: <strong>{meta.example.value}</strong></p> : null}
+        {renderGoetheBank(meta.bank, isEcl ? "Antwortbank A-M" : "Satzbank A-H")}
+      </>);
+    }
+
+    if (meta.partType === "short_answer") {
+      return frame(<>
+        <article className={styles.goetheArticle}>{renderGoetheTextBlocks(meta.article, "ecl-short-article")}</article>
+        <div className={styles.structuredAnswerList}>
+          {tasks.map(({ taskIndex, task }) => (
+            <article key={task.id} className={styles.goetheQuestionRow}>
+              <p translate="no"><strong>{task.sourceQuestionNumber}.</strong> {task.question}</p>
+              {renderStructuredTextInput({ taskIndex, task })}
+            </article>
+          ))}
+        </div>
+      </>);
+    }
+
+    if (meta.partType === "three_way_choice" || meta.partType === "single_choice") {
+      return frame(<>
+        <article className={styles.goetheArticle}>{renderGoetheTextBlocks(meta.article, `${provider}-choice-article`)}</article>
+        <div className={styles.goetheChoiceList}>{tasks.map(renderStructuredChoiceGroup)}</div>
+      </>);
+    }
+
+    if (meta.partType === "advertisement_matching" || meta.partType === "heading_matching") {
+      const items = meta.advertisements || meta.headings || [];
+      return frame(<>
+        {renderGoetheBank(items, meta.partType === "advertisement_matching" ? "Anzeigen A-F" : "Ueberschriften A-F")}
+        <div className={styles.goetheQuestionList}>
+          {tasks.map(({ taskIndex, task }) => (
+            <article key={task.id} className={styles.goetheQuestionRow}>
+              <p translate="no"><strong>{task.sourceQuestionNumber}.</strong> {task.question}</p>
+              {renderGoetheSelect({ taskIndex, task })}
+            </article>
+          ))}
+        </div>
+      </>);
+    }
+
+    if (meta.partType === "missing_letters") {
+      let gapIndex = 0;
+      const article = String(meta.article || "")
+        .replace(/\r/g, "")
+        .split(/\n{2,}/)
+        .map((block) => block.trim())
+        .filter(Boolean)
+        .map((block, blockIndex) => {
+          const elements = [];
+          let cursor = 0;
+          for (const match of block.matchAll(/([\p{L}\u00df\u00c4\u00d6\u00dc\u00e4\u00f6\u00fc-]+)_{3,}/gu)) {
+            if (match.index > cursor) elements.push(block.slice(cursor, match.index));
+            const gap = tasks[gapIndex++];
+            elements.push(gap
+              ? <Fragment key={`osd-letter-${blockIndex}-${match.index}`}>
+                  <span className={styles.goetheGapNumber}>{gap.task.sourceQuestionNumber}.</span>
+                  {renderStructuredTextInput({ ...gap, compact: true, prefix: match[1] })}
+                </Fragment>
+              : match[0]);
+            cursor = match.index + match[0].length;
+          }
+          if (cursor < block.length) elements.push(block.slice(cursor));
+          return <p key={`osd-letter-block-${blockIndex}`} className={styles.goetheInlineArticle} translate="no">{elements}</p>;
+        });
+      return frame(<article className={styles.goetheArticle}>{article}</article>);
+    }
+
+    if (meta.partType === "missing_word") {
+      const article = renderNumberedGapArticle(meta.article, /\(__?(\d{1,2})__?\)/g, "osd-word", (number, _match, key) => {
+        const gap = getGoetheTaskByNumber(number);
+        return gap
+          ? <Fragment key={key}><span className={styles.goetheGapNumber}>{number}.</span>{renderStructuredTextInput({ ...gap, compact: true })}</Fragment>
+          : <span key={key} className={styles.goetheMissingGap}>_____</span>;
+      });
+      return frame(<article className={styles.goetheArticle}>{article}</article>);
+    }
+
+    return frame(<div className={styles.goetheQuestionList}>{tasks.map(renderStructuredChoiceGroup)}</div>);
+  };
+
   const renderReading = () => (
+    isGoetheB2LesenModule ? renderGoetheB2Lesen() :
+    isStructuredB2LesenModule ? renderStructuredB2Lesen() :
+    isTelcSprachbausteineModule ? renderTelcSprachbausteine() :
     <div className={styles.readingLayout}>
       <section className={styles.passagePane} onWheel={handleReadableWheel}>
         <div className={styles.sectionLabel}>
@@ -3765,16 +4541,14 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   );
 
   const renderListening = () => {
-    const replayLimit = AUDIO_REPLAY_LIMIT;
-    const replaysLeft = Math.max(0, replayLimit - replaysUsed);
     const audioProgressPercent = currentAudioDuration
       ? Math.min(100, (audioTimestamp / currentAudioDuration) * 100)
       : 0;
     const listeningAudioElement = (
       <audio
         ref={listeningAudioRef}
-        src={module.audio?.audioUrl || undefined}
-        preload="metadata"
+        src={listeningAudioUrl || undefined}
+        preload="auto"
         onLoadedMetadata={handleListeningAudioLoadedMetadata}
         onTimeUpdate={handleListeningAudioTimeUpdate}
         onEnded={handleListeningAudioEnded}
@@ -3785,18 +4559,14 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     if (module.id === "listen") {
       return (
         <div className={styles.listeningLayout}>
-          <section className={styles.audioPanel}>
+          <section className={styles.audioPanel} ref={listeningPlayerAnchorRef}>
             <div className={styles.audioHeader}>
               <div>
                 <div className={styles.sectionLabel}>
                   <Headphones size={18} />
-                  {module.audio.title}
+                  {currentListeningAudio?.title || module.audio?.title || "Hoeren"}
                 </div>
-                <h2>{module.audio.speaker}</h2>
-              </div>
-              <div className={styles.replayBadge} data-blocked={audioReplayBlocked ? "true" : "false"}>
-                <Volume2 size={16} />
-                {replaysLeft} Hoerdurchgang{replaysLeft !== 1 ? "e" : ""} uebrig
+                <h2>{currentListeningAudio?.speaker || module.audio?.speaker || "Standarddeutsch"}</h2>
               </div>
             </div>
 
@@ -3806,10 +4576,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
                 type="button"
                 className={styles.audioPlayButton}
                 data-playing={audioPlaying ? "true" : "false"}
-                data-blocked={audioReplayBlocked ? "true" : "false"}
                 style={{ "--audio-progress": `${audioProgressPercent}%` }}
                 onClick={audioPlaying ? pauseListeningAudio : playListeningAudio}
-                disabled={!audioPlaying && audioReplayBlocked}
                 aria-label={audioPlaying ? "Pause" : "Abspielen"}
               >
                 {audioPlaying ? <Pause size={34} /> : <Play size={34} />}
@@ -3823,7 +4591,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
                   <span style={{ width: `${audioProgressPercent}%` }} />
                 </div>
               </div>
-              <button type="button" className={styles.iconButton} onClick={resetListeningAudio} disabled={audioReplayBlocked} aria-label="Zum Anfang zurueck">
+              <button type="button" className={styles.iconButton} onClick={resetListeningAudio} aria-label="Zum Anfang zurueck">
                 <RotateCcw size={20} />
                 Noch einmal hoeren
               </button>
@@ -3861,7 +4629,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
     return (
       <div className={styles.listeningLayout}>
-        <section className={styles.audioPanel}>
+        <section className={styles.audioPanel} ref={listeningPlayerAnchorRef}>
           <div className={styles.audioHeader}>
             <div>
               <div className={styles.sectionLabel}>
@@ -3869,10 +4637,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
                 {module.audio.title}
               </div>
               <h2>{module.audio.speaker}</h2>
-            </div>
-            <div className={styles.replayBadge} data-blocked={audioReplayBlocked ? "true" : "false"}>
-              <Volume2 size={16} />
-              {replaysLeft} écoute{replaysLeft > 1 ? "s" : ""} restante{replaysLeft > 1 ? "s" : ""}
             </div>
           </div>
 
@@ -3882,10 +4646,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               type="button"
               className={styles.audioPlayButton}
               data-playing={audioPlaying ? "true" : "false"}
-              data-blocked={audioReplayBlocked ? "true" : "false"}
               style={{ "--audio-progress": `${audioProgressPercent}%` }}
               onClick={audioPlaying ? pauseListeningAudio : playListeningAudio}
-              disabled={!audioPlaying && audioReplayBlocked}
               aria-label={audioPlaying ? "Pause" : "Lecture"}
             >
               {audioPlaying ? <Pause size={34} /> : <Play size={34} />}
@@ -3899,7 +4661,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
                 <span style={{ width: `${audioProgressPercent}%` }} />
               </div>
             </div>
-            <button type="button" className={styles.iconButton} onClick={resetListeningAudio} disabled={audioReplayBlocked} aria-label="Revenir au début">
+            <button type="button" className={styles.iconButton} onClick={resetListeningAudio} aria-label="Revenir au début">
               <RotateCcw size={20} />
               Reecouter
             </button>
@@ -3939,6 +4701,26 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     const text = String(currentAnswer ?? "");
     const words = countWords(text);
     const suggestions = getWritingSuggestions(currentTask, text);
+    const insertGermanCharacter = (character) => {
+      const textarea = writingTextareaRef.current;
+      const start = textarea?.selectionStart ?? text.length;
+      const end = textarea?.selectionEnd ?? text.length;
+      const nextText = `${text.slice(0, start)}${character}${text.slice(end)}`;
+      setAnswerForCurrent(nextText);
+      window.setTimeout(() => {
+        textarea?.focus();
+        textarea?.setSelectionRange(start + character.length, start + character.length);
+      }, 0);
+    };
+    const renderGermanCharacterToolbar = () => (
+      <div className={styles.germanCharacterToolbar} aria-label="Deutsche Sonderzeichen">
+        {["Ä", "ä", "Ö", "ö", "Ü", "ü", "ß"].map((character) => (
+          <button key={character} type="button" onClick={() => insertGermanCharacter(character)}>
+            {character}
+          </button>
+        ))}
+      </div>
+    );
 
     if (module.id === "write") {
       return (
@@ -3969,11 +4751,13 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               </button>
             </div>
             <textarea
+              ref={writingTextareaRef}
               value={text}
               onChange={(event) => setAnswerForCurrent(event.target.value)}
               placeholder="Schreiben Sie Ihre Antwort auf Deutsch..."
               className={styles.editor}
             />
+            {renderGermanCharacterToolbar()}
           </section>
 
           <div className={styles.writingSupportGrid}>
@@ -4049,11 +4833,13 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             </button>
           </div>
           <textarea
+            ref={writingTextareaRef}
             value={text}
             onChange={(event) => setAnswerForCurrent(event.target.value)}
             placeholder="Rédigez votre réponse en allemand..."
             className={styles.editor}
           />
+          {renderGermanCharacterToolbar()}
         </section>
 
         <div className={styles.writingSupportGrid}>
@@ -4649,16 +5435,16 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             {resultStatus ? <p className={styles.statusLine}>{toGermanStatus(resultStatus)}</p> : null}
             <div className={styles.resultActions}>
               <button type="button" className={styles.secondaryButton} onClick={() => navigate(loggedIn ? "/dashboard" : "/")}>
-                <ChevronLeft size={16} />
-                Zurueck
+                <Home size={16} />
+                Zum Dashboard
               </button>
               <button type="button" className={styles.secondaryButton} onClick={startSimulation}>
                 <RotateCcw size={16} />
-                Neu starten
+                Neue Simulation starten
               </button>
               <button type="button" className={styles.secondaryButton} onClick={() => navigate(selectedSeries ? `/simulations/${selectedSeries.examId}` : "/simulations", { state: { fromResults: true } })}>
                 <ClipboardCheck size={16} />
-                Neue Serie waehlen
+                Zurueck zu den Simulationen
               </button>
               <button type="button" className={styles.primaryButton} onClick={() => navigate(seriesRoute)}>
                 {t.modulePage.chooseModule}
@@ -4713,6 +5499,13 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     );
   }
 
+  const isLastNavigationStep = usesFullPartNavigation
+    ? currentPartIndex >= Math.max(0, examParts.length - 1)
+    : currentIndex >= totalTasks - 1;
+  const isPreviousNavigationDisabled = usesFullPartNavigation
+    ? currentPartIndex <= 0
+    : currentIndex === 0;
+
   return (
     <div className={styles.page} style={{ "--module-accent": module.accent, "--module-soft": module.soft }}>
       {partTransition ? (
@@ -4724,32 +5517,30 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           onComplete={completePartTransition}
         />
       ) : null}
+      {exitConfirmationOpen ? createPortal((
+        <div className={styles.exitDialogOverlay} role="presentation">
+          <section className={styles.exitDialog} role="dialog" aria-modal="true" aria-labelledby="exit-simulation-title">
+            <AlertCircle size={30} />
+            <h2 id="exit-simulation-title">Simulation wirklich verlassen?</h2>
+            <p>Ihr aktueller Fortschritt kann verloren gehen.</p>
+            <div>
+              <button type="button" className={styles.secondaryButton} onClick={() => setExitConfirmationOpen(false)}>In der Simulation bleiben</button>
+              <button type="button" className={styles.primaryButton} onClick={leaveSimulation}>Simulation verlassen</button>
+            </div>
+          </section>
+        </div>
+      ), document.body) : null}
       <nav className={styles.nav}>
-        <button
-          type="button"
-          className={styles.logoButton}
-          onClick={() => navigate(loggedIn ? "/dashboard" : "/")}
-          aria-label="Zurueck"
-        >
+        <div className={styles.logoButton}>
           <img src={logo} alt="Deutsch Prüfungen" />
-        </button>
+        </div>
         <div className={styles.navActions}>
-          {!loggedIn ? (
-            <button type="button" onClick={() => navigate("/")}>
-              <Home size={16} />
-              {t.common.home}
+          {!completed && !module.unavailable ? (
+            <button type="button" onClick={() => setExitConfirmationOpen(true)}>
+              <X size={16} />
+              Simulation beenden
             </button>
           ) : null}
-          {loggedIn ? (
-            <button type="button" onClick={() => navigate("/dashboard")}>
-              <ClipboardCheck size={16} />
-              {t.common.dashboard}
-            </button>
-          ) : null}
-          <button type="button" onClick={() => navigate(seriesRoute)}>
-            <ClipboardCheck size={16} />
-            {t.common.modules}
-          </button>
         </div>
       </nav>
 
@@ -4823,7 +5614,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               type="button"
               className={`${styles.secondaryButton} ${styles.mobileNavButton}`}
               onClick={goToPrevious}
-              disabled={currentIndex === 0 || isRecording}
+              disabled={isPreviousNavigationDisabled || isRecording}
             >
               <ChevronLeft size={16} />
               Zurueck
@@ -4838,7 +5629,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               onClick={goToNext}
               disabled={isRecording}
             >
-              {currentIndex >= totalTasks - 1 ? t.common.submit : t.common.next}
+              {isLastNavigationStep ? t.common.submit : t.common.next}
               <Send size={16} />
             </button>
           </section>

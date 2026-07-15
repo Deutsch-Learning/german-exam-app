@@ -4,6 +4,8 @@ import "./LoginPage.css";
 import logo from "../assets/images/logo.png";
 import API from "../services/api";
 import { useLanguage } from "../context/LanguageContext";
+import CountryPhoneField from "../components/CountryPhoneField";
+import BackButton from "../components/BackButton";
 
 export default function RegisterPage() {
   const { t } = useLanguage();
@@ -13,6 +15,7 @@ export default function RegisterPage() {
     firstName: "",
     lastName: "",
     email: "",
+    countryCode: "",
     phone: "",
     password: "",
     confirmPassword: "",
@@ -48,7 +51,12 @@ export default function RegisterPage() {
     } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
       newErrors.email = "Entrez une adresse email valide.";
     }
-    if (formData.phone && !/^[\d\s+().-]{8,}$/.test(formData.phone)) {
+    if (!formData.countryCode) {
+      newErrors.country = "Le pays est requis.";
+    }
+    if (!formData.phone.trim()) {
+      newErrors.phone = "Le numero de telephone est requis.";
+    } else if (!/^\+[\d\s().-]{7,}$/.test(formData.phone.trim())) {
       newErrors.phone = "Numéro de téléphone invalide.";
     }
     if (!formData.password) {
@@ -79,6 +87,8 @@ export default function RegisterPage() {
         username: formData.username,
         firstName: formData.firstName,
         lastName: formData.lastName,
+        country: formData.countryCode,
+        phone: formData.phone.trim(),
         marketingEmailsEnabled: formData.marketingEmailsEnabled,
       });
       if (res.data?.ok) {
@@ -103,10 +113,10 @@ export default function RegisterPage() {
     <div className="login-layout">
       <div className="login-brand-panel">
         <div className="brand-content">
-          <div className="brand-logo-placeholder">
+          <Link className="brand-logo-placeholder" to="/">
             <img src={logo} alt="" width={32} height={32} />
             <span>Deutsch Prüfungen</span>
-          </div>
+          </Link>
           <div className="brand-text">
             <h2>{t.auth.registerBrandTitle}</h2>
             <p>{t.auth.registerBrandText}</p>
@@ -116,9 +126,7 @@ export default function RegisterPage() {
 
       <div className="login-form-panel">
         <div className="form-container">
-          <Link className="auth-back-home" to="/">
-            ← {t.auth.backHome}
-          </Link>
+          <BackButton fallback="/" label={t.auth.backHome} className="auth-back-home" />
 
           <div className="form-header">
             <h1>{t.auth.registerTitle}</h1>
@@ -199,22 +207,15 @@ export default function RegisterPage() {
               )}
             </div>
 
-            <div className="form-group">
-              <label htmlFor="phone">{t.auth.phoneOptional}</label>
-              <input
-                id="phone"
-                name="phone"
-                type="tel"
-                value={formData.phone}
-                onChange={handleChange}
-                placeholder="+33 6 12 34 56 78"
-                autoComplete="tel"
-                className={errors.phone ? "input-error" : ""}
-              />
-              {errors.phone && (
-                <span className="error-text">{errors.phone}</span>
-              )}
-            </div>
+            <CountryPhoneField
+              countryCode={formData.countryCode}
+              phone={formData.phone}
+              error={errors.country || errors.phone}
+              onChange={({ countryCode, phone }) => {
+                setFormData((previous) => ({ ...previous, countryCode, phone }));
+                setErrors((previous) => ({ ...previous, country: "", phone: "" }));
+              }}
+            />
 
             <div className="form-group">
               <label htmlFor="reg-password">{t.auth.password}</label>

@@ -11,15 +11,18 @@ const rateLimit = require("express-rate-limit");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const nodemailer = require("nodemailer");
-const { createAuthMiddleware } = require("./middleware/auth");
+const { createAuthMiddleware, getBearerToken } = require("./middleware/auth");
 const adminMiddleware = require("./middleware/admin");
 const {
   analyzeExamDocument,
+  buildHoerenParsedPreview,
+  buildListeningImportFoundation,
   ensureDocumentImportSchema,
   getExamImportDraft,
   importParsedExamDocument,
   publishExamImportDraft,
   saveExamImportDraft,
+  saveListeningImportFoundationDraft,
   summarizeOutline,
   updateExamImportDraft,
   validateImportDraftContent,
@@ -37,12 +40,16 @@ const {
 const {
   buildAudioContentHash,
   ensureAudioAssetSchema,
+  ensureVoiceProfileSchema,
   generateAndStoreExamAudio,
   getAudioAssetById,
   getAudioAssetForExam,
   getConfiguredProvider,
   getProviderStatus,
+  getVoiceProfiles,
   normalizeProvider,
+  parseSpeakerSegments,
+  stripProductionMarkers,
   TtsConfigurationError,
 } = require("./services/ttsService");
 const {
@@ -105,6 +112,16 @@ const originAllowed = (origin) => {
   if (allowedOrigins.has(normalized)) return true;
   return isVercelPreviewOrigin(origin);
 };
+
+const getRequestPublicBaseUrl = (req) => {
+  const origin = normalizePublicUrl(req.get("origin") || "");
+  if (origin && originAllowed(origin)) return origin;
+  const host = String(req.get("x-forwarded-host") || req.get("host") || "").trim();
+  if (!host) return FRONTEND_URL;
+  const protocol = String(req.get("x-forwarded-proto") || req.protocol || "https").split(",")[0].trim() || "https";
+  return normalizePublicUrl(`${protocol}://${host}`);
+};
+
 const JWT_SECRET =
   process.env.JWT_SECRET ||
   "dev-only-change-me-german-exam-app-secret";
@@ -125,6 +142,11 @@ const LEVEL_ORDER = ["A1", "A2", "B1", "B2", "C1", "C2"];
 const NOT_SPECIFIED_LEVEL = "Not specified";
 const SUBSCRIPTION_CERTIFICATIONS = ["goethe", "osd", "telc", "ecl"];
 const SUBSCRIPTION_SECTIONS = ["read", "listen", "speak", "write"];
+const SUBSCRIPTION_SPEAKING_QUOTAS = {
+  starter: 20,
+  standard: 45,
+  intensif: 65,
+};
 const SUBSCRIPTION_PLAN_SEEDS = [
   { level: "B1", planKey: "starter", planName: "Starter", durationDays: 5, priceEur: 14.99, writingSimulatorAttempts: 3 },
   { level: "B1", planKey: "standard", planName: "Standard", durationDays: 15, priceEur: 29.99, writingSimulatorAttempts: 6 },
@@ -132,6 +154,21 @@ const SUBSCRIPTION_PLAN_SEEDS = [
   { level: "B2", planKey: "starter", planName: "Starter", durationDays: 5, priceEur: 19.99, writingSimulatorAttempts: 3 },
   { level: "B2", planKey: "standard", planName: "Standard", durationDays: 15, priceEur: 34.99, writingSimulatorAttempts: 6 },
   { level: "B2", planKey: "intensif", planName: "Intensif", durationDays: 30, priceEur: 64.99, writingSimulatorAttempts: 10 },
+];
+const NOTCHPAY_API_BASE_URL = process.env.NOTCHPAY_API_BASE_URL || "https://api.notchpay.co";
+const NOTCHPAY_PUBLIC_KEY = process.env.NOTCHPAY_PUBLIC_KEY || "";
+const NOTCHPAY_SECRET_KEY = process.env.NOTCHPAY_SECRET_KEY || process.env.NOTCHPAY_PRIVATE_KEY || "";
+const NOTCHPAY_WEBHOOK_HASH = process.env.NOTCHPAY_WEBHOOK_HASH || process.env.NOTCHPAY_HASH_KEY || "";
+const NOTCHPAY_CURRENCY = String(process.env.NOTCHPAY_CURRENCY || "XAF").toUpperCase();
+const NOTCHPAY_LOCKED_COUNTRY = process.env.NOTCHPAY_LOCKED_COUNTRY || "CM";
+const NOTCHPAY_XAF_PER_EUR = Number(process.env.NOTCHPAY_XAF_PER_EUR || 656);
+const NOTCHPAY_CALLBACK_URL =
+  process.env.NOTCHPAY_CALLBACK_URL ||
+  `${normalizePublicUrl(process.env.API_BASE_URL || FRONTEND_URL)}/api/payments/notchpay/callback`;
+const INDUSTRIAL_OFFERS = [
+  { offerKey: "industrial_1_month", label: "Industrial 1 month", accessMonths: 1, billedMonths: 1, durationDays: 30, priceEur: 450.99, speakingSimulatorQuota: 240 },
+  { offerKey: "industrial_6_months", label: "Industrial 6 months", accessMonths: 6, billedMonths: 6, durationDays: 180, priceEur: 2500.99, speakingSimulatorQuota: 600 },
+  { offerKey: "industrial_12_plus_2", label: "Industrial 1 year + 2 free months", accessMonths: 14, billedMonths: 12, durationDays: 420, priceEur: 5000.99, speakingSimulatorQuota: 1000 },
 ];
 
 if (!process.env.JWT_SECRET && isProduction) {
@@ -154,7 +191,12 @@ app.use(
     credentials: true,
   })
 );
-app.use(express.json({ limit: "8mb" }));
+app.use(express.json({
+  limit: "8mb",
+  verify: (req, _res, buf) => {
+    req.rawBody = Buffer.from(buf || "");
+  },
+}));
 
 const documentUpload = multer({
   storage: multer.memoryStorage(),
@@ -167,6 +209,13 @@ const documentUpload = multer({
 const authRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const testimonialRateLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 6,
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -199,6 +248,8 @@ const sanitizeUser = (user) => ({
   first_name: user.first_name,
   last_name: user.last_name,
   date_of_birth: user.date_of_birth,
+  country: user.country || null,
+  phone: user.phone || null,
   role: user.role,
   status: user.status,
   email_verified: Boolean(user.email_verified),
@@ -254,8 +305,578 @@ const normalizePlanKey = (value) => {
 
 const normalizePaymentProvider = (value) => {
   const provider = String(value ?? "").trim().toLowerCase();
-  return ["stripe", "cinetpay", "notpay", "manual"].includes(provider) ? provider : "manual";
+  if (provider === "notpay") return "notchpay";
+  return ["stripe", "cinetpay", "notchpay", "manual"].includes(provider) ? provider : "manual";
 };
+
+const MOBILE_MONEY_COUNTRIES = {
+  CM: {
+    label: "Cameroun",
+    dialCode: "237",
+    currency: "XAF",
+    providers: {
+      mtn: {
+        label: "MTN Mobile Money",
+        channel: "cm.mtn",
+        prefixes: [/^237(?:650|651|652|653|654|67\d|680|681|682|683)\d{6}$/],
+      },
+      orange: {
+        label: "Orange Money",
+        channel: "cm.orange",
+        prefixes: [/^237(?:640|655|656|657|658|659|686|687|688|689|69\d)\d{6}$/],
+      },
+    },
+  },
+  CI: {
+    label: "Côte d'Ivoire",
+    dialCode: "225",
+    currency: "XOF",
+    providers: {
+      mtn: { label: "MTN Mobile Money", channel: "ci.mtn", prefixes: [/^22505\d{8}$/] },
+      orange: { label: "Orange Money", channel: "ci.orange", prefixes: [/^22507\d{8}$/] },
+    },
+  },
+  SN: {
+    label: "Sénégal",
+    dialCode: "221",
+    currency: "XOF",
+    providers: {
+      orange: { label: "Orange Money", channel: "sn.orange", prefixes: [/^22177\d{7}$/] },
+    },
+  },
+};
+
+const normalizeMobileMoneyProvider = (value) => {
+  const provider = String(value ?? "").trim().toLowerCase();
+  return ["mtn", "orange"].includes(provider) ? provider : "";
+};
+
+const normalizeMobileMoneyCountry = (value) => {
+  const country = String(value ?? "").trim().toUpperCase();
+  return MOBILE_MONEY_COUNTRIES[country] ? country : "";
+};
+
+const normalizePaymentStatus = (value) =>
+  String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+
+const isSuccessfulPaymentStatus = (value) =>
+  [
+    "complete",
+    "completed",
+    "success",
+    "successful",
+    "succeeded",
+    "paid",
+    "active",
+    "approved",
+    "accepted",
+    "payment_complete",
+    "payment_completed",
+    "payment_success",
+    "payment_successful",
+  ].includes(normalizePaymentStatus(value));
+
+const isFailedPaymentStatus = (value) =>
+  [
+    "failed",
+    "failure",
+    "cancelled",
+    "canceled",
+    "expired",
+    "declined",
+    "rejected",
+    "refused",
+    "aborted",
+    "error",
+    "insufficient_funds",
+    "insufficient_balance",
+    "payment_failed",
+    "payment_cancelled",
+    "payment_canceled",
+    "payment_expired",
+    "payment_declined",
+  ].includes(normalizePaymentStatus(value));
+
+const eurToNotchPayAmount = (amountEur, currency = NOTCHPAY_CURRENCY) => {
+  const amount = Number(amountEur);
+  if (!Number.isFinite(amount) || amount <= 0) return 0;
+  if (["XAF", "XOF"].includes(String(currency).toUpperCase())) {
+    return Math.round(amount * NOTCHPAY_XAF_PER_EUR);
+  }
+  return Number(amount.toFixed(2));
+};
+
+const buildNotchPayReference = (transactionId) =>
+  `ndp_${Date.now()}_${transactionId}_${crypto.randomBytes(4).toString("hex")}`;
+
+const normalizeMobileMoneyPhone = (rawPhone, countryCode) => {
+  const country = MOBILE_MONEY_COUNTRIES[countryCode];
+  if (!country) return "";
+  const digits = String(rawPhone ?? "").replace(/[^\d]/g, "");
+  if (!digits) return "";
+  if (digits.startsWith(country.dialCode)) return `+${digits}`;
+  if (countryCode === "CM" && /^6\d{8}$/.test(digits)) return `+237${digits}`;
+  if (countryCode === "CI" && /^(05|07)\d{8}$/.test(digits)) return `+225${digits}`;
+  if (countryCode === "SN" && /^77\d{7}$/.test(digits)) return `+221${digits}`;
+  return `+${digits}`;
+};
+
+const validateMobileMoneySelection = ({ country, provider, phone }) => {
+  const normalizedCountry = normalizeMobileMoneyCountry(country);
+  const normalizedProvider = normalizeMobileMoneyProvider(provider);
+  if (!normalizedCountry) {
+    return { ok: false, error: "Pays Mobile Money non pris en charge." };
+  }
+  const countryConfig = MOBILE_MONEY_COUNTRIES[normalizedCountry];
+  const providerConfig = countryConfig.providers[normalizedProvider];
+  if (!normalizedProvider || !providerConfig) {
+    return {
+      ok: false,
+      error: `Ce pays ne prend pas en charge ${normalizedProvider === "mtn" ? "MTN Mobile Money" : "Orange Money"} dans cette integration.`,
+    };
+  }
+  const normalizedPhone = normalizeMobileMoneyPhone(phone, normalizedCountry);
+  const digits = normalizedPhone.replace(/[^\d]/g, "");
+  if (!providerConfig.prefixes.some((pattern) => pattern.test(digits))) {
+    const otherProviderKey = Object.keys(countryConfig.providers).find((key) => key !== normalizedProvider);
+    const otherProvider = otherProviderKey ? countryConfig.providers[otherProviderKey] : null;
+    const belongsToOther = otherProvider?.prefixes?.some((pattern) => pattern.test(digits));
+    const selectedLabel = providerConfig.label;
+    const otherLabel = otherProvider?.label || "un autre operateur";
+    return {
+      ok: false,
+      error: belongsToOther
+        ? `Ce numero ne semble pas etre un numero ${selectedLabel}. Verifiez le numero ou selectionnez ${otherLabel}.`
+        : `Ce numero ne semble pas etre valide pour ${selectedLabel}. Verifiez le format et le pays selectionne.`,
+    };
+  }
+  return {
+    ok: true,
+    country: normalizedCountry,
+    provider: normalizedProvider,
+    phone: normalizedPhone,
+    channel: providerConfig.channel,
+    currency: countryConfig.currency,
+    providerLabel: providerConfig.label,
+    countryLabel: countryConfig.label,
+  };
+};
+
+const safeJson = (value) => {
+  try {
+    return JSON.stringify(value ?? {});
+  } catch {
+    return "{}";
+  }
+};
+
+const parseJsonBody = (value) => {
+  if (!value) return {};
+  if (typeof value === "object") return value;
+  try {
+    return JSON.parse(String(value));
+  } catch {
+    return {};
+  }
+};
+
+const getNotchPayTransactionObject = (payload = {}) => {
+  const body = parseJsonBody(payload);
+  return body.transaction || body.data?.transaction || body.data || body.payment || body;
+};
+
+const collectPayloadValues = (value, keys, output = [], depth = 0) => {
+  if (!value || depth > 5) return output;
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectPayloadValues(item, keys, output, depth + 1));
+    return output;
+  }
+  if (typeof value !== "object") return output;
+  Object.entries(value).forEach(([key, item]) => {
+    if (keys.includes(String(key).toLowerCase())) output.push(item);
+    if (item && typeof item === "object") collectPayloadValues(item, keys, output, depth + 1);
+  });
+  return output;
+};
+
+const getNotchPayReferenceFromPayload = (payload = {}) => {
+  const body = parseJsonBody(payload);
+  const transaction = getNotchPayTransactionObject(body);
+  return String(
+    transaction.reference ||
+      transaction.provider_reference ||
+      body.reference ||
+      body.transaction_reference ||
+      body.payment_reference ||
+      transaction.id ||
+      ""
+  ).trim();
+};
+
+const getNotchPayStatusFromPayload = (payload = {}) => {
+  const body = parseJsonBody(payload);
+  const transaction = getNotchPayTransactionObject(body);
+  const directCandidates = [
+    transaction.status,
+    transaction.payment_status,
+    transaction.transaction_status,
+    transaction.gateway_status,
+    body.status,
+    body.payment_status,
+    body.transaction_status,
+    body.event,
+    body.type,
+  ];
+  const recursiveCandidates = collectPayloadValues(body, [
+    "status",
+    "payment_status",
+    "transaction_status",
+    "gateway_status",
+    "state",
+  ]);
+  const candidates = [...directCandidates, ...recursiveCandidates].map((item) => String(item || "").trim()).filter(Boolean);
+  return candidates.find((item) => isSuccessfulPaymentStatus(item) || isFailedPaymentStatus(item)) || candidates[0] || "";
+};
+
+const getNotchPayMessageFromPayload = (payload = {}) => {
+  const body = parseJsonBody(payload);
+  const transaction = getNotchPayTransactionObject(body);
+  const candidates = [
+    body.message,
+    body.error,
+    body.description,
+    body.reason,
+    body.data?.message,
+    body.data?.error,
+    body.data?.reason,
+    transaction.message,
+    transaction.error,
+    transaction.description,
+    transaction.reason,
+    transaction.failure_reason,
+    transaction.gateway_response,
+    ...collectPayloadValues(body, [
+      "message",
+      "error",
+      "description",
+      "reason",
+      "failure_reason",
+      "gateway_response",
+      "processor_response",
+      "response_message",
+    ]),
+  ];
+  return candidates.map((item) => String(item || "").trim()).find(Boolean) || "";
+};
+
+const buildPaymentStatusMessage = (status, providerStatus, providerMessage = "") => {
+  const statusText = normalizePaymentStatus(providerStatus || status);
+  const detail = String(providerMessage || "").trim();
+  const detailSuffix = detail ? ` Detail: ${detail}` : "";
+  if (isSuccessfulPaymentStatus(statusText) || status === "succeeded") {
+    return "Paiement confirme. Votre acces aux examens a ete active.";
+  }
+  if (statusText.includes("insufficient") || detail.toLowerCase().includes("insufficient")) {
+    return `Paiement non confirme: solde insuffisant.${detailSuffix}`;
+  }
+  if (["cancelled", "canceled"].includes(statusText) || detail.toLowerCase().includes("cancel")) {
+    return `Paiement annule.${detailSuffix}`;
+  }
+  if (isFailedPaymentStatus(statusText) || status === "failed") {
+    return `Paiement non confirme ou echoue.${detailSuffix}`;
+  }
+  return detail
+    ? `Paiement en attente de confirmation. ${detail}`
+    : "Nous n'avons pas encore recu votre paiement. La confirmation peut prendre un court instant.";
+};
+
+const verifyNotchPaySignature = (rawBody, signature) => {
+  if (!NOTCHPAY_WEBHOOK_HASH || !signature) return false;
+  const payload = Buffer.isBuffer(rawBody) ? rawBody : Buffer.from(String(rawBody || ""));
+  const expected = crypto.createHmac("sha256", NOTCHPAY_WEBHOOK_HASH).update(payload).digest("hex");
+  const received = String(signature || "").replace(/^sha256=/i, "").trim();
+  if (!received || expected.length !== received.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(expected, "utf8"), Buffer.from(received, "utf8"));
+};
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const isTransientNotchPayError = (error) => {
+  const status = Number(error?.status || error?.statusCode || 0);
+  return !status || status === 408 || status === 409 || status === 425 || status === 429 || status >= 500;
+};
+
+const notchPayRequestOnce = async (pathName, { method = "GET", body } = {}) => {
+  if (!NOTCHPAY_PUBLIC_KEY) {
+    const error = new Error("Notch Pay public key is not configured.");
+    error.status = 503;
+    throw error;
+  }
+  const headers = {
+    Authorization: NOTCHPAY_PUBLIC_KEY,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
+  if (NOTCHPAY_SECRET_KEY) headers["X-Grant"] = NOTCHPAY_SECRET_KEY;
+  const response = await fetch(`${NOTCHPAY_API_BASE_URL}${pathName}`, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const text = await response.text();
+  const data = parseJsonBody(text);
+  if (!response.ok) {
+    const error = new Error(data.message || data.error || `Notch Pay request failed with status ${response.status}`);
+    error.status = response.status;
+    error.data = data;
+    throw error;
+  }
+  return data;
+};
+
+const notchPayRequest = async (pathName, options = {}) => {
+  const attempts = Number(options.attempts || 2);
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await notchPayRequestOnce(pathName, options);
+    } catch (err) {
+      lastError = err;
+      if (attempt >= attempts || !isTransientNotchPayError(err)) break;
+      await sleep(350 * attempt);
+    }
+  }
+  throw lastError;
+};
+
+const createNotchPayPayment = async ({
+  user,
+  transactionId,
+  reference,
+  amountEur,
+  plan,
+  selectedCertifications,
+  callbackBaseUrl,
+  currency = NOTCHPAY_CURRENCY,
+  lockedCountry = NOTCHPAY_LOCKED_COUNTRY,
+  phone,
+}) => {
+  const paymentCurrency = String(currency || NOTCHPAY_CURRENCY).toUpperCase();
+  const amount = eurToNotchPayAmount(amountEur, paymentCurrency);
+  if (!amount) {
+    const error = new Error("Invalid Notch Pay amount.");
+    error.status = 400;
+    throw error;
+  }
+  const callbackRoot = callbackBaseUrl
+    ? `${normalizePublicUrl(callbackBaseUrl)}/api/payments/notchpay/callback`
+    : NOTCHPAY_CALLBACK_URL;
+  const callback = `${callbackRoot}?reference=${encodeURIComponent(reference)}`;
+  const payload = {
+    amount,
+    currency: paymentCurrency,
+    email: user.email,
+    phone: phone || String(user.phone || "").replace(/[^\d]/g, "") || undefined,
+    description: `N-Deutschpruefungen ${plan.level || "Enterprise"} ${plan.plan_name || plan.label || ""}`.trim(),
+    reference,
+    callback,
+    locked_currency: paymentCurrency,
+    locked_country: lockedCountry,
+    customer_meta: {
+      userId: user.id,
+      transactionId,
+      level: plan.level,
+      planKey: plan.plan_key,
+      selectedCertifications,
+      amountEur,
+      amount,
+      currency: paymentCurrency,
+    },
+  };
+  const session = await notchPayRequest("/payments", { method: "POST", body: payload });
+  return { ...session, callback, notchAmount: amount, notchCurrency: paymentCurrency };
+};
+
+const retrieveNotchPayPayment = async (reference) =>
+  notchPayRequest(`/payments/${encodeURIComponent(reference)}`);
+
+const retrieveNotchPayPaymentWithFallback = async (references = []) => {
+  const uniqueReferences = [...new Set(references.map((item) => String(item || "").trim()).filter(Boolean))];
+  let lastError = null;
+  for (const lookupReference of uniqueReferences) {
+    try {
+      const payment = await retrieveNotchPayPayment(lookupReference);
+      return { payment, reference: lookupReference };
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError;
+};
+
+const getRequestClientIp = (req) =>
+  String(req.get("cf-connecting-ip") || req.get("x-real-ip") || req.get("x-forwarded-for") || req.ip || "")
+    .split(",")[0]
+    .trim();
+
+const getNotchPayAuthorizationUrlFromPayload = (payload = {}) => {
+  const body = parseJsonBody(payload);
+  const transaction = getNotchPayTransactionObject(body);
+  const candidates = [
+    body.authorization_url,
+    body.authorizationUrl,
+    body.payment_url,
+    body.paymentUrl,
+    body.checkout_url,
+    body.checkoutUrl,
+    body.redirect_url,
+    body.redirectUrl,
+    body.link,
+    body.url,
+    body.data?.authorization_url,
+    body.data?.payment_url,
+    body.data?.checkout_url,
+    body.data?.redirect_url,
+    body.data?.link,
+    transaction.authorization_url,
+    transaction.payment_url,
+    transaction.checkout_url,
+    transaction.redirect_url,
+    transaction.link,
+    transaction.url,
+  ];
+  return candidates.map((item) => String(item || "").trim()).find(Boolean) || "";
+};
+
+const buildNotchPayProcessPayload = ({ channel, phone, clientIp }) => ({
+  channel,
+  data: {
+    phone: Number(String(phone || "").replace(/[^\d]/g, "")),
+    account_number: String(phone || "").replace(/[^\d]/g, ""),
+    country: String(phone || "").replace(/[^\d]/g, "").startsWith("237") ? "CM" : undefined,
+  },
+  client_ip: clientIp || undefined,
+});
+
+const processNotchPayMobileMoneyPayment = async ({ reference, channel, phone, clientIp, method = "POST" }) =>
+  notchPayRequest(`/payments/${encodeURIComponent(reference)}`, {
+    method,
+    body: buildNotchPayProcessPayload({ channel, phone, clientIp }),
+  });
+
+const processNotchPayMobileMoneyPaymentWithFallback = async ({ reference, channel, phone, clientIp }) => {
+  let lastError = null;
+  for (const method of ["POST", "PUT"]) {
+    try {
+      const result = await processNotchPayMobileMoneyPayment({ reference, channel, phone, clientIp, method });
+      return { result, method };
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError;
+};
+
+const startNotchPayMobileMoneyPrompt = async ({ references, channel, phone, clientIp }) => {
+  const processReferences = [...new Set((references || []).filter(Boolean))];
+  let lastProcessError = null;
+  for (const processReference of processReferences) {
+    try {
+      const processed = await processNotchPayMobileMoneyPaymentWithFallback({
+        reference: processReference,
+        channel,
+        phone,
+        clientIp,
+      });
+      return {
+        providerReference: processReference,
+        processing: processed.result,
+        processMethod: processed.method,
+        providerStatus: getNotchPayStatusFromPayload(processed.result) || "processing",
+      };
+    } catch (err) {
+      lastProcessError = err;
+    }
+  }
+  throw lastProcessError;
+};
+
+const getNotchPayPromptErrorDetails = (err) => ({
+  status: Number(err?.status || err?.statusCode || 0) || null,
+  message:
+    err?.data?.message ||
+    err?.data?.error ||
+    err?.message ||
+    "Notch Pay Mobile Money prompt could not be started immediately.",
+});
+
+const updateNotchPayTransactionPromptMetadata = async ({
+  transactionId,
+  providerReference,
+  merchantReference,
+  authorizationUrl = "",
+  notchPaySession = null,
+  processing = null,
+  processingError = null,
+  providerStatus = "processing",
+  processMethod = "",
+  customerMessage,
+}) =>
+  pool.query(
+    `UPDATE payment_transactions
+        SET provider_reference = $2,
+            status = 'processing',
+            metadata = (metadata || ($3::jsonb - 'notchpay')) ||
+              jsonb_build_object(
+                'notchpay',
+                COALESCE(metadata->'notchpay', '{}'::jsonb) || COALESCE($3::jsonb->'notchpay', '{}'::jsonb)
+              ),
+            updated_at = NOW()
+      WHERE id = $1`,
+    [
+      transactionId,
+      providerReference,
+      safeJson({
+        notchpay: {
+          reference: providerReference,
+          merchantReference,
+          amount: notchPaySession?.notchAmount,
+          currency: notchPaySession?.notchCurrency,
+          authorizationUrl,
+          callbackUrl: notchPaySession?.callback,
+          transaction: notchPaySession ? getNotchPayTransactionObject(notchPaySession) : undefined,
+          processing: processing ? getNotchPayTransactionObject(processing) : null,
+          processingError,
+          processMethod,
+          providerStatus,
+          promptRequestedAt: new Date().toISOString(),
+        },
+        customerMessage,
+      }),
+    ]
+  );
+
+const getEnterpriseBillingPlan = async (client = pool) => {
+  const result = await client.query(
+    `SELECT id, level, plan_key, plan_name, duration_days, price_eur, currency,
+            writing_simulator_attempts, speaking_simulator_quota, certifications, unlocked_sections
+       FROM subscription_plans
+      WHERE level = 'B2' AND plan_key = 'intensif' AND is_active = TRUE
+      LIMIT 1`
+  );
+  return result.rows[0] || null;
+};
+
+const mergeTransactionMetadata = (metadata, next) => ({
+  ...asPlainObject(metadata),
+  ...next,
+});
+
+const asPlainObject = (value) =>
+  value && typeof value === "object" && !Array.isArray(value) ? value : {};
 
 const normalizeStringArray = (value, allowed = []) => {
   const raw = Array.isArray(value)
@@ -299,6 +920,8 @@ const mapSubscriptionRow = (row) => ({
     0,
     Number(row.writing_simulator_attempts ?? 0) - Number(row.writing_attempts_used ?? 0)
   ),
+  speakingSimulatorQuota: Number(row.speaking_simulator_quota_override ?? row.speaking_simulator_quota ?? 0),
+  planCategory: row.plan_category || "standard",
 });
 
 const getActiveSubscriptionsForUser = async (userId) => {
@@ -306,7 +929,9 @@ const getActiveSubscriptionsForUser = async (userId) => {
   const result = await pool.query(
     `SELECT us.id, us.plan_id, us.level, us.plan_key, us.status, us.starts_at, us.expires_at,
             us.amount_paid, us.currency, us.selected_certifications,
+            us.speaking_simulator_quota_override,
             sp.plan_name, sp.duration_days, sp.price_eur, sp.writing_simulator_attempts,
+            sp.speaking_simulator_quota, sp.plan_category,
             sp.unlocked_sections,
             COALESCE(wsu.attempts_used, 0) AS writing_attempts_used
      FROM user_subscriptions us
@@ -352,6 +977,305 @@ const userHasSubscriptionAccess = (user, subscription, certification, section) =
     (!cert || subscription.certifications.includes(cert)) &&
     (!unlockedSection || subscription.unlockedSections.includes(unlockedSection))
   );
+};
+
+const activateSubscriptionFromTransaction = async ({ providerReference, providerPayload = {}, eventType = "" }) => {
+  const reference = String(providerReference || "").trim();
+  if (!reference) return { activated: false, reason: "missing_reference" };
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const transactionResult = await client.query(
+      `SELECT pt.id, pt.user_id, pt.plan_id, pt.provider, pt.provider_reference, pt.status,
+              pt.amount, pt.currency, pt.selected_certifications, pt.metadata,
+              sp.level, sp.plan_key, sp.duration_days, sp.writing_simulator_attempts,
+              sp.speaking_simulator_quota
+        FROM payment_transactions pt
+         JOIN subscription_plans sp ON sp.id = pt.plan_id
+        WHERE pt.provider_reference = $1
+           OR pt.metadata #>> '{notchpay,merchantReference}' = $1
+           OR pt.metadata #>> '{notchpay,reference}' = $1
+        FOR UPDATE`,
+      [reference]
+    );
+    const transaction = transactionResult.rows[0];
+    if (!transaction) {
+      await client.query("ROLLBACK");
+      return { activated: false, reason: "transaction_not_found" };
+    }
+    const transactionMetadata = asPlainObject(transaction.metadata);
+
+    const metadata = mergeTransactionMetadata(transaction.metadata, {
+      lastProviderEvent: eventType || null,
+      lastProviderPayload: providerPayload,
+      paidAt: new Date().toISOString(),
+    });
+    await client.query(
+      `UPDATE payment_transactions
+          SET status = 'succeeded',
+              metadata = $2::jsonb,
+              updated_at = NOW()
+        WHERE id = $1`,
+      [transaction.id, safeJson(metadata)]
+    );
+
+    const isEnterprisePayment = transactionMetadata.offerType === "enterprise";
+    if (isEnterprisePayment) {
+      const enterpriseOffer = asPlainObject(transactionMetadata.enterpriseOffer);
+      const levels = ["B1", "B2"];
+      const existingEnterprise = await client.query(
+        `SELECT id
+           FROM user_subscriptions
+          WHERE payment_provider = $1
+            AND payment_reference = ANY($2::text[])
+          LIMIT 1`,
+        [transaction.provider, levels.map((level) => `${reference}:${level}`)]
+      );
+      if (existingEnterprise.rows[0]) {
+        await client.query("COMMIT");
+        return { activated: false, reason: "already_active", subscriptionId: existingEnterprise.rows[0].id };
+      }
+
+      const selectedCertifications = normalizeStringArray(
+        transactionMetadata.selectedCertifications || transaction.selected_certifications,
+        SUBSCRIPTION_CERTIFICATIONS
+      );
+      if (!selectedCertifications.length) {
+        await client.query("ROLLBACK");
+        return { activated: false, reason: "missing_selected_certifications" };
+      }
+
+      const createdSubscriptions = [];
+      for (const level of levels) {
+        const levelPlan = await client.query(
+          `SELECT id, plan_key, writing_simulator_attempts
+             FROM subscription_plans
+            WHERE level = $1 AND plan_key = 'intensif' AND is_active = TRUE
+            LIMIT 1`,
+          [level]
+        );
+        const planRow = levelPlan.rows[0];
+        if (!planRow) {
+          await client.query("ROLLBACK");
+          return { activated: false, reason: `missing_${level.toLowerCase()}_enterprise_plan` };
+        }
+        const subscriptionResult = await client.query(
+          `INSERT INTO user_subscriptions (
+             user_id, plan_id, level, plan_key, status, starts_at, expires_at,
+             payment_provider, payment_reference, selected_certifications, amount_paid,
+             currency, speaking_simulator_quota_override, grant_reason
+           )
+           VALUES (
+             $1, $2, $3, $4, 'active', NOW(), NOW() + ($5::int * INTERVAL '1 day'),
+             $6, $7, $8::jsonb, $9, $10, $11, $12
+           )
+           RETURNING id`,
+          [
+            transaction.user_id,
+            planRow.id,
+            level,
+            planRow.plan_key,
+            Number(enterpriseOffer.durationDays || transactionMetadata.durationDays || 30),
+            transaction.provider,
+            `${reference}:${level}`,
+            JSON.stringify(selectedCertifications),
+            Number(transaction.amount),
+            transaction.currency,
+            Number(enterpriseOffer.speakingSimulatorQuota || transactionMetadata.speakingSimulatorQuota || 0),
+            "Notch Pay verified enterprise payment",
+          ]
+        );
+        const subscriptionId = subscriptionResult.rows[0].id;
+        createdSubscriptions.push(subscriptionId);
+        await client.query(
+          `INSERT INTO writing_simulator_usage (user_id, subscription_id, level, attempts_allowed, attempts_used)
+           VALUES ($1, $2, $3, $4, 0)
+           ON CONFLICT (user_id, subscription_id, level)
+           DO UPDATE SET attempts_allowed = EXCLUDED.attempts_allowed, updated_at = NOW()`,
+          [transaction.user_id, subscriptionId, level, Number(planRow.writing_simulator_attempts ?? 10)]
+        );
+        await client.query(
+          `INSERT INTO subscription_admin_events (subscription_id, user_id, action, details)
+           VALUES ($1, $2, 'notchpay_enterprise_payment_activated', $3::jsonb)`,
+          [
+            subscriptionId,
+            transaction.user_id,
+            safeJson({ providerReference: reference, transactionId: transaction.id, eventType, enterpriseOffer }),
+          ]
+        );
+      }
+      await client.query("COMMIT");
+      return { activated: true, subscriptionIds: createdSubscriptions, transactionId: transaction.id, enterprise: true };
+    }
+
+    const existing = await client.query(
+      `SELECT id
+         FROM user_subscriptions
+        WHERE payment_provider = $1
+          AND payment_reference = $2
+        LIMIT 1`,
+      [transaction.provider, reference]
+    );
+    if (existing.rows[0]) {
+      await client.query("COMMIT");
+      return { activated: false, reason: "already_active", subscriptionId: existing.rows[0].id };
+    }
+
+    const selectedCertifications = normalizeStringArray(transaction.selected_certifications, SUBSCRIPTION_CERTIFICATIONS);
+    if (!selectedCertifications.length) {
+      await client.query("ROLLBACK");
+      return { activated: false, reason: "missing_selected_certifications" };
+    }
+
+    const subscriptionResult = await client.query(
+      `INSERT INTO user_subscriptions (
+         user_id, plan_id, level, plan_key, status, starts_at, expires_at,
+         payment_provider, payment_reference, selected_certifications, amount_paid,
+         currency, speaking_simulator_quota_override, grant_reason
+       )
+       VALUES (
+         $1, $2, $3, $4, 'active', NOW(), NOW() + ($5::int * INTERVAL '1 day'),
+         $6, $7, $8::jsonb, $9, $10, $11, $12
+       )
+       RETURNING id`,
+      [
+        transaction.user_id,
+        transaction.plan_id,
+        transaction.level,
+        transaction.plan_key,
+        Number(transaction.duration_days),
+        transaction.provider,
+        reference,
+        JSON.stringify(selectedCertifications),
+        Number(transaction.amount),
+        transaction.currency,
+        Number(transaction.speaking_simulator_quota ?? 0),
+        "Notch Pay verified payment",
+      ]
+    );
+    const subscriptionId = subscriptionResult.rows[0].id;
+    await client.query(
+      `INSERT INTO writing_simulator_usage (user_id, subscription_id, level, attempts_allowed, attempts_used)
+       VALUES ($1, $2, $3, $4, 0)
+       ON CONFLICT (user_id, subscription_id, level)
+       DO UPDATE SET attempts_allowed = EXCLUDED.attempts_allowed, updated_at = NOW()`,
+      [
+        transaction.user_id,
+        subscriptionId,
+        transaction.level,
+        Number(transaction.writing_simulator_attempts ?? 0),
+      ]
+    );
+    await client.query(
+      `INSERT INTO subscription_admin_events (subscription_id, user_id, action, details)
+       VALUES ($1, $2, 'notchpay_payment_activated', $3::jsonb)`,
+      [
+        subscriptionId,
+        transaction.user_id,
+        safeJson({ providerReference: reference, transactionId: transaction.id, eventType }),
+      ]
+    );
+    await client.query("COMMIT");
+    return { activated: true, subscriptionId, transactionId: transaction.id };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+const cleanPublicText = (value, max = 1000) =>
+  String(value ?? "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, max);
+
+const stripHtmlForValidation = (value) =>
+  String(value ?? "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const pushValidationFlag = (flags, severity, code, message, entityType, entityId = null) => {
+  flags.push({ severity, code, message, entityType, entityId });
+};
+
+const buildExamContentValidation = async (examId) => {
+  const [examResult, sectionResult, questionResult, audioResult] = await Promise.all([
+    pool.query(`SELECT id, code, name, section_type, level, provider FROM exams WHERE id = $1`, [examId]),
+    pool.query(`SELECT id, title, instructions, section_type, part_number FROM exam_sections WHERE exam_id = $1 ORDER BY position, id`, [examId]),
+    pool.query(`SELECT id, section_id, prompt, question_type, options, correct_answer, transcript, position FROM exam_questions WHERE exam_id = $1 ORDER BY position, id`, [examId]),
+    pool.query(
+      `SELECT id, title, admin_transcript, audio_generation_status, validation_warnings
+         FROM exam_listening_audio_items
+        WHERE exam_id = $1
+        ORDER BY part_number, item_number, id`,
+      [examId]
+    ).catch(() => ({ rows: [] })),
+  ]);
+  const exam = examResult.rows[0];
+  if (!exam) return null;
+  const flags = [];
+  if (!sectionResult.rows.length) {
+    pushValidationFlag(flags, "error", "missing_sections", "No sections are attached to this exam.", "exam", exam.id);
+  }
+  if (!questionResult.rows.length) {
+    pushValidationFlag(flags, "error", "missing_questions", "No questions are attached to this exam.", "exam", exam.id);
+  }
+  sectionResult.rows.forEach((section) => {
+    if (!stripHtmlForValidation(section.title)) {
+      pushValidationFlag(flags, "warning", "empty_section_title", "A section has no title.", "section", section.id);
+    }
+    if (!stripHtmlForValidation(section.instructions)) {
+      pushValidationFlag(flags, "warning", "empty_section_instructions", "A section has no visible instructions.", "section", section.id);
+    }
+    if (String(section.instructions || "").split("\n").filter((line) => line.trim().length <= 2).length >= 5) {
+      pushValidationFlag(flags, "warning", "unusual_line_breaks", "Section instructions contain unusual short line breaks.", "section", section.id);
+    }
+  });
+  questionResult.rows.forEach((question) => {
+    const prompt = stripHtmlForValidation(question.prompt);
+    const options = Array.isArray(question.options) ? question.options : [];
+    const answer = question.correct_answer && typeof question.correct_answer === "object" ? question.correct_answer : {};
+    if (!prompt) pushValidationFlag(flags, "error", "empty_question_prompt", "A question has no prompt.", "question", question.id);
+    if (["multiple_choice", "matching", "true_false", "yes_no"].includes(question.question_type) && options.length < 2) {
+      pushValidationFlag(flags, "warning", "missing_options", "A question appears to need answer options but has fewer than two.", "question", question.id);
+    }
+    const optionValues = new Set(options.map((option) => String(option?.value ?? option?.id ?? option?.key ?? "").trim()).filter(Boolean));
+    const answerValue = String(answer.value ?? answer.answer ?? answer.correct ?? "").trim();
+    if (answerValue && optionValues.size && !optionValues.has(answerValue)) {
+      pushValidationFlag(flags, "warning", "answer_option_mismatch", "A correction value does not match any visible option value.", "question", question.id);
+    }
+  });
+  if (String(exam.section_type).toLowerCase() === "listen") {
+    audioResult.rows.forEach((item) => {
+      if (!stripHtmlForValidation(item.admin_transcript)) {
+        pushValidationFlag(flags, "error", "missing_audio_transcript", "A listening audio item has no transcript for playback generation.", "audio_item", item.id);
+      }
+      if (item.audio_generation_status !== "published") {
+        pushValidationFlag(flags, "warning", "audio_not_published", "A listening audio item is not published yet.", "audio_item", item.id);
+      }
+      const warnings = Array.isArray(item.validation_warnings) ? item.validation_warnings : [];
+      warnings.forEach((warning, index) => {
+        pushValidationFlag(flags, "warning", `audio_warning_${index + 1}`, String(warning), "audio_item", item.id);
+      });
+    });
+  }
+  return {
+    exam,
+    flags,
+    counts: {
+      errors: flags.filter((flag) => flag.severity === "error").length,
+      warnings: flags.filter((flag) => flag.severity !== "error").length,
+      sections: sectionResult.rows.length,
+      questions: questionResult.rows.length,
+      audioItems: audioResult.rows.length,
+    },
+  };
 };
 
 const getClientIp = (req) =>
@@ -657,6 +1581,8 @@ async function ensureSchema() {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name TEXT;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS date_of_birth DATE;`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS country TEXT;`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user';`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT FALSE;`);
@@ -790,9 +1716,9 @@ async function ensureSchema() {
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       plan_id INTEGER NOT NULL REFERENCES subscription_plans(id) ON DELETE RESTRICT,
-      provider TEXT NOT NULL DEFAULT 'manual' CHECK (provider IN ('stripe', 'cinetpay', 'notpay', 'manual')),
+      provider TEXT NOT NULL DEFAULT 'manual' CHECK (provider IN ('stripe', 'cinetpay', 'notchpay', 'notpay', 'manual')),
       provider_reference TEXT,
-      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'active', 'expired', 'cancelled', 'failed', 'succeeded')),
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'active', 'expired', 'cancelled', 'failed', 'succeeded')),
       amount NUMERIC(10,2) NOT NULL CHECK (amount >= 0),
       currency TEXT NOT NULL DEFAULT 'EUR',
       selected_certifications JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -803,6 +1729,62 @@ async function ensureSchema() {
   `);
   await pool.query(`ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS selected_certifications JSONB NOT NULL DEFAULT '[]'::jsonb;`);
   await pool.query(`ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS selected_certifications JSONB NOT NULL DEFAULT '[]'::jsonb;`);
+  await pool.query(`
+    DO $$
+    BEGIN
+      ALTER TABLE payment_transactions DROP CONSTRAINT IF EXISTS payment_transactions_provider_check;
+      ALTER TABLE payment_transactions
+        ADD CONSTRAINT payment_transactions_provider_check
+        CHECK (provider IN ('stripe', 'cinetpay', 'notchpay', 'notpay', 'manual'));
+    END $$;
+  `);
+  await pool.query(`
+    DO $$
+    BEGIN
+      ALTER TABLE payment_transactions DROP CONSTRAINT IF EXISTS payment_transactions_status_check;
+      ALTER TABLE payment_transactions
+        ADD CONSTRAINT payment_transactions_status_check
+        CHECK (status IN ('pending', 'processing', 'active', 'expired', 'cancelled', 'failed', 'succeeded'));
+    END $$;
+  `);
+  await pool.query(`ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS speaking_simulator_quota INTEGER NOT NULL DEFAULT 0;`);
+  await pool.query(`ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS plan_category TEXT NOT NULL DEFAULT 'standard';`);
+  await pool.query(`ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS access_months INTEGER;`);
+  await pool.query(`ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS billed_months INTEGER;`);
+  await pool.query(`ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb;`);
+  await pool.query(`ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS speaking_simulator_quota_override INTEGER;`);
+  await pool.query(`ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMPTZ;`);
+  await pool.query(`ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS revoked_by INTEGER REFERENCES users(id) ON DELETE SET NULL;`);
+  await pool.query(`ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS grant_reason TEXT;`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS industrial_subscription_offers (
+      id SERIAL PRIMARY KEY,
+      offer_key TEXT NOT NULL UNIQUE,
+      label TEXT NOT NULL,
+      duration_days INTEGER NOT NULL CHECK (duration_days > 0),
+      access_months INTEGER NOT NULL CHECK (access_months > 0),
+      billed_months INTEGER NOT NULL CHECK (billed_months > 0),
+      price_eur NUMERIC(10,2) NOT NULL CHECK (price_eur >= 0),
+      currency TEXT NOT NULL DEFAULT 'EUR',
+      speaking_simulator_quota INTEGER NOT NULL CHECK (speaking_simulator_quota >= 0),
+      certifications JSONB NOT NULL DEFAULT '["goethe","osd","telc","ecl"]'::jsonb,
+      unlocked_sections JSONB NOT NULL DEFAULT '["read","listen","speak","write"]'::jsonb,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS subscription_admin_events (
+      id SERIAL PRIMARY KEY,
+      subscription_id INTEGER REFERENCES user_subscriptions(id) ON DELETE SET NULL,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      admin_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      action TEXT NOT NULL,
+      details JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
   await pool.query(`
     CREATE INDEX IF NOT EXISTS user_subscriptions_user_level_status_idx
       ON user_subscriptions(user_id, level, status, expires_at DESC);
@@ -819,10 +1801,21 @@ async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS payment_transactions_user_created_idx
       ON payment_transactions(user_id, created_at DESC);
   `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS payment_transactions_provider_reference_idx
+      ON payment_transactions(provider, provider_reference);
+  `);
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS user_subscriptions_payment_reference_unique_idx
+      ON user_subscriptions(payment_provider, payment_reference)
+      WHERE payment_reference IS NOT NULL;
+  `);
   await pool.query(`ALTER TABLE subscription_plans ENABLE ROW LEVEL SECURITY;`);
   await pool.query(`ALTER TABLE user_subscriptions ENABLE ROW LEVEL SECURITY;`);
   await pool.query(`ALTER TABLE writing_simulator_usage ENABLE ROW LEVEL SECURITY;`);
   await pool.query(`ALTER TABLE payment_transactions ENABLE ROW LEVEL SECURITY;`);
+  await pool.query(`ALTER TABLE industrial_subscription_offers ENABLE ROW LEVEL SECURITY;`);
+  await pool.query(`ALTER TABLE subscription_admin_events ENABLE ROW LEVEL SECURITY;`);
   await pool.query(`
     DO $$
     BEGIN
@@ -837,9 +1830,11 @@ async function ensureSchema() {
     await pool.query(
       `INSERT INTO subscription_plans (
          level, plan_key, plan_name, duration_days, price_eur, currency,
-         writing_simulator_attempts, certifications, unlocked_sections, is_active, updated_at
+         writing_simulator_attempts, speaking_simulator_quota, certifications, unlocked_sections,
+         plan_category, access_months, billed_months, metadata, is_active, updated_at
        )
-       VALUES ($1, $2, $3, $4, $5, 'EUR', $6, $7::jsonb, $8::jsonb, TRUE, NOW())
+       VALUES ($1, $2, $3, $4, $5, 'EUR', $6, $7, $8::jsonb, $9::jsonb,
+               'standard', NULL, NULL, $10::jsonb, TRUE, NOW())
        ON CONFLICT (level, plan_key)
        DO UPDATE SET
          plan_name = EXCLUDED.plan_name,
@@ -847,8 +1842,13 @@ async function ensureSchema() {
          price_eur = EXCLUDED.price_eur,
          currency = EXCLUDED.currency,
          writing_simulator_attempts = EXCLUDED.writing_simulator_attempts,
+         speaking_simulator_quota = EXCLUDED.speaking_simulator_quota,
          certifications = EXCLUDED.certifications,
          unlocked_sections = EXCLUDED.unlocked_sections,
+         plan_category = EXCLUDED.plan_category,
+         access_months = EXCLUDED.access_months,
+         billed_months = EXCLUDED.billed_months,
+         metadata = EXCLUDED.metadata,
          is_active = TRUE,
          updated_at = NOW()`,
       [
@@ -858,6 +1858,42 @@ async function ensureSchema() {
         plan.durationDays,
         plan.priceEur,
         plan.writingSimulatorAttempts,
+        SUBSCRIPTION_SPEAKING_QUOTAS[plan.planKey] ?? 0,
+        JSON.stringify(SUBSCRIPTION_CERTIFICATIONS),
+        JSON.stringify(SUBSCRIPTION_SECTIONS),
+        JSON.stringify({
+          speakingSimulatorQuota: SUBSCRIPTION_SPEAKING_QUOTAS[plan.planKey] ?? 0,
+        }),
+      ]
+    );
+  }
+  for (const offer of INDUSTRIAL_OFFERS) {
+    await pool.query(
+      `INSERT INTO industrial_subscription_offers (
+         offer_key, label, duration_days, access_months, billed_months, price_eur,
+         speaking_simulator_quota, certifications, unlocked_sections, is_active, updated_at
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, TRUE, NOW())
+       ON CONFLICT (offer_key)
+       DO UPDATE SET
+         label = EXCLUDED.label,
+         duration_days = EXCLUDED.duration_days,
+         access_months = EXCLUDED.access_months,
+         billed_months = EXCLUDED.billed_months,
+         price_eur = EXCLUDED.price_eur,
+         speaking_simulator_quota = EXCLUDED.speaking_simulator_quota,
+         certifications = EXCLUDED.certifications,
+         unlocked_sections = EXCLUDED.unlocked_sections,
+         is_active = TRUE,
+         updated_at = NOW()`,
+      [
+        offer.offerKey,
+        offer.label,
+        offer.durationDays,
+        offer.accessMonths,
+        offer.billedMonths,
+        offer.priceEur,
+        offer.speakingSimulatorQuota,
         JSON.stringify(SUBSCRIPTION_CERTIFICATIONS),
         JSON.stringify(SUBSCRIPTION_SECTIONS),
       ]
@@ -913,6 +1949,25 @@ async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS api_usage_user_created_idx
       ON api_usage_logs(user_id, created_at DESC);
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS testimonials (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      display_name TEXT NOT NULL,
+      role_label TEXT,
+      rating INTEGER NOT NULL DEFAULT 5 CHECK (rating >= 1 AND rating <= 5),
+      comment TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+      admin_note TEXT,
+      reviewed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      reviewed_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS testimonials_status_created_idx ON testimonials(status, created_at DESC);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS testimonials_user_created_idx ON testimonials(user_id, created_at DESC);`);
+  await pool.query(`ALTER TABLE testimonials ENABLE ROW LEVEL SECURITY;`);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS email_events (
@@ -1063,6 +2118,19 @@ async function ensureSchema() {
   `);
 
   await ensureDocumentImportSchema(pool);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS exams_published_catalog_idx
+      ON exams (LOWER(provider), UPPER(level), series_number, section_type)
+      WHERE is_active = TRUE;
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS exam_sections_exam_part_position_idx
+      ON exam_sections (exam_id, part_number, position, id);
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS exam_questions_exam_section_position_idx
+      ON exam_questions (exam_id, section_id, position, id);
+  `);
   await ensureWritingCorrectionSchema(pool);
   await ensureContentStyleSchema(pool);
   await ensureAudioAssetSchema(pool);
@@ -1117,6 +2185,43 @@ const requireAuth = createAuthMiddleware({
   emailVerificationRequired: EMAIL_VERIFICATION_REQUIRED,
 });
 const requireAdmin = [requireAuth, adminMiddleware];
+
+const optionalPaymentAuth = async (req, _res, next) => {
+  try {
+    const token = getBearerToken(req);
+    if (!token) return next();
+    const payload = jwt.verify(token, JWT_SECRET, {
+      issuer: JWT_ISSUER,
+      audience: JWT_AUDIENCE,
+      ignoreExpiration: true,
+    });
+    const userId = Number(payload.sub ?? payload.id);
+    if (!Number.isInteger(userId) || userId <= 0) return next();
+    if (payload.jti) {
+      const revoked = await pool.query(`SELECT 1 FROM revoked_tokens WHERE jti = $1 LIMIT 1`, [payload.jti]);
+      if (revoked.rows[0]) return next();
+    }
+    const result = await pool.query(
+      `SELECT id, email, username, first_name, last_name, date_of_birth, role, status,
+              email_verified, has_full_access, partial_access, current_level, target_level,
+              marketing_emails_enabled,
+              created_at, last_login_at
+         FROM users
+        WHERE id = $1`,
+      [userId]
+    );
+    const user = result.rows[0];
+    if (!user || user.status !== "active" || !["user", "admin"].includes(String(user.role)) || payload.role !== user.role) {
+      return next();
+    }
+    req.token = token;
+    req.authPayload = payload;
+    req.user = user;
+  } catch {
+    // Payment status can still be checked by reference; normal protected routes remain strict.
+  }
+  return next();
+};
 
 const auditAdminAction = async (req, action, targetType, targetId, metadata = {}) => {
   try {
@@ -1491,6 +2596,9 @@ const toPublicSeriesList = (rows, routeMeta = {}) => {
     if (!Number.isFinite(seriesNumber)) continue;
 
     if (!groups.has(seriesNumber)) {
+      const publicExamId = routeMeta.level
+        ? `${provider}-${String(routeMeta.level).toLowerCase()}`
+        : meta.examId;
       groups.set(seriesNumber, {
         id: toImportedSeriesId(provider, row.level, seriesNumber),
         code: `Series ${String(seriesNumber).padStart(2, "0")}`,
@@ -1499,7 +2607,8 @@ const toPublicSeriesList = (rows, routeMeta = {}) => {
         duration: "Imported modules",
         theme: "",
         setting: examName,
-        examId: meta.examId,
+        examId: publicExamId,
+        accessExamId: meta.examId,
         examName,
         accent: meta.accent,
         isFree: seriesNumber === 1,
@@ -1529,7 +2638,10 @@ const toPublicSeriesList = (rows, routeMeta = {}) => {
       title: title || moduleMeta.label,
       questionCount: Number(row.question_count) || 0,
       sectionCount: Number(row.section_count) || 0,
-      durationMinutes: Number(row.duration_minutes) || moduleMeta.defaultMinutes,
+      durationMinutes:
+        Number(row.duration_minutes) ||
+        Number(metadata.globalDurationMinutes || metadata.scoring?.globalDurationMinutes) ||
+        moduleMeta.defaultMinutes,
     };
   }
 
@@ -1604,6 +2716,7 @@ const queryImportedExamRows = async (provider, seriesNumber = null, level = null
 
 const buildTaskPartMeta = (question, index = 0) => {
   const metadata = asJsonObject(question.source_metadata);
+  const sectionMetadata = asJsonObject(question.section_metadata);
   const partNumber = Number(question.part_number) || Number(question.section_position) || index + 1;
   const partTitle = question.section_title || (partNumber ? `Teil ${partNumber}` : "Part");
   return {
@@ -1614,10 +2727,19 @@ const buildTaskPartMeta = (question, index = 0) => {
     partDurationMinutes: Number(question.section_duration_minutes) || null,
     partPoints: Number(question.section_points) || null,
     sourceQuestionNumber: metadata.sourceQuestionNumber ?? question.position ?? index + 1,
+    sourceMetadata: metadata,
+    partSourceMetadata: sectionMetadata,
   };
 };
 
-const buildListeningTask = (question, index = 0) => {
+const resolveListeningAudioForQuestion = (question, listeningAudioMap = new Map()) => {
+  const metadata = asJsonObject(question.source_metadata);
+  const partNumber = Number(question.part_number) || Number(question.section_position) || Number(metadata.partNumber) || 1;
+  const itemNumber = Number(metadata.textNumber || metadata.audioItemNumber || metadata.itemNumber) || 1;
+  return listeningAudioMap.get(`${partNumber}:${itemNumber}`) || listeningAudioMap.get(`${partNumber}:1`) || null;
+};
+
+const buildListeningTask = (question, index = 0, listeningAudioMap = new Map()) => {
   const questionType = String(question.question_type || "").toLowerCase();
   const correctValue = extractCorrectValue(question.correct_answer);
   const options = normalizeChoiceOptions(question.options)
@@ -1632,6 +2754,7 @@ const buildListeningTask = (question, index = 0) => {
     hint: "Hören Sie den Audiotext aufmerksam und beantworten Sie die Aufgaben.",
     explanation: question.explanation || "Antwort aus dem importierten Hörverstehen-Modul.",
     sourceQuestionId: question.id,
+    audio: resolveListeningAudioForQuestion(question, listeningAudioMap),
     contentStyle: asJsonObject(metadata.contentStyle),
     ...buildTaskPartMeta(question, index),
     partInstructions: LISTENING_STUDENT_INSTRUCTION,
@@ -1674,9 +2797,12 @@ const buildListeningTask = (question, index = 0) => {
 
 const buildReadingTask = (question, index = 0) => {
   const questionType = String(question.question_type || "").toLowerCase();
+  const correctAnswerData = asJsonObject(question.correct_answer);
   const correctValue = extractCorrectValue(question.correct_answer);
   const options = normalizeChoiceOptions(question.options);
   const metadata = asJsonObject(question.source_metadata);
+  const scoring = asJsonObject(question.scoring);
+  const taskPoints = Number(scoring.points);
   const base = {
     id: `db-question-${question.id}`,
     level: question.level || "B1",
@@ -1686,8 +2812,52 @@ const buildReadingTask = (question, index = 0) => {
     explanation: question.explanation || "Réponse issue du document importé.",
     sourceQuestionId: question.id,
     contentStyle: asJsonObject(metadata.contentStyle),
+    points: Number.isFinite(taskPoints) ? taskPoints : 1,
     ...buildTaskPartMeta(question, index),
   };
+
+  if (metadata.structuredB2Lesen) {
+    const acceptedAnswers = Array.isArray(correctAnswerData.acceptedAnswers)
+      ? correctAnswerData.acceptedAnswers.map((value) => cleanPlainText(value)).filter(Boolean)
+      : [];
+    if (options.length >= 2) {
+      return {
+        ...base,
+        type: questionType.includes("multiple") ? "multiple" : "select",
+        options,
+        correct: correctValue || options[0].value,
+        alternatives: correctValue ? [correctValue.toLowerCase(), correctValue.toUpperCase()] : [],
+        uniqueAnswers: metadata.uniqueAnswers === true,
+        sourceKeyReviewRequired: metadata.sourceKeyReviewRequired === true,
+      };
+    }
+    return {
+      ...base,
+      type: "blank",
+      correct: correctValue,
+      alternatives: acceptedAnswers.filter((value) => value !== correctValue),
+      answerNormalization: metadata.answerNormalization || "strict-german",
+      manualReviewOnMismatch:
+        metadata.manualReviewOnMismatch === true || correctAnswerData.manualReviewOnMismatch === true,
+      sourcePrefixMismatch:
+        metadata.sourcePrefixMismatch === true || correctAnswerData.sourcePrefixMismatch === true,
+      visiblePrefix: metadata.visiblePrefix || correctAnswerData.visiblePrefix || "",
+      expectedWord: metadata.expectedWord || correctAnswerData.expectedWord || "",
+      requiredConcepts: Array.isArray(correctAnswerData.requiredConcepts)
+        ? correctAnswerData.requiredConcepts
+        : Array.isArray(metadata.requiredConcepts) ? metadata.requiredConcepts : [],
+    };
+  }
+
+  if (metadata.goetheB2Lesen && options.length >= 2) {
+    return {
+      ...base,
+      type: questionType.includes("multiple") ? "multiple" : "select",
+      options,
+      correct: correctValue || options[0].value,
+      alternatives: correctValue ? [correctValue.toLowerCase(), correctValue.toUpperCase()] : [],
+    };
+  }
 
   if (questionType.includes("true_false")) {
     return {
@@ -1920,7 +3090,61 @@ const attachGeneratedListeningAudio = async ({ examId, audio, provider }) => {
   };
 };
 
-const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {} }) => {
+const stripPublicListeningTranscriptFields = (value) => {
+  if (Array.isArray(value)) {
+    return value.map(stripPublicListeningTranscriptFields);
+  }
+  if (!value || typeof value !== "object") return value;
+
+  const next = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (["transcript", "adminTranscript", "admin_transcript", "script", "prompt", "timing", "sfx", "ambience"].includes(key)) {
+      continue;
+    }
+    next[key] = stripPublicListeningTranscriptFields(child);
+  }
+  return next;
+};
+
+const buildPublicListeningAudioSummary = (listeningAudioItems = []) => {
+  const firstItem = Array.isArray(listeningAudioItems) ? listeningAudioItems[0] : null;
+  if (!firstItem) {
+    return {
+      title: "Hören",
+      speaker: "Standarddeutsch",
+      audioUrl: "",
+      productionStatus: "missing",
+      listeningCount: 2,
+    };
+  }
+
+  const metadata = asJsonObject(firstItem.source_metadata);
+  const isBrowserFallback = metadata.browserTtsFallback === true;
+  const speechText = isBrowserFallback ? stripProductionMarkers(firstItem.admin_transcript || "") : "";
+  return {
+    id: `audio-item-${firstItem.id}`,
+    title: firstItem.title || `Audio ${firstItem.item_number || 1}`,
+    speaker: "Standarddeutsch",
+    audioUrl: firstItem.asset_id ? `/api/audio/generated/${firstItem.asset_id}` : "",
+    fallbackEngine: isBrowserFallback ? "browser-speech" : "",
+    productionLabel: isBrowserFallback ? "Browser TTS (no MP3)" : "MP3",
+    transcript: speechText,
+    tracks: isBrowserFallback ? [{
+      id: `browser-tts-${firstItem.id}`,
+      title: firstItem.title || `Audio ${firstItem.item_number || 1}`,
+      transcript: speechText,
+      audio: { transcript: speechText },
+    }] : [],
+    speakers: Array.isArray(firstItem.voice_profile_map) ? firstItem.voice_profile_map : [],
+    productionStatus: "ready",
+    listeningCount: Number(firstItem.listening_count) || 2,
+    durationSeconds: Number(firstItem.duration_seconds) || null,
+    partNumber: Number(firstItem.part_number) || 1,
+    itemNumber: Number(firstItem.item_number) || 1,
+  };
+};
+
+const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {}, listeningAudioItems = [] }) => {
   const moduleId = exam.section_type;
   const moduleMeta = PUBLIC_MODULE_META[moduleId] ?? PUBLIC_MODULE_META.read;
   const metadata = asJsonObject(exam.metadata);
@@ -1943,15 +3167,47 @@ const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {} 
       : clipText(applyExamAlias(section.instructions || section.title, routeMeta), 5200),
     durationMinutes: Number(section.duration_minutes) || null,
     points: Number(section.points) || null,
+    sourceMetadata: asJsonObject(section.metadata),
   }));
 
   let tasks;
+  const listeningAudioMap = new Map(
+    (Array.isArray(listeningAudioItems) ? listeningAudioItems : []).map((item) => {
+      const isBrowserFallback = asJsonObject(item.source_metadata).browserTtsFallback === true;
+      const speechText = isBrowserFallback ? stripProductionMarkers(item.admin_transcript || "") : "";
+      return [
+        `${Number(item.part_number) || 1}:${Number(item.item_number) || 1}`,
+        {
+        id: `audio-item-${item.id}`,
+        title: item.title || `Audio ${item.item_number || 1}`,
+        speaker: "Standarddeutsch",
+        audioUrl: item.asset_id ? `/api/audio/generated/${item.asset_id}` : "",
+        fallbackEngine: isBrowserFallback ? "browser-speech" : "",
+        productionLabel: isBrowserFallback ? "Browser TTS (no MP3)" : "MP3",
+        transcript: speechText,
+        tracks: isBrowserFallback ? [{
+          id: `browser-tts-${item.id}`,
+          title: item.title || `Audio ${item.item_number || 1}`,
+          transcript: speechText,
+          audio: { transcript: speechText },
+        }] : [],
+        speakers: Array.isArray(item.voice_profile_map) ? item.voice_profile_map : [],
+        productionStatus: "ready",
+        listeningCount: Number(item.listening_count) || 2,
+        durationSeconds: Number(item.duration_seconds) || null,
+        partNumber: Number(item.part_number) || 1,
+        itemNumber: Number(item.item_number) || 1,
+        },
+      ];
+    })
+  );
+
   if (moduleId === "write") {
     tasks = questions.map((question, index) => buildWritingTask(question, index));
   } else if (moduleId === "speak") {
     tasks = questions.map((question, index) => buildSpeakingTask(question, index));
   } else if (moduleId === "listen") {
-    tasks = questions.map((question, index) => buildListeningTask(question, index));
+    tasks = questions.map((question, index) => buildListeningTask(question, index, listeningAudioMap));
   } else {
     tasks = questions.map((question, index) => buildReadingTask(question, index));
   }
@@ -1986,7 +3242,15 @@ const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {} 
               : [{ id: "A", text: "Texte importé depuis le document source." }],
           }
         : undefined,
-    audio: moduleId === "listen" ? buildImportedListeningAudio({ title, sourceLabel, sections, questions }) : undefined,
+    audio: moduleId === "listen"
+      ? (() => {
+          const audioSummary = buildPublicListeningAudioSummary(listeningAudioItems);
+          return audioSummary.fallbackEngine === "browser-speech"
+            ? audioSummary
+            : stripPublicListeningTranscriptFields(audioSummary);
+        })()
+      : undefined,
+    globalDurationMinutes: Number(metadata.globalDurationMinutes || metadata.scoring?.globalDurationMinutes) || null,
     tasks,
     sourceExamId: exam.id,
   };
@@ -2071,18 +3335,14 @@ app.get("/api/exams/:provider/series/:seriesId/:moduleId", async (req, res) => {
       [exam.id]
     );
 
+    const listeningAudioItems = moduleId === "listen" ? await getPublishedAudioItemsForExam(exam.id) : [];
     const content = buildImportedModuleContent({
       exam,
       sections: sections.rows,
       questions: questions.rows,
       routeMeta,
+      listeningAudioItems,
     });
-    if (moduleId === "listen") {
-      content.audio = await attachGeneratedListeningAudio({
-        examId: exam.id,
-        audio: content.audio,
-      });
-    }
     return res.json({ ok: true, source: "database", series, content });
   } catch (err) {
     console.error("Imported module lookup failed", err);
@@ -2092,7 +3352,7 @@ app.get("/api/exams/:provider/series/:seriesId/:moduleId", async (req, res) => {
 
 const registerHandler = async (req, res) => {
   try {
-    const { email, password, username, firstName, lastName, marketingEmailsEnabled } = req.body ?? {};
+    const { email, password, username, firstName, lastName, country, phone, marketingEmailsEnabled } = req.body ?? {};
 
     if (!isEmail(email) || typeof password !== "string") {
       return res.status(400).json({ ok: false, error: "A valid email and password are required" });
@@ -2109,6 +3369,14 @@ const registerHandler = async (req, res) => {
     const normalizedEmail = normalizeEmail(email);
     const safeFirst = typeof firstName === "string" ? firstName.trim().slice(0, 80) : null;
     const safeLast = typeof lastName === "string" ? lastName.trim().slice(0, 80) : null;
+    const safeCountry = typeof country === "string" ? country.trim().toUpperCase() : "";
+    const safePhone = typeof phone === "string" ? phone.trim().slice(0, 40) : "";
+    if (!/^[A-Z]{2}$/.test(safeCountry)) {
+      return res.status(400).json({ ok: false, error: "A valid country is required" });
+    }
+    if (!/^\+[\d\s().-]{7,}$/.test(safePhone)) {
+      return res.status(400).json({ ok: false, error: "A valid international phone number is required" });
+    }
     const passwordHash = await bcrypt.hash(password, 12);
     const verificationToken = EMAIL_VERIFICATION_ENABLED ? makeToken() : null;
     const verificationCode = EMAIL_VERIFICATION_ENABLED ? makeVerificationCode() : null;
@@ -2116,18 +3384,20 @@ const registerHandler = async (req, res) => {
 
     const insert = await pool.query(
       `INSERT INTO users (
-         email, username, first_name, last_name, password_hash, role, status,
+         email, username, first_name, last_name, country, phone, password_hash, role, status,
          email_verified, verification_token_hash, verification_expires_at,
          verification_code_hash, verification_code_expires_at,
          last_verification_email_sent_at, marketing_emails_enabled
        )
-       VALUES ($1, $2, $3, $4, $5, 'user', 'active', $6, $7, $8, $9, $10, NULL, $11)
-       RETURNING id, email, username, first_name, last_name, email_verified, marketing_emails_enabled`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'user', 'active', $8, $9, $10, $11, $12, NULL, $13)
+       RETURNING id, email, username, first_name, last_name, country, phone, email_verified, marketing_emails_enabled`,
       [
         normalizedEmail,
         safeUsername,
         safeFirst,
         safeLast,
+        safeCountry,
+        safePhone,
         passwordHash,
         !EMAIL_VERIFICATION_ENABLED,
         verificationToken ? tokenHash(verificationToken) : null,
@@ -2330,7 +3600,7 @@ const loginHandler = async (req, res) => {
     }
 
     const userRes = await pool.query(
-      `SELECT id, email, username, first_name, last_name, date_of_birth, password_hash, role, status,
+      `SELECT id, email, username, first_name, last_name, date_of_birth, country, phone, password_hash, role, status,
               email_verified, has_full_access, partial_access, current_level, target_level,
               marketing_emails_enabled, created_at, last_login_at
        FROM users
@@ -2385,7 +3655,7 @@ const refreshHandler = async (req, res) => {
     const hashed = tokenHash(refreshToken);
     const tokenRes = await pool.query(
       `SELECT rt.id AS refresh_token_id, rt.user_id, rt.expires_at, rt.revoked_at,
-              u.email, u.username, u.first_name, u.last_name, u.date_of_birth,
+              u.email, u.username, u.first_name, u.last_name, u.date_of_birth, u.country, u.phone,
               u.role, u.status, u.email_verified, u.has_full_access, u.partial_access,
               u.current_level, u.target_level, u.marketing_emails_enabled, u.created_at, u.last_login_at
        FROM refresh_tokens rt
@@ -2789,7 +4059,10 @@ const levelActivityHandler = async (req, res) => {
     return res.json({ ok: true, level: snapshot });
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ ok: false, error: "Server error" });
+    return res.status(err.status && err.status < 500 ? err.status : 500).json({
+      ok: false,
+      error: err.status && err.status < 500 ? err.message : "Server error",
+    });
   }
 };
 
@@ -3173,6 +4446,70 @@ app.post("/contact", async (req, res) => {
   }
 });
 
+app.get("/api/testimonials", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, display_name, role_label, rating, comment, created_at
+         FROM testimonials
+        WHERE status = 'approved'
+        ORDER BY created_at DESC
+        LIMIT 12`
+    );
+    return res.json({
+      ok: true,
+      testimonials: result.rows.map((row) => ({
+        id: row.id,
+        displayName: row.display_name,
+        roleLabel: row.role_label,
+        rating: Number(row.rating),
+        comment: row.comment,
+        createdAt: row.created_at,
+      })),
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.post("/api/testimonials", testimonialRateLimiter, requireAuth, async (req, res) => {
+  try {
+    const comment = cleanPublicText(req.body?.comment, 1000);
+    const rating = Math.max(1, Math.min(5, Math.round(Number(req.body?.rating || 5))));
+    const displayName = cleanPublicText(
+      req.body?.displayName || req.user.first_name || req.user.username || req.user.email,
+      80
+    );
+    const roleLabel = cleanPublicText(req.body?.roleLabel || "Candidat", 80);
+    if (comment.length < 20) {
+      return res.status(400).json({ ok: false, error: "Le commentaire doit contenir au moins 20 caractères." });
+    }
+    const recent = await pool.query(
+      `SELECT COUNT(*)::int AS count
+         FROM testimonials
+        WHERE user_id = $1 AND created_at > NOW() - INTERVAL '1 hour'`,
+      [req.user.id]
+    );
+    if (Number(recent.rows[0]?.count || 0) >= 3) {
+      return res.status(429).json({ ok: false, error: "Veuillez patienter avant d'envoyer un autre avis." });
+    }
+    const inserted = await pool.query(
+      `INSERT INTO testimonials (user_id, display_name, role_label, rating, comment, status)
+       VALUES ($1, $2, $3, $4, $5, 'pending')
+       RETURNING id, status, created_at`,
+      [req.user.id, displayName || "Candidat", roleLabel, rating, comment]
+    );
+    return res.status(201).json({
+      ok: true,
+      testimonial: inserted.rows[0],
+      message: "Merci. Votre avis sera publié après validation.",
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
 app.get("/api/admin/users", requireAdmin, async (req, res) => {
   try {
     const users = await pool.query(`
@@ -3251,6 +4588,63 @@ app.patch("/api/admin/users/:id/status", requireAdmin, updateAdminUserStatusHand
 app.patch("/api/admin/users/:id/suspend", requireAdmin, (req, res) => {
   req.body = { ...(req.body ?? {}), status: req.body?.status === "active" ? "active" : "suspended" };
   return updateAdminUserStatusHandler(req, res);
+});
+
+app.get("/api/admin/testimonials", requireAdmin, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT t.*, u.email AS user_email, a.email AS reviewed_by_email
+         FROM testimonials t
+         LEFT JOIN users u ON u.id = t.user_id
+         LEFT JOIN users a ON a.id = t.reviewed_by
+        ORDER BY t.created_at DESC
+        LIMIT 200`
+    );
+    return res.json({ ok: true, testimonials: result.rows });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.patch("/api/admin/testimonials/:id", requireAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const status = ["pending", "approved", "rejected"].includes(req.body?.status) ? req.body.status : null;
+    const displayName = req.body?.displayName == null ? null : cleanPublicText(req.body.displayName, 80);
+    const roleLabel = req.body?.roleLabel == null ? null : cleanPublicText(req.body.roleLabel, 80);
+    const comment = req.body?.comment == null ? null : cleanPublicText(req.body.comment, 1000);
+    const rating = req.body?.rating == null ? null : Math.max(1, Math.min(5, Math.round(Number(req.body.rating))));
+    const adminNote = req.body?.adminNote == null ? null : cleanPublicText(req.body.adminNote, 500);
+    if (!Number.isInteger(id)) return res.status(400).json({ ok: false, error: "Invalid testimonial id" });
+    if (comment != null && comment.length < 20) {
+      return res.status(400).json({ ok: false, error: "Comment is too short" });
+    }
+    const updated = await pool.query(
+      `UPDATE testimonials
+          SET status = COALESCE($1, status),
+              display_name = COALESCE(NULLIF($2, ''), display_name),
+              role_label = COALESCE($3, role_label),
+              comment = COALESCE($4, comment),
+              rating = COALESCE($5, rating),
+              admin_note = COALESCE($6, admin_note),
+              reviewed_by = CASE WHEN $1 IS NULL THEN reviewed_by ELSE $7 END,
+              reviewed_at = CASE WHEN $1 IS NULL THEN reviewed_at ELSE NOW() END,
+              updated_at = NOW()
+        WHERE id = $8
+        RETURNING *`,
+      [status, displayName, roleLabel, comment, rating, adminNote, req.user.id, id]
+    );
+    if (!updated.rows[0]) return res.status(404).json({ ok: false, error: "Testimonial not found" });
+    await auditAdminAction(req, "testimonial.update", "testimonial", id, {
+      status,
+      edited: Boolean(displayName || roleLabel || comment || rating || adminNote),
+    });
+    return res.json({ ok: true, testimonial: updated.rows[0] });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
 });
 
 const adminAnalyticsHandler = async (req, res) => {
@@ -3425,6 +4819,429 @@ const loadListeningExamAudioContext = async (examId) => {
   };
 };
 
+const ensureListeningAudioProductionSchema = async () => {
+  await ensureDocumentImportSchema(pool);
+  await ensureAudioAssetSchema(pool);
+  await ensureVoiceProfileSchema(pool);
+  await pool.query(`
+    ALTER TABLE exam_listening_audio_items
+      ADD COLUMN IF NOT EXISTS voice_profile_map JSONB NOT NULL DEFAULT '{}'::jsonb,
+      ADD COLUMN IF NOT EXISTS admin_notes TEXT,
+      ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS generation_log JSONB NOT NULL DEFAULT '[]'::jsonb;
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS exam_listening_audio_items_exam_status_idx ON exam_listening_audio_items(exam_id, audio_generation_status, part_number, item_number);`);
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS exam_listening_audio_items_exam_part_item_uidx ON exam_listening_audio_items(exam_id, part_number, item_number);`);
+};
+
+const inferListeningVoiceSettings = ({ transcript, itemNumber, audioSettings = {}, profiles = [] }) => {
+  const text = `${transcript || ""}\n${JSON.stringify(audioSettings || {})}`;
+  const ignoredLabel = /^(?:(?:der|die|das)\s+.+|sie|text|track|audio|teil|thema|das thema|aufgabe|aufgaben|frage|fragen|multiple-choice|richtig\/falsch|richtig falsch|loesung|lösung|antwort|skript|geh[oö]rt|format|transkription|transcription|type de t[aâ]che|heute|und|dann|erstens|zweitens|drittens|au[ßs]erdem|überraschungen|ueberraschungen|kluft|weltbild|sprache|achtsamkeit|pakete|qualit[aä]tsfinanzierung|qualitaetsfinanzierung|vorteile|nachteile|optionen|zum abschluss)\s*\d*$/i;
+  const dialogueLabels = parseSpeakerSegments({
+    transcript,
+    tracks: [{
+      id: `listening-item-${itemNumber || "admin"}`,
+      transcript,
+      audio: { transcript },
+    }],
+  })
+    .map((segment) => String(segment.speaker || "").trim())
+    .filter((label) => label && label !== "Narrator" && !ignoredLabel.test(label));
+  const hasDialogue = dialogueLabels.length > 0;
+  const femaleProfiles = profiles.filter((profile) => profile.gender === "female");
+  const maleProfiles = profiles.filter((profile) => profile.gender === "male");
+  const pick = (list, index = 0) => list[index % Math.max(1, list.length)] || {};
+  const configuredSpeakers = Array.isArray(audioSettings?.speakers) ? audioSettings.speakers : [];
+  const configuredGenderFor = (name) => {
+    const folded = foldPlain(name);
+    const match = configuredSpeakers.find((speaker) => {
+      const labels = [speaker.speaker, speaker.voiceName, speaker.id].map(foldPlain).filter(Boolean);
+      return labels.some((label) => folded && (folded === label || folded.includes(label)));
+    });
+    return String(match?.suggestedGender || match?.gender || "").toLowerCase();
+  };
+  if (!hasDialogue) {
+    const prefersMale = /\b(?:homme|male|mann|maennlich|sprecher\s*b|speaker\s*b)\b/i.test(text) && Number(itemNumber) % 2 === 0;
+    const profile = prefersMale ? pick(maleProfiles) : pick(femaleProfiles);
+    return [{
+      speaker: "Narrator",
+      gender: profile.gender || (prefersMale ? "male" : "female"),
+      suggestedGender: profile.gender || (prefersMale ? "male" : "female"),
+      voiceId: profile.voice_id || undefined,
+      voiceName: profile.label || undefined,
+      role: "narration",
+      style: profile.style || "Deutsch, klar, pruefungsgerecht",
+      ...(asJsonObject(profile.settings)),
+    }];
+  }
+
+  const speakers = [];
+  const seen = new Set();
+  dialogueLabels.forEach((name) => {
+    const key = foldPlain(name);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    const configuredGender = configuredGenderFor(name);
+    const looksFemale = /\b(?:frau|mutter|tochter|freundin|kundin|mitarbeiterin|beraterin|reiseberaterin|anna|julia|julie|maria|sara|clara|eva|gabi|moderatorin|sprecherin|reporterin|katrin|monika|lena|hannah|nadja|klara|nina|mira|petra|sabine|lara|greta|sophie)\b/i.test(name);
+    const looksMale = /\b(?:herr|vater|sohn|freund|ben|daniel|frank|mike|moderator|sprecher|reporter|thomas|klaus|marco|tobias|lukas|pawel|bernd|otto|markus|stefan|robert|tim|felix|karl|ralf|tom|kunde|student|reisender|dr\.\s*(?:felix|stark|haas|schulz))\b/i.test(name);
+    const gender = looksFemale && !looksMale
+      ? "female"
+      : looksMale && !looksFemale
+        ? "male"
+        : configuredGender === "male" || configuredGender === "female"
+      ? configuredGender
+      : "female";
+    const list = gender === "male" ? maleProfiles : femaleProfiles;
+    const profile = pick(list, speakers.filter((speaker) => speaker.gender === gender).length);
+    speakers.push({
+      speaker: name,
+      gender,
+      suggestedGender: gender,
+      voiceId: profile.voice_id || undefined,
+      voiceName: profile.label || undefined,
+      role: "dialogue",
+      style: profile.style || "natuerlich, klar, dialogisch",
+      ...(asJsonObject(profile.settings)),
+    });
+  });
+  return speakers.length ? speakers : inferListeningVoiceSettings({ transcript: "", itemNumber, audioSettings, profiles });
+};
+
+const isListeningTemplateTranscript = (transcript) =>
+  /\bsprecher(?:in)?\s*:\s*_+/i.test(transcript) ||
+  /\(not found in source|manual review required\)/i.test(transcript) ||
+  /_{3,}/.test(transcript);
+
+const isListeningProductionLine = (line) =>
+  /^(?:(?:der|die|das)\s+[^:]+|sie|thema|das thema|aufgabe|aufgaben|frage|fragen|multiple-choice|richtig\/falsch|richtig falsch|loesung|lösung|antwort|skript|format|transkription|transcription|type de t[aâ]che|heute|und|dann|erstens|zweitens|drittens|au[ßs]erdem|überraschungen|ueberraschungen|kluft|weltbild|sprache|achtsamkeit|pakete|qualit[aä]tsfinanzierung|qualitaetsfinanzierung|vorteile|nachteile|optionen|zum abschluss)\s*:/i.test(line) ||
+  /^\s*(?:n|■|-)?\s*\[?(?:anfang|ende|pause|sfx|audio script|zweite wiedergabe|wiederholung)\]?/i.test(line);
+
+const extractListeningDialogueSpeakerLabels = ({ transcript, settings }) => {
+  const settingLabels = [];
+  const transcriptLabels = [];
+  const add = (target, value) => {
+    const normalized = String(value || "")
+      .replace(/^\s*(?:n|■|-)\s*/i, "")
+      .replace(/\s*\([^)]*\)\s*$/g, "")
+      .trim();
+    if (!normalized || /^(?:(?:der|die|das)\s+.+|sie|text|track|audio|teil|thema|das thema|aufgabe|aufgaben|frage|fragen|multiple-choice|richtig\/falsch|richtig falsch|loesung|lösung|antwort|skript|geh[oö]rt|format|transkription|transcription|type de t[aâ]che|heute|und|dann|erstens|zweitens|drittens|au[ßs]erdem|überraschungen|ueberraschungen|kluft|weltbild|sprache|achtsamkeit|pakete|qualit[aä]tsfinanzierung|qualitaetsfinanzierung|vorteile|nachteile|optionen|zum abschluss)\s*\d*$/i.test(normalized)) return;
+    const folded = foldPlain(normalized);
+    if (!folded || target.some((label) => foldPlain(label) === folded)) return;
+    target.push(normalized);
+  };
+  const speakers = Array.isArray(settings?.speakers) ? settings.speakers : [];
+  speakers.forEach((speaker) => add(settingLabels, speaker.speaker || speaker.voiceName || speaker.id));
+  Array.from(String(transcript || "").matchAll(/(?:^|\n)\s*(?:n|■|-)?\s*((?:Herr|Frau|Dr\.?\s+[A-ZÄÖÜ][^:\n]{0,28}|Moderator|Moderatorin|Gast|Reporter|Reporterin|Sprecher|Sprecherin)(?:\s+[A-ZÄÖÜ][^:\n]{0,36})?)\s*:/g))
+    .forEach((match) => add(transcriptLabels, match[1]));
+  if (transcriptLabels.length < 2 && settingLabels.length < 2) {
+    Array.from(String(transcript || "").matchAll(/(?:^|\n)\s*([A-ZÄÖÜ][^:\n]{1,36})\s*:/gu))
+      .forEach((match) => add(transcriptLabels, match[1]));
+  }
+  return (transcriptLabels.length >= 2 ? transcriptLabels : settingLabels).slice(0, 4);
+};
+
+const findKnownListeningSpeakerLabel = (label, speakerLabels) => {
+  const folded = foldPlain(label);
+  return speakerLabels.find((speaker) => {
+    const speakerFolded = foldPlain(speaker);
+    return folded === speakerFolded || folded.includes(speakerFolded);
+  }) || "";
+};
+
+const prepareListeningTranscriptForTts = ({ transcript, title, settings }) => {
+  if (isListeningTemplateTranscript(transcript || "")) return "";
+  const normalized = stripProductionMarkers(transcript || "");
+  if (!normalized || isListeningTemplateTranscript(normalized)) return "";
+  if (!/\b(?:radiointerview|radiogespr[aä]ch|radiogespraech|dialog|dialogue|interview|diskussion|discussion)\b/i.test(`${title || ""} ${JSON.stringify(settings || {})}`)) {
+    return normalized;
+  }
+  const speakerLabels = extractListeningDialogueSpeakerLabels({ transcript: normalized, settings });
+  if (speakerLabels.length < 2) return normalized;
+  let turnIndex = 0;
+  const prepared = normalized.split(/\n+/).map((line) => line.trim()).filter(Boolean).reduce((lines, rawLine) => {
+    const line = rawLine.replace(/^\s*(?:format|transkription|transcription)\s*:\s*/i, "").trim();
+    if (isListeningProductionLine(line)) return lines;
+    if (/^\s*(?:n|■|-)?\s*(?:Moderator|Moderatorin|Gast|Reporter|Reporterin|Sprecher|Sprecherin)\b[^:\n]*:/i.test(line)) return lines;
+    const labelMatch = line.match(/^\s*(?:n|■|-)?\s*([A-ZÄÖÜ][^:\n]{1,48})\s*:\s*(.*)$/u);
+    if (labelMatch) {
+      const knownLabel = findKnownListeningSpeakerLabel(labelMatch[1], speakerLabels);
+      if (knownLabel) {
+        lines.push(`${knownLabel}: ${labelMatch[2]}`.trim());
+      } else if (labelMatch[2]) {
+        lines.push(`${speakerLabels[turnIndex % speakerLabels.length]}: ${labelMatch[2]}`.trim());
+        turnIndex += 1;
+      }
+      return lines;
+    }
+    lines.push(`${speakerLabels[turnIndex % speakerLabels.length]}: ${line}`);
+    turnIndex += 1;
+    return lines;
+  }, []);
+  return prepared.join("\n").trim() || normalized;
+};
+
+const buildAudioFromListeningItem = (item, profiles = []) => {
+  const settings = asJsonObject(item.audio_engine_settings);
+  const transcript = prepareListeningTranscriptForTts({
+    transcript: item.admin_transcript || "",
+    title: item.title || "",
+    settings,
+  });
+  const speakers = inferListeningVoiceSettings({
+    transcript,
+    itemNumber: item.item_number,
+    audioSettings: settings,
+    profiles,
+  });
+  return {
+    title: item.title || `Hoeren Teil ${item.part_number || 1}`,
+    speaker: speakers.map((speaker) => speaker.speaker).join(" / ") || "Standarddeutsch",
+    scene: settings.scene || settings.situation || "",
+    situation: settings.situation || "",
+    transcript,
+    speakers,
+    tracks: [{
+      id: `listening-item-${item.id}`,
+      partNumber: Number(item.part_number) || 1,
+      title: item.title || `Text ${item.item_number || 1}`,
+      transcript,
+      audio: { transcript, speakers },
+    }],
+    ambience: [],
+    sfx: "",
+    rate: settings.rate || 0.92,
+  };
+};
+
+const appendAudioItemLog = async (itemId, entry) => {
+  await pool.query(
+    `UPDATE exam_listening_audio_items
+        SET generation_log = COALESCE(generation_log, '[]'::jsonb) || $2::jsonb,
+            updated_at = NOW()
+      WHERE id = $1`,
+    [itemId, JSON.stringify([{ at: new Date().toISOString(), ...entry }])]
+  );
+};
+
+const getLatestListeningPreviewDraft = async (exam) => {
+  const result = await pool.query(
+    `SELECT id, draft_content
+       FROM exam_document_imports
+      WHERE LOWER(provider) = LOWER($1)
+        AND UPPER(level) = UPPER($2)
+        AND section_type = 'listen'
+        AND draft_content <> '{}'::jsonb
+      ORDER BY updated_at DESC, id DESC
+      LIMIT 1`,
+    [exam.provider || exam.exam_type || "", exam.level || "B1"]
+  );
+  return result.rows[0] || null;
+};
+
+const splitTranscriptByTextNumber = (transcript = "", itemNumber = 1) => {
+  const text = stripProductionMarkers(transcript || "");
+  const number = Number(itemNumber) || 1;
+  const escaped = String(number).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const next = String(number + 1).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const patterns = [
+    new RegExp(`(?:^|\\s)(?:Text|Track|Audio)\\s*${escaped}\\s*[:.-]\\s*([\\s\\S]*?)(?=(?:\\s(?:Text|Track|Audio)\\s*${next}\\s*[:.-])|$)`, "i"),
+    new RegExp(`(?:^|\\s)${escaped}\\s*[.)-]\\s*([\\s\\S]*?)(?=(?:\\s${next}\\s*[.)-]\\s)|$)`, "i"),
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1] && match[1].trim().length > 20) return stripProductionMarkers(match[1]);
+  }
+  return text;
+};
+
+const syncListeningAudioItemsFromExamContent = async (examId) => {
+  await ensureListeningAudioProductionSchema();
+  const examResult = await pool.query(`SELECT * FROM exams WHERE id = $1`, [examId]);
+  const exam = examResult.rows[0];
+  if (!exam) return { error: "Exam not found", status: 404 };
+  if (exam.section_type !== "listen") return { error: "Audio item sync is only available for Hoeren exams.", status: 400 };
+  const sections = await pool.query(`SELECT * FROM exam_sections WHERE exam_id = $1 ORDER BY position, id`, [examId]);
+  const questions = await pool.query(
+    `SELECT id, section_id, position, prompt, transcript, audio, source_metadata
+       FROM exam_questions
+      WHERE exam_id = $1
+      ORDER BY position, id`,
+    [examId]
+  );
+  const questionsBySection = new Map();
+  questions.rows.forEach((question) => {
+    const key = question.section_id || "unassigned";
+    if (!questionsBySection.has(key)) questionsBySection.set(key, []);
+    questionsBySection.get(key).push(question);
+  });
+  const upserted = [];
+  for (const section of sections.rows) {
+    const partNumber = Number(section.part_number) || Number(section.position) || upserted.length + 1;
+    const sectionMetadata = asJsonObject(section.metadata);
+    const sectionQuestions = questionsBySection.get(section.id) || [];
+    const textNumbers = Array.from(new Set(sectionQuestions
+      .map((question) => Number(asJsonObject(question.source_metadata).textNumber || asJsonObject(question.source_metadata).audioItemNumber || asJsonObject(question.source_metadata).itemNumber))
+      .filter(Boolean)))
+      .sort((a, b) => a - b);
+    const itemNumbers = textNumbers.length ? textNumbers : [1];
+    const sectionAudio = {
+      ...asJsonObject(sectionMetadata.audio),
+      ...asJsonObject(sectionQuestions.find((question) => Object.keys(asJsonObject(question.audio)).length)?.audio),
+    };
+    const fullTranscript = cleanPlainText(
+      sectionMetadata.transcript ||
+      sectionQuestions.find((question) => question.transcript)?.transcript ||
+      sectionAudio.transcript ||
+      section.instructions ||
+      ""
+    );
+    if (!fullTranscript || fullTranscript.length < 20) continue;
+    for (const itemNumber of itemNumbers) {
+      const transcript = splitTranscriptByTextNumber(fullTranscript, itemNumber);
+      if (!transcript || transcript.length < 20) continue;
+      const result = await pool.query(
+        `INSERT INTO exam_listening_audio_items (
+           exam_id, section_id, source_import_id, provider, level, series_number,
+           part_number, item_number, title, instructions, admin_transcript,
+           audio_engine_settings, listening_count, audio_generation_status,
+           validation_warnings, source_metadata, position, updated_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, 'draft', $14::jsonb, $15::jsonb, $16, NOW())
+         ON CONFLICT (exam_id, part_number, item_number)
+         DO UPDATE SET
+           section_id = EXCLUDED.section_id,
+           title = EXCLUDED.title,
+           instructions = EXCLUDED.instructions,
+           admin_transcript = CASE
+             WHEN exam_listening_audio_items.audio_generation_status IN ('published', 'approved', 'generated')
+               THEN exam_listening_audio_items.admin_transcript
+             ELSE EXCLUDED.admin_transcript
+           END,
+           audio_engine_settings = EXCLUDED.audio_engine_settings,
+           validation_warnings = EXCLUDED.validation_warnings,
+           source_metadata = EXCLUDED.source_metadata,
+           position = EXCLUDED.position,
+           updated_at = NOW()
+         RETURNING *`,
+        [
+          examId,
+          section.id,
+          exam.source_import_id || null,
+          exam.provider || exam.exam_type || null,
+          exam.level || null,
+          Number(exam.series_number) || null,
+          partNumber,
+          itemNumber,
+          itemNumbers.length > 1 ? `Teil ${partNumber} - Text ${itemNumber}` : (section.title || `Teil ${partNumber}`),
+          LISTENING_STUDENT_INSTRUCTION,
+          transcript,
+          JSON.stringify(sectionAudio),
+          Number(sectionAudio.listeningCount || sectionMetadata.listeningCount || 2),
+          JSON.stringify(["Background/SFX mixing is not enabled in this deployment; generated audio is clean voice-only."]),
+          JSON.stringify({ source: "published-exam-content", sectionId: section.id, partNumber, itemNumber }),
+          (partNumber * 100) + itemNumber,
+        ]
+      );
+      upserted.push(result.rows[0]);
+    }
+  }
+  return { exam, items: upserted };
+};
+
+const syncListeningAudioItemsFromDraft = async (examId) => {
+  await ensureListeningAudioProductionSchema();
+  const examResult = await pool.query(`SELECT * FROM exams WHERE id = $1`, [examId]);
+  const exam = examResult.rows[0];
+  if (!exam) return { error: "Exam not found", status: 404 };
+  if (exam.section_type !== "listen") return { error: "Audio item sync is only available for Hoeren exams.", status: 400 };
+  const draft = await getLatestListeningPreviewDraft(exam);
+  if (!draft) return { error: "No Hoeren preview draft found for this provider/level.", status: 404 };
+  const sections = await pool.query(`SELECT * FROM exam_sections WHERE exam_id = $1 ORDER BY position, id`, [examId]);
+  const sectionsByPart = new Map(sections.rows.map((section) => [Number(section.part_number) || Number(section.position), section]));
+  const content = asJsonObject(draft.draft_content);
+  const series = Array.isArray(content.series) ? content.series[0] : null;
+  const draftSections = Array.isArray(series?.sections) ? series.sections : [];
+  const upserted = [];
+
+  for (const draftSection of draftSections) {
+    const partNumber = Number(draftSection.partNumber || draftSection.part || draftSection.position) || upserted.length + 1;
+    const section = sectionsByPart.get(partNumber) || null;
+    const audioItems = Array.isArray(draftSection.audioItems) && draftSection.audioItems.length
+      ? draftSection.audioItems
+      : [{ itemNumber: 1, title: draftSection.title || `Teil ${partNumber}`, transcript: draftSection.transcript || draftSection.instructions || "", audioSettings: draftSection.audioSettings || {} }];
+    for (const audioItem of audioItems) {
+      const itemNumber = Number(audioItem.itemNumber || audioItem.number || audioItems.indexOf(audioItem) + 1) || 1;
+      const transcript = stripProductionMarkers(audioItem.adminTranscript || audioItem.transcript || audioItem.script || audioItem.audioText || "");
+      if (!transcript) continue;
+      const result = await pool.query(
+        `INSERT INTO exam_listening_audio_items (
+           exam_id, section_id, source_import_id, provider, level, series_number,
+           part_number, item_number, title, instructions, admin_transcript,
+           audio_engine_settings, listening_count, audio_generation_status,
+           validation_warnings, source_metadata, position, updated_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, 'draft', $14::jsonb, $15::jsonb, $16, NOW())
+         ON CONFLICT (exam_id, part_number, item_number)
+         DO UPDATE SET
+           section_id = EXCLUDED.section_id,
+           title = EXCLUDED.title,
+           instructions = EXCLUDED.instructions,
+           admin_transcript = EXCLUDED.admin_transcript,
+           audio_engine_settings = EXCLUDED.audio_engine_settings,
+           validation_warnings = EXCLUDED.validation_warnings,
+           source_metadata = EXCLUDED.source_metadata,
+           position = EXCLUDED.position,
+           updated_at = NOW()
+         RETURNING *`,
+        [
+          examId,
+          section?.id || null,
+          draft.id,
+          exam.provider || exam.exam_type || null,
+          exam.level || null,
+          Number(exam.series_number) || 1,
+          partNumber,
+          itemNumber,
+          audioItem.title || draftSection.title || `Teil ${partNumber} - Text ${itemNumber}`,
+          LISTENING_STUDENT_INSTRUCTION,
+          transcript,
+          JSON.stringify(audioItem.audioEngineSettings || audioItem.audioSettings || draftSection.audioEngineSettings || draftSection.audioSettings || {}),
+          Number(audioItem.listeningCount || draftSection.listeningCount || 2),
+          JSON.stringify([
+            "Background/SFX mixing is not enabled in this deployment; generated audio is clean voice-only.",
+          ]),
+          JSON.stringify({ previewImportId: draft.id, draftPartNumber: partNumber, draftItemNumber: itemNumber }),
+          (partNumber * 100) + itemNumber,
+        ]
+      );
+      upserted.push(result.rows[0]);
+    }
+  }
+  return { exam, draftId: draft.id, items: upserted };
+};
+
+const getPublishedAudioItemsForExam = async (examId) => {
+  await ensureListeningAudioProductionSchema();
+  const result = await pool.query(
+    `SELECT i.id, i.exam_id, i.section_id, i.part_number, i.item_number, i.title,
+            i.listening_count, i.audio_generation_status, i.generated_audio_asset_id,
+            i.admin_transcript, i.voice_profile_map, i.source_metadata,
+            a.id AS asset_id, a.status AS asset_status, a.byte_size, a.duration_seconds, a.updated_at AS asset_updated_at
+       FROM exam_listening_audio_items i
+       LEFT JOIN exam_audio_assets a ON a.id = i.generated_audio_asset_id
+      WHERE i.exam_id = $1
+        AND i.audio_generation_status = 'published'
+        AND (
+          a.status = 'ready'
+          OR COALESCE(i.source_metadata->>'browserTtsFallback', 'false') = 'true'
+        )
+      ORDER BY i.part_number, i.item_number, i.id`,
+    [examId]
+  );
+  return result.rows;
+};
+
 const generateListeningAudioForPublishedExams = async ({ exams = [], adminId = null }) => {
   const results = [];
   for (const exam of exams) {
@@ -3485,10 +5302,18 @@ app.get("/api/subscription-plans", async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT id, level, plan_key, plan_name, duration_days, price_eur, currency,
-              writing_simulator_attempts, certifications, unlocked_sections
+              writing_simulator_attempts, speaking_simulator_quota, certifications, unlocked_sections,
+              plan_category, access_months, billed_months
        FROM subscription_plans
        WHERE is_active = TRUE
        ORDER BY level, CASE plan_key WHEN 'starter' THEN 1 WHEN 'standard' THEN 2 ELSE 3 END`
+    );
+    const industrial = await pool.query(
+      `SELECT id, offer_key, label, duration_days, access_months, billed_months, price_eur, currency,
+              speaking_simulator_quota, certifications, unlocked_sections
+         FROM industrial_subscription_offers
+        WHERE is_active = TRUE
+        ORDER BY duration_days`
     );
     return res.json({
       ok: true,
@@ -3501,6 +5326,23 @@ app.get("/api/subscription-plans", async (req, res) => {
         priceEur: Number(row.price_eur),
         currency: row.currency,
         writingSimulatorAttempts: Number(row.writing_simulator_attempts),
+        speakingSimulatorQuota: Number(row.speaking_simulator_quota ?? 0),
+        planCategory: row.plan_category || "standard",
+        accessMonths: row.access_months ? Number(row.access_months) : null,
+        billedMonths: row.billed_months ? Number(row.billed_months) : null,
+        certifications: normalizeStringArray(row.certifications, SUBSCRIPTION_CERTIFICATIONS),
+        unlockedSections: normalizeStringArray(row.unlocked_sections, SUBSCRIPTION_SECTIONS),
+      })),
+      industrialOffers: industrial.rows.map((row) => ({
+        id: row.id,
+        offerKey: row.offer_key,
+        label: row.label,
+        durationDays: Number(row.duration_days),
+        accessMonths: Number(row.access_months),
+        billedMonths: Number(row.billed_months),
+        priceEur: Number(row.price_eur),
+        currency: row.currency,
+        speakingSimulatorQuota: Number(row.speaking_simulator_quota),
         certifications: normalizeStringArray(row.certifications, SUBSCRIPTION_CERTIFICATIONS),
         unlockedSections: normalizeStringArray(row.unlocked_sections, SUBSCRIPTION_SECTIONS),
       })),
@@ -3544,38 +5386,301 @@ app.get("/api/subscriptions/access", requireAuth, async (req, res) => {
   }
 });
 
-app.post("/api/checkout/session", requireAuth, async (req, res) => {
+const getCheckoutPlanAndQuote = async ({ level, planKey, selectedCertifications, country = "CM" }) => {
+  const planResult = await pool.query(
+    `SELECT id, level, plan_key, plan_name, duration_days, price_eur, currency,
+            writing_simulator_attempts, speaking_simulator_quota, certifications, unlocked_sections
+       FROM subscription_plans
+       WHERE level = $1 AND plan_key = $2 AND is_active = TRUE
+       LIMIT 1`,
+    [level, planKey]
+  );
+  const plan = planResult.rows[0];
+  if (!plan) return { plan: null, quote: null };
+  const countryCode = normalizeMobileMoneyCountry(country) || "CM";
+  const countryConfig = MOBILE_MONEY_COUNTRIES[countryCode] || MOBILE_MONEY_COUNTRIES.CM;
+  const basePriceEur = Number(plan.price_eur);
+  const selectedCertificationCount = selectedCertifications.length;
+  const finalPriceEur = Number((basePriceEur * selectedCertificationCount).toFixed(2));
+  const paymentCurrency = countryConfig.currency;
+  const paymentAmount = eurToNotchPayAmount(finalPriceEur, paymentCurrency);
+  return {
+    plan,
+    quote: {
+      level: plan.level,
+      planKey: plan.plan_key,
+      planName: plan.plan_name,
+      durationDays: Number(plan.duration_days),
+      basePriceEur,
+      selectedCertifications,
+      selectedCertificationCount,
+      finalPriceEur,
+      paymentAmount,
+      paymentCurrency,
+      country: countryCode,
+      countryLabel: countryConfig.label,
+      exchangeRate: NOTCHPAY_XAF_PER_EUR,
+      writingSimulatorAttempts: Number(plan.writing_simulator_attempts),
+      speakingSimulatorQuota: Number(plan.speaking_simulator_quota ?? 0),
+      unlockedSections: normalizeStringArray(plan.unlocked_sections, SUBSCRIPTION_SECTIONS),
+    },
+  };
+};
+
+const getEnterpriseOfferAndQuote = async ({ offerKey, country = "CM" }) => {
+  const offerResult = await pool.query(
+    `SELECT id, offer_key, label, duration_days, access_months, billed_months, price_eur, currency,
+            speaking_simulator_quota, certifications, unlocked_sections
+       FROM industrial_subscription_offers
+      WHERE offer_key = $1 AND is_active = TRUE
+      LIMIT 1`,
+    [String(offerKey || "").trim()]
+  );
+  const offer = offerResult.rows[0];
+  if (!offer) return { offer: null, billingPlan: null, quote: null };
+  const billingPlan = await getEnterpriseBillingPlan();
+  if (!billingPlan) return { offer, billingPlan: null, quote: null };
+  const countryCode = normalizeMobileMoneyCountry(country) || "CM";
+  const countryConfig = MOBILE_MONEY_COUNTRIES[countryCode] || MOBILE_MONEY_COUNTRIES.CM;
+  const selectedCertifications = normalizeStringArray(offer.certifications, SUBSCRIPTION_CERTIFICATIONS);
+  const finalPriceEur = Number(offer.price_eur);
+  const paymentCurrency = countryConfig.currency;
+  const paymentAmount = eurToNotchPayAmount(finalPriceEur, paymentCurrency);
+  return {
+    offer,
+    billingPlan,
+    quote: {
+      offerType: "enterprise",
+      offerKey: offer.offer_key,
+      label: offer.label,
+      level: "B1+B2",
+      planKey: "enterprise",
+      planName: offer.label,
+      durationDays: Number(offer.duration_days),
+      accessMonths: Number(offer.access_months),
+      billedMonths: Number(offer.billed_months),
+      basePriceEur: finalPriceEur,
+      selectedCertifications,
+      selectedCertificationCount: selectedCertifications.length,
+      finalPriceEur,
+      paymentAmount,
+      paymentCurrency,
+      country: countryCode,
+      countryLabel: countryConfig.label,
+      exchangeRate: NOTCHPAY_XAF_PER_EUR,
+      writingSimulatorAttempts: 10,
+      speakingSimulatorQuota: Number(offer.speaking_simulator_quota ?? 0),
+      unlockedSections: normalizeStringArray(offer.unlocked_sections, SUBSCRIPTION_SECTIONS),
+    },
+  };
+};
+
+app.post("/api/checkout/quote", requireAuth, async (req, res) => {
   try {
+    const offerKey = String(req.body?.offerKey || "").trim();
+    if (offerKey) {
+      const { offer, quote } = await getEnterpriseOfferAndQuote({ offerKey, country: req.body?.country });
+      if (!offer || !quote) return res.status(404).json({ ok: false, error: "Offre entreprise introuvable." });
+      return res.json({ ok: true, quote });
+    }
     const level = normalizeSubscriptionLevel(req.body?.level);
     const planKey = normalizePlanKey(req.body?.planKey);
-    const provider = normalizePaymentProvider(req.body?.provider);
     const rawSelectedCertifications = Array.isArray(req.body?.selectedCertifications)
       ? req.body.selectedCertifications
       : [];
     const selectedCertifications = normalizeStringArray(rawSelectedCertifications, SUBSCRIPTION_CERTIFICATIONS);
-    if (!level || !planKey) {
-      return res.status(400).json({ ok: false, error: "A valid pricing plan is required" });
-    }
+    if (!level || !planKey) return res.status(400).json({ ok: false, error: "Plan invalide." });
     if (!selectedCertifications.length) {
-      return res.status(400).json({ ok: false, error: "Select at least one certification" });
+      return res.status(400).json({ ok: false, error: "Selectionnez au moins une certification." });
     }
     if (selectedCertifications.length !== rawSelectedCertifications.length) {
+      return res.status(400).json({ ok: false, error: "Une certification selectionnee est invalide." });
+    }
+    const { plan, quote } = await getCheckoutPlanAndQuote({
+      level,
+      planKey,
+      selectedCertifications,
+      country: req.body?.country,
+    });
+    if (!plan) return res.status(404).json({ ok: false, error: "Plan introuvable." });
+    return res.json({ ok: true, quote });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "La preparation du paiement a echoue." });
+  }
+});
+
+app.post("/api/checkout/session", requireAuth, async (req, res) => {
+  try {
+    const publicBaseUrl = getRequestPublicBaseUrl(req);
+    const offerKey = String(req.body?.offerKey || "").trim();
+    const level = normalizeSubscriptionLevel(req.body?.level);
+    const planKey = normalizePlanKey(req.body?.planKey);
+    const provider = normalizePaymentProvider(req.body?.provider);
+    const paymentMethod = String(req.body?.paymentMethod || "mobile_money").trim().toLowerCase();
+    const idempotencyKey = String(req.body?.idempotencyKey || "").trim().slice(0, 120);
+    const rawSelectedCertifications = Array.isArray(req.body?.selectedCertifications)
+      ? req.body.selectedCertifications
+      : [];
+    const selectedCertifications = normalizeStringArray(rawSelectedCertifications, SUBSCRIPTION_CERTIFICATIONS);
+    if (!offerKey && (!level || !planKey)) {
+      return res.status(400).json({ ok: false, error: "A valid pricing plan is required" });
+    }
+    if (!offerKey && !selectedCertifications.length) {
+      return res.status(400).json({ ok: false, error: "Select at least one certification" });
+    }
+    if (!offerKey && selectedCertifications.length !== rawSelectedCertifications.length) {
       return res.status(400).json({ ok: false, error: "One or more selected certifications are invalid" });
     }
-
-    const planResult = await pool.query(
-      `SELECT id, level, plan_key, plan_name, duration_days, price_eur, currency,
-              writing_simulator_attempts, certifications, unlocked_sections
-       FROM subscription_plans
-       WHERE level = $1 AND plan_key = $2 AND is_active = TRUE
-       LIMIT 1`,
-      [level, planKey]
-    );
-    const plan = planResult.rows[0];
+    if (paymentMethod !== "mobile_money") {
+      return res.status(400).json({ ok: false, error: "Ce moyen de paiement n'est pas encore actif." });
+    }
+    const mobileMoneyValidation = validateMobileMoneySelection({
+      country: req.body?.mobileMoney?.country || req.body?.country || "CM",
+      provider: req.body?.mobileMoney?.provider,
+      phone: req.body?.mobileMoney?.phone,
+    });
+    if (!mobileMoneyValidation.ok) {
+      return res.status(400).json({ ok: false, error: mobileMoneyValidation.error });
+    }
+    const enterpriseQuoteResult = offerKey
+      ? await getEnterpriseOfferAndQuote({ offerKey, country: mobileMoneyValidation.country })
+      : null;
+    const normalQuoteResult = offerKey
+      ? null
+      : await getCheckoutPlanAndQuote({
+          level,
+          planKey,
+          selectedCertifications,
+          country: mobileMoneyValidation.country,
+        });
+    const plan = offerKey ? enterpriseQuoteResult?.billingPlan : normalQuoteResult?.plan;
+    const quote = offerKey ? enterpriseQuoteResult?.quote : normalQuoteResult?.quote;
+    const selectedForTransaction = quote?.selectedCertifications || selectedCertifications;
     if (!plan) return res.status(404).json({ ok: false, error: "Pricing plan not found" });
-    const basePriceEur = Number(plan.price_eur);
-    const selectedCertificationCount = selectedCertifications.length;
-    const finalPriceEur = Number((basePriceEur * selectedCertificationCount).toFixed(2));
+    if (idempotencyKey) {
+      const existing = await pool.query(
+        `SELECT id, status, provider_reference, metadata
+           FROM payment_transactions
+          WHERE user_id = $1
+            AND provider = $2
+            AND metadata->>'idempotencyKey' = $3
+            AND status IN ('pending', 'processing', 'succeeded')
+          ORDER BY created_at DESC
+          LIMIT 1`,
+        [req.user.id, provider, idempotencyKey]
+      );
+      const existingTransaction = existing.rows[0];
+      if (existingTransaction) {
+        const existingMetadata = asPlainObject(existingTransaction.metadata);
+        const existingNotchPay = asPlainObject(existingMetadata.notchpay);
+        let existingReference =
+          existingTransaction.provider_reference ||
+          existingNotchPay.reference ||
+          existingNotchPay.merchantReference ||
+          "";
+        let existingMerchantReference = existingNotchPay.merchantReference || "";
+        let existingAuthorizationUrl = existingNotchPay.authorizationUrl || "";
+        let customerMessage = existingMetadata.customerMessage || "Paiement deja en cours. Verifiez votre telephone.";
+
+        if (provider === "notchpay" && ["pending", "processing"].includes(normalizePaymentStatus(existingTransaction.status))) {
+          let notchPaySession = null;
+          let processing = null;
+          let processingError = null;
+          let providerStatus = "processing";
+          let processMethod = "";
+          try {
+            if (!existingReference) {
+              existingMerchantReference = existingMerchantReference || buildNotchPayReference(existingTransaction.id);
+              notchPaySession = await createNotchPayPayment({
+                user: req.user,
+                transactionId: existingTransaction.id,
+                reference: existingMerchantReference,
+                amountEur: quote.finalPriceEur,
+                plan,
+                selectedCertifications: selectedForTransaction,
+                callbackBaseUrl: publicBaseUrl,
+                currency: quote.paymentCurrency,
+                lockedCountry: mobileMoneyValidation.country,
+                phone: mobileMoneyValidation.phone,
+              });
+              existingReference = getNotchPayReferenceFromPayload(notchPaySession) || existingMerchantReference;
+              existingAuthorizationUrl = getNotchPayAuthorizationUrlFromPayload(notchPaySession);
+            }
+            const prompt = await startNotchPayMobileMoneyPrompt({
+              references: [existingReference, existingMerchantReference],
+              channel: mobileMoneyValidation.channel,
+              phone: mobileMoneyValidation.phone,
+              clientIp: getRequestClientIp(req),
+            });
+            existingReference = prompt.providerReference || existingReference;
+            processing = prompt.processing;
+            providerStatus = prompt.providerStatus;
+            processMethod = prompt.processMethod;
+            customerMessage = "Nouvelle demande Mobile Money envoyee. Validez-la sur votre telephone pour terminer l'abonnement.";
+          } catch (err) {
+            processingError = getNotchPayPromptErrorDetails(err);
+            customerMessage = processingError.message
+              ? `La demande Mobile Money n'a pas encore pu etre envoyee: ${processingError.message}. Vous pouvez verifier le paiement ou reessayer dans quelques instants.`
+              : "La demande Mobile Money n'a pas encore pu etre envoyee. Vous pouvez verifier le paiement ou reessayer dans quelques instants.";
+            console.warn("Existing Notch Pay Mobile Money prompt retry failed", {
+              transactionId: existingTransaction.id,
+              providerReference: existingReference,
+              status: processingError.status,
+              message: processingError.message,
+            });
+          }
+          await updateNotchPayTransactionPromptMetadata({
+            transactionId: existingTransaction.id,
+            providerReference: existingReference || existingTransaction.id,
+            merchantReference: existingMerchantReference,
+            authorizationUrl: existingAuthorizationUrl,
+            notchPaySession,
+            processing,
+            processingError,
+            providerStatus,
+            processMethod,
+            customerMessage,
+          });
+        }
+
+        existingReference = existingReference || existingTransaction.provider_reference || existingTransaction.id;
+        return res.json({
+          ok: true,
+          duplicate: true,
+          checkoutSession: {
+            provider,
+            paymentMethod,
+            status: existingTransaction.status,
+            transactionId: existingTransaction.id,
+            providerReference: existingReference,
+            merchantReference: existingMerchantReference,
+            authorizationUrl: existingAuthorizationUrl,
+            ...(existingMetadata.quote || quote),
+            mobileMoney: existingMetadata.mobileMoney,
+            message: customerMessage,
+          },
+        });
+      }
+    }
+    const transactionMetadata = {
+      ...quote,
+      quote,
+      offerType: offerKey ? "enterprise" : "individual",
+      enterpriseOffer: offerKey ? quote : null,
+      selectedCertifications: selectedForTransaction,
+      requestedProvider: provider,
+      paymentMethod,
+      idempotencyKey: idempotencyKey || null,
+      mobileMoney: {
+        country: mobileMoneyValidation.country,
+        countryLabel: mobileMoneyValidation.countryLabel,
+        provider: mobileMoneyValidation.provider,
+        providerLabel: mobileMoneyValidation.providerLabel,
+        channel: mobileMoneyValidation.channel,
+        phone: mobileMoneyValidation.phone,
+      },
+    };
 
     const transaction = await pool.query(
       `INSERT INTO payment_transactions (user_id, plan_id, provider, status, amount, currency, selected_certifications, metadata)
@@ -3585,47 +5690,537 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
         req.user.id,
         plan.id,
         provider,
-        finalPriceEur,
-        plan.currency,
-        JSON.stringify(selectedCertifications),
-        JSON.stringify({
-          level: plan.level,
-          planKey: plan.plan_key,
-          planName: plan.plan_name,
-          durationDays: Number(plan.duration_days),
-          basePriceEur,
-          selectedCertifications,
-          selectedCertificationCount,
-          finalPriceEur,
-          writingSimulatorAttempts: Number(plan.writing_simulator_attempts),
-          requestedProvider: provider,
-        }),
+        quote.paymentAmount,
+        quote.paymentCurrency,
+        JSON.stringify(selectedForTransaction),
+        safeJson(transactionMetadata),
       ]
     );
+    const transactionId = transaction.rows[0].id;
+    let providerReference = "";
+    let merchantReference = "";
+    let authorizationUrl = "";
+    let checkoutCustomerMessage = "Confirmez le paiement sur votre telephone pour terminer l'abonnement.";
+    if (provider === "notchpay") {
+      merchantReference = buildNotchPayReference(transactionId);
+      const notchPaySession = await createNotchPayPayment({
+        user: req.user,
+        transactionId,
+        reference: merchantReference,
+        amountEur: quote.finalPriceEur,
+        plan,
+        selectedCertifications: selectedForTransaction,
+        callbackBaseUrl: publicBaseUrl,
+        currency: quote.paymentCurrency,
+        lockedCountry: mobileMoneyValidation.country,
+        phone: mobileMoneyValidation.phone,
+      });
+      providerReference = getNotchPayReferenceFromPayload(notchPaySession) || merchantReference;
+      authorizationUrl = getNotchPayAuthorizationUrlFromPayload(notchPaySession);
+      let processing = null;
+      let processingError = null;
+      let providerStatus = "processing";
+      let processMethod = "";
+      try {
+        const prompt = await startNotchPayMobileMoneyPrompt({
+          references: [providerReference, merchantReference],
+          channel: mobileMoneyValidation.channel,
+          phone: mobileMoneyValidation.phone,
+          clientIp: getRequestClientIp(req),
+        });
+        providerReference = prompt.providerReference || providerReference;
+        processing = prompt.processing;
+        providerStatus = prompt.providerStatus;
+        processMethod = prompt.processMethod;
+      } catch (err) {
+        processingError = getNotchPayPromptErrorDetails(err);
+        console.warn("Notch Pay Mobile Money prompt was delayed", {
+          transactionId,
+          providerReference,
+          status: processingError.status,
+          message: processingError.message,
+        });
+        checkoutCustomerMessage =
+          processingError.message
+            ? `La demande Mobile Money n'a pas encore pu etre envoyee: ${processingError.message}. Vous pouvez verifier le paiement ou reessayer dans quelques instants.`
+            : "La demande Mobile Money n'a pas encore pu etre envoyee. Vous pouvez verifier le paiement ou reessayer dans quelques instants.";
+      }
+      await updateNotchPayTransactionPromptMetadata({
+        transactionId,
+        providerReference,
+        merchantReference,
+        authorizationUrl,
+        notchPaySession,
+        processing,
+        processingError,
+        providerStatus,
+        processMethod,
+        customerMessage: checkoutCustomerMessage,
+      });
+    }
 
     return res.json({
       ok: true,
       checkoutSession: {
         provider,
-        status: transaction.rows[0].status,
-        transactionId: transaction.rows[0].id,
+        paymentMethod,
+        status: "processing",
+        transactionId,
+        providerReference,
+        merchantReference,
+        authorizationUrl,
         planId: plan.id,
-        level: plan.level,
-        planKey: plan.plan_key,
-        planName: plan.plan_name,
-        amount: finalPriceEur,
-        basePriceEur,
-        selectedCertifications,
-        selectedCertificationCount,
-        finalPriceEur,
-        currency: plan.currency,
-        durationDays: Number(plan.duration_days),
-        writingSimulatorAttempts: Number(plan.writing_simulator_attempts),
-        certifications: selectedCertifications,
+        amount: quote.finalPriceEur,
+        ...quote,
+        certifications: selectedForTransaction,
         unlockedSections: normalizeStringArray(plan.unlocked_sections, SUBSCRIPTION_SECTIONS),
-        message: "Paiement bientôt disponible. Ce pack est prêt pour l’intégration du paiement.",
+        mobileMoney: transactionMetadata.mobileMoney,
+        message: checkoutCustomerMessage,
       },
     });
+  } catch (err) {
+    console.error(err);
+    const status = Number(err.status || err.statusCode || 500);
+    const providerMessage =
+      err?.data?.message ||
+      err?.data?.error ||
+      err?.message ||
+      "Payment session could not be prepared.";
+    return res.status(status >= 400 && status < 500 ? status : 502).json({
+      ok: false,
+      error: "La session de paiement n'a pas pu etre preparee. Veuillez reessayer dans quelques instants.",
+      details: isProduction ? undefined : providerMessage,
+    });
+  }
+});
+
+app.get("/api/checkout/session/:reference/status", optionalPaymentAuth, async (req, res) => {
+  try {
+    const reference = String(req.params.reference || "").trim();
+    if (!reference) return res.status(400).json({ ok: false, error: "Reference de paiement manquante." });
+    const result = await pool.query(
+      `SELECT id, user_id, provider, provider_reference, status, amount, currency, metadata
+         FROM payment_transactions
+        WHERE (
+          provider_reference = $1
+          OR metadata #>> '{notchpay,merchantReference}' = $1
+          OR metadata #>> '{notchpay,reference}' = $1
+          OR id::text = $1
+        )
+        ORDER BY created_at DESC
+        LIMIT 1`,
+      [reference]
+    );
+    const transaction = result.rows[0];
+    if (!transaction) return res.status(404).json({ ok: false, error: "Paiement introuvable." });
+
+    let status = normalizePaymentStatus(transaction.status);
+    let providerStatus = "";
+    let providerMessage = "";
+    let activated = null;
+    const transactionMetadata = asPlainObject(transaction.metadata);
+    const notchPayMetadata = asPlainObject(transactionMetadata.notchpay);
+    const providerLookupReferences = [
+      transaction.provider_reference,
+      notchPayMetadata.reference,
+      notchPayMetadata.merchantReference,
+      reference,
+    ];
+    let providerLookupReference = providerLookupReferences.find(Boolean) || reference;
+    if (transaction.provider === "notchpay" && ["pending", "processing"].includes(status)) {
+      try {
+        const lookup = await retrieveNotchPayPaymentWithFallback(providerLookupReferences);
+        const payment = lookup.payment;
+        providerLookupReference = lookup.reference || providerLookupReference;
+        providerStatus = getNotchPayStatusFromPayload(payment);
+        providerMessage = getNotchPayMessageFromPayload(payment);
+        if (isSuccessfulPaymentStatus(providerStatus)) {
+          activated = await activateSubscriptionFromTransaction({
+            providerReference: providerLookupReference,
+            providerPayload: payment,
+            eventType: "status_check",
+          });
+          status = "succeeded";
+        } else if (isFailedPaymentStatus(providerStatus)) {
+          status = "failed";
+          await pool.query(
+            `UPDATE payment_transactions
+                SET status = 'failed',
+                    metadata = metadata || $2::jsonb,
+                    updated_at = NOW()
+              WHERE id = $1`,
+            [transaction.id, safeJson({ notchpayStatusCheck: payment, notchpayStatus: providerStatus, notchpayMessage: providerMessage })]
+          );
+        } else {
+          await pool.query(
+            `UPDATE payment_transactions
+                SET metadata = metadata || $2::jsonb,
+                    updated_at = NOW()
+              WHERE id = $1`,
+            [transaction.id, safeJson({ notchpayStatusCheck: payment, notchpayStatus: providerStatus, notchpayMessage: providerMessage })]
+          );
+        }
+      } catch (error) {
+        console.warn("Notch Pay status check failed", error?.message || error);
+        providerMessage = error?.data?.message || error?.data?.error || error?.message || "";
+        const metadataStatus =
+          notchPayMetadata.providerStatus ||
+          notchPayMetadata.processing?.status ||
+          notchPayMetadata.processing?.payment_status ||
+          notchPayMetadata.processingError?.status ||
+          "";
+        const metadataMessage =
+          notchPayMetadata.processingError?.message ||
+          notchPayMetadata.notchpayMessage ||
+          notchPayMetadata.message ||
+          "";
+        providerStatus = providerStatus || metadataStatus;
+        providerMessage = providerMessage || metadataMessage;
+      }
+    }
+
+    const responseMessage = buildPaymentStatusMessage(status, providerStatus, providerMessage);
+    const ownsTransaction = Number(req.user?.id) === Number(transaction.user_id);
+    const refreshedAuth = status === "succeeded" && ownsTransaction ? signAccessToken(req.user) : null;
+    return res.json({
+      ok: true,
+      status,
+      providerStatus,
+      providerMessage,
+      activated,
+      providerReference: providerLookupReference,
+      transactionId: transaction.id,
+      quote: transactionMetadata.quote || null,
+      mobileMoney: transactionMetadata.mobileMoney || null,
+      user: status === "succeeded" && ownsTransaction ? await sanitizeUserWithSubscriptions(req.user) : null,
+      accessToken: refreshedAuth?.token || null,
+      expiresIn: refreshedAuth?.expiresIn || null,
+      message: responseMessage,
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Impossible de verifier le paiement pour le moment." });
+  }
+});
+
+app.get("/api/payments/notchpay/callback", async (req, res) => {
+  const reference = String(req.query.reference || req.query.transaction_id || req.query.transaction || "").trim();
+  const redirectRoot = getRequestPublicBaseUrl(req);
+  const redirectBase = `${redirectRoot}/offers`;
+  if (!reference) return res.redirect(`${redirectBase}?payment=missing_reference`);
+  try {
+    const payment = await retrieveNotchPayPayment(reference);
+    const status = getNotchPayStatusFromPayload(payment);
+    if (isSuccessfulPaymentStatus(status)) {
+      await activateSubscriptionFromTransaction({
+        providerReference: reference,
+        providerPayload: payment,
+        eventType: "callback",
+      });
+      return res.redirect(`${redirectRoot}/dashboard?payment=success`);
+    }
+    if (isFailedPaymentStatus(status)) {
+      await pool.query(
+        `UPDATE payment_transactions
+            SET status = 'failed',
+                metadata = metadata || $2::jsonb,
+                updated_at = NOW()
+          WHERE provider = 'notchpay' AND provider_reference = $1`,
+        [reference, safeJson({ notchpayCallback: payment, notchpayStatus: status })]
+      );
+      return res.redirect(`${redirectBase}?payment=failed`);
+    }
+    await pool.query(
+      `UPDATE payment_transactions
+          SET metadata = metadata || $2::jsonb,
+              updated_at = NOW()
+        WHERE provider = 'notchpay' AND provider_reference = $1`,
+      [reference, safeJson({ notchpayCallback: payment, notchpayStatus: status })]
+    );
+    return res.redirect(`${redirectBase}?payment=pending`);
+  } catch (err) {
+    console.error("Notch Pay callback failed", err);
+    return res.redirect(`${redirectBase}?payment=verification_error`);
+  }
+});
+
+app.post("/api/payments/notchpay/webhook", async (req, res) => {
+  try {
+    const rawPayload = req.rawBody || Buffer.from(JSON.stringify(req.body || {}));
+    const signature = req.get("x-notch-signature");
+    if (!verifyNotchPaySignature(rawPayload, signature)) {
+      return res.status(403).json({ ok: false, error: "Invalid signature" });
+    }
+    const event = req.body || parseJsonBody(rawPayload.toString("utf8"));
+    const reference = getNotchPayReferenceFromPayload(event);
+    const status = getNotchPayStatusFromPayload(event);
+    const eventType = String(event.event || event.type || event.action || status || "").trim();
+    if (!reference) return res.status(202).json({ ok: true, ignored: "missing_reference" });
+
+    if (isSuccessfulPaymentStatus(status) || /payment\.(complete|completed|success|successful|paid)/i.test(eventType)) {
+      const activated = await activateSubscriptionFromTransaction({
+        providerReference: reference,
+        providerPayload: event,
+        eventType,
+      });
+      return res.json({ ok: true, received: true, activated });
+    }
+    if (isFailedPaymentStatus(status) || /payment\.(failed|cancelled|canceled|expired|declined)/i.test(eventType)) {
+      await pool.query(
+        `UPDATE payment_transactions
+            SET status = 'failed',
+                metadata = metadata || $2::jsonb,
+                updated_at = NOW()
+          WHERE provider = 'notchpay' AND provider_reference = $1`,
+        [reference, safeJson({ notchpayWebhook: event, notchpayStatus: status, eventType })]
+      );
+      return res.json({ ok: true, received: true, status: "failed" });
+    }
+
+    await pool.query(
+      `UPDATE payment_transactions
+          SET metadata = metadata || $2::jsonb,
+              updated_at = NOW()
+        WHERE provider = 'notchpay' AND provider_reference = $1`,
+      [reference, safeJson({ notchpayWebhook: event, notchpayStatus: status, eventType })]
+    );
+    return res.json({ ok: true, received: true, status: "pending" });
+  } catch (err) {
+    console.error("Notch Pay webhook failed", err);
+    return res.status(500).json({ ok: false, error: "Webhook processing failed" });
+  }
+});
+
+app.get("/api/admin/subscriptions", requireAdmin, async (req, res) => {
+  try {
+    const [plans, industrialOffers, subscriptions, events] = await Promise.all([
+      pool.query(
+        `SELECT id, level, plan_key, plan_name, duration_days, price_eur, currency,
+                writing_simulator_attempts, speaking_simulator_quota, certifications, unlocked_sections
+           FROM subscription_plans
+          WHERE is_active = TRUE
+          ORDER BY level, CASE plan_key WHEN 'starter' THEN 1 WHEN 'standard' THEN 2 ELSE 3 END`
+      ),
+      pool.query(
+        `SELECT id, offer_key, label, duration_days, access_months, billed_months, price_eur, currency,
+                speaking_simulator_quota, certifications, unlocked_sections
+           FROM industrial_subscription_offers
+          WHERE is_active = TRUE
+          ORDER BY duration_days`
+      ),
+      pool.query(
+        `SELECT us.id, us.user_id, u.email, u.username, us.plan_id, us.level, us.plan_key, us.status,
+                us.starts_at, us.expires_at, us.selected_certifications, us.amount_paid, us.currency,
+                us.payment_provider, us.payment_reference, us.speaking_simulator_quota_override,
+                us.revoked_at, us.grant_reason, us.created_at, us.updated_at,
+                sp.plan_name, sp.duration_days, sp.price_eur, sp.writing_simulator_attempts,
+                sp.speaking_simulator_quota, sp.unlocked_sections
+           FROM user_subscriptions us
+           JOIN users u ON u.id = us.user_id
+           JOIN subscription_plans sp ON sp.id = us.plan_id
+          ORDER BY us.created_at DESC
+          LIMIT 200`
+      ),
+      pool.query(
+        `SELECT e.id, e.subscription_id, e.user_id, u.email, e.action, e.details, e.created_at,
+                a.email AS admin_email
+           FROM subscription_admin_events e
+           LEFT JOIN users u ON u.id = e.user_id
+           LEFT JOIN users a ON a.id = e.admin_id
+          ORDER BY e.created_at DESC
+          LIMIT 80`
+      ),
+    ]);
+
+    return res.json({
+      ok: true,
+      plans: plans.rows.map((row) => ({
+        id: row.id,
+        level: row.level,
+        planKey: row.plan_key,
+        planName: row.plan_name,
+        durationDays: Number(row.duration_days),
+        priceEur: Number(row.price_eur),
+        currency: row.currency,
+        writingSimulatorAttempts: Number(row.writing_simulator_attempts),
+        speakingSimulatorQuota: Number(row.speaking_simulator_quota ?? 0),
+        certifications: normalizeStringArray(row.certifications, SUBSCRIPTION_CERTIFICATIONS),
+        unlockedSections: normalizeStringArray(row.unlocked_sections, SUBSCRIPTION_SECTIONS),
+      })),
+      industrialOffers: industrialOffers.rows.map((row) => ({
+        id: row.id,
+        offerKey: row.offer_key,
+        label: row.label,
+        durationDays: Number(row.duration_days),
+        accessMonths: Number(row.access_months),
+        billedMonths: Number(row.billed_months),
+        priceEur: Number(row.price_eur),
+        currency: row.currency,
+        speakingSimulatorQuota: Number(row.speaking_simulator_quota),
+      })),
+      subscriptions: subscriptions.rows.map((row) => ({
+        ...mapSubscriptionRow(row),
+        userId: row.user_id,
+        email: row.email,
+        username: row.username,
+        paymentProvider: row.payment_provider,
+        paymentReference: row.payment_reference,
+        grantReason: row.grant_reason,
+        revokedAt: row.revoked_at,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      })),
+      events: events.rows.map((row) => ({
+        id: row.id,
+        subscriptionId: row.subscription_id,
+        userId: row.user_id,
+        email: row.email,
+        adminEmail: row.admin_email,
+        action: row.action,
+        details: row.details,
+        createdAt: row.created_at,
+      })),
+      paymentProviderStatus: {
+        automaticActivationReady: false,
+        message: "No verified payment webhook is configured. Manual admin grants are available.",
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.post("/api/admin/subscriptions/manual-grant", requireAdmin, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const userId = Number(req.body?.userId);
+    const planId = Number(req.body?.planId);
+    const selectedCertifications = normalizeStringArray(req.body?.selectedCertifications, SUBSCRIPTION_CERTIFICATIONS);
+    const startsAt = req.body?.startsAt ? new Date(req.body.startsAt) : new Date();
+    const requestedExpiresAt = req.body?.expiresAt ? new Date(req.body.expiresAt) : null;
+    const quotaOverride = req.body?.speakingSimulatorQuotaOverride === "" || req.body?.speakingSimulatorQuotaOverride == null
+      ? null
+      : Number(req.body.speakingSimulatorQuotaOverride);
+    const grantReason = String(req.body?.grantReason || "Manual admin grant").trim().slice(0, 500);
+
+    if (!Number.isInteger(userId) || userId <= 0) return res.status(400).json({ ok: false, error: "Valid userId is required" });
+    if (!Number.isInteger(planId) || planId <= 0) return res.status(400).json({ ok: false, error: "Valid planId is required" });
+    if (!selectedCertifications.length) return res.status(400).json({ ok: false, error: "Select at least one certification" });
+    if (Number.isFinite(quotaOverride) && quotaOverride < 0) return res.status(400).json({ ok: false, error: "Quota override must be positive" });
+    if (Number.isNaN(startsAt.getTime())) return res.status(400).json({ ok: false, error: "Invalid start date" });
+
+    await client.query("BEGIN");
+    const user = await client.query(`SELECT id, email FROM users WHERE id = $1`, [userId]);
+    if (!user.rows[0]) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ ok: false, error: "User not found" });
+    }
+    const planResult = await client.query(
+      `SELECT id, level, plan_key, plan_name, duration_days, price_eur, currency, writing_simulator_attempts
+         FROM subscription_plans
+        WHERE id = $1 AND is_active = TRUE`,
+      [planId]
+    );
+    const plan = planResult.rows[0];
+    if (!plan) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ ok: false, error: "Plan not found" });
+    }
+    const expiresAt = requestedExpiresAt && !Number.isNaN(requestedExpiresAt.getTime())
+      ? requestedExpiresAt
+      : new Date(startsAt.getTime() + Number(plan.duration_days) * 24 * 60 * 60 * 1000);
+    if (expiresAt <= startsAt) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ ok: false, error: "End date must be after start date" });
+    }
+
+    const finalPrice = Number((Number(plan.price_eur) * selectedCertifications.length).toFixed(2));
+    const inserted = await client.query(
+      `INSERT INTO user_subscriptions (
+         user_id, plan_id, level, plan_key, status, starts_at, expires_at,
+         payment_provider, payment_reference, selected_certifications, amount_paid,
+         currency, speaking_simulator_quota_override, grant_reason
+       )
+       VALUES ($1, $2, $3, $4, 'active', $5, $6, 'manual', $7, $8::jsonb, $9, $10, $11, $12)
+       RETURNING *`,
+      [
+        userId,
+        plan.id,
+        plan.level,
+        plan.plan_key,
+        startsAt,
+        expiresAt,
+        `manual-admin-${Date.now()}`,
+        JSON.stringify(selectedCertifications),
+        finalPrice,
+        plan.currency,
+        Number.isFinite(quotaOverride) ? quotaOverride : null,
+        grantReason,
+      ]
+    );
+    await client.query(
+      `INSERT INTO writing_simulator_usage (user_id, subscription_id, level, attempts_allowed, attempts_used)
+       VALUES ($1, $2, $3, $4, 0)
+       ON CONFLICT (user_id, subscription_id, level)
+       DO UPDATE SET attempts_allowed = EXCLUDED.attempts_allowed, updated_at = NOW()`,
+      [userId, inserted.rows[0].id, plan.level, Number(plan.writing_simulator_attempts)]
+    );
+    await client.query(
+      `INSERT INTO subscription_admin_events (subscription_id, user_id, admin_id, action, details)
+       VALUES ($1, $2, $3, 'manual_grant', $4::jsonb)`,
+      [
+        inserted.rows[0].id,
+        userId,
+        req.user.id,
+        JSON.stringify({
+          planId: plan.id,
+          level: plan.level,
+          planKey: plan.plan_key,
+          selectedCertifications,
+          startsAt: startsAt.toISOString(),
+          expiresAt: expiresAt.toISOString(),
+          speakingSimulatorQuotaOverride: Number.isFinite(quotaOverride) ? quotaOverride : null,
+          grantReason,
+        }),
+      ]
+    );
+    await client.query("COMMIT");
+    return res.status(201).json({ ok: true, subscription: inserted.rows[0] });
+  } catch (err) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {}
+    console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
+app.patch("/api/admin/subscriptions/:id/revoke", requireAdmin, async (req, res) => {
+  try {
+    const subscriptionId = Number(req.params.id);
+    if (!Number.isInteger(subscriptionId)) return res.status(400).json({ ok: false, error: "Invalid subscription id" });
+    const reason = String(req.body?.reason || "Manual revoke").trim().slice(0, 500);
+    const updated = await pool.query(
+      `UPDATE user_subscriptions
+          SET status = 'cancelled',
+              revoked_at = NOW(),
+              revoked_by = $1,
+              grant_reason = COALESCE(NULLIF($2, ''), grant_reason),
+              updated_at = NOW()
+        WHERE id = $3
+        RETURNING *`,
+      [req.user.id, reason, subscriptionId]
+    );
+    if (!updated.rows[0]) return res.status(404).json({ ok: false, error: "Subscription not found" });
+    await pool.query(
+      `INSERT INTO subscription_admin_events (subscription_id, user_id, admin_id, action, details)
+       VALUES ($1, $2, $3, 'revoke', $4::jsonb)`,
+      [subscriptionId, updated.rows[0].user_id, req.user.id, JSON.stringify({ reason })]
+    );
+    return res.json({ ok: true, subscription: updated.rows[0] });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ ok: false, error: "Server error" });
@@ -3703,9 +6298,410 @@ app.post("/api/writing-simulator/attempts/consume", requireAuth, async (req, res
 
 app.get("/api/admin/tts/status", requireAdmin, async (req, res) => {
   try {
-    return res.json({ ok: true, ...getProviderStatus() });
+    await ensureListeningAudioProductionSchema();
+    return res.json({ ok: true, ...getProviderStatus(), voiceProfiles: await getVoiceProfiles(pool) });
   } catch (err) {
     console.error(err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.post("/api/admin/listening-audio/:examId/sync", requireAdmin, async (req, res) => {
+  try {
+    const examId = Number(req.params.examId);
+    const mode = String(req.body?.mode || req.query.mode || "auto").toLowerCase();
+    let result = mode === "content"
+      ? await syncListeningAudioItemsFromExamContent(examId)
+      : await syncListeningAudioItemsFromDraft(examId);
+    if (result.error && mode === "auto") {
+      result = await syncListeningAudioItemsFromExamContent(examId);
+    }
+    if (result.error) return res.status(result.status || 400).json({ ok: false, error: result.error });
+    await auditAdminAction(req, "listening_audio.sync", "exam", examId, {
+      draftId: result.draftId,
+      itemCount: result.items.length,
+    });
+    return res.json({ ok: true, draftId: result.draftId, items: result.items });
+  } catch (err) {
+    console.error("Listening audio sync failed", err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.post("/api/admin/listening-audio/sync-all", requireAdmin, async (req, res) => {
+  try {
+    await ensureListeningAudioProductionSchema();
+    const provider = req.body?.provider ? String(req.body.provider).trim().toLowerCase() : "";
+    const level = req.body?.level ? String(req.body.level).trim().toUpperCase() : "";
+    const params = [];
+    let where = "WHERE section_type = 'listen' AND is_active = TRUE";
+    if (provider) {
+      params.push(provider);
+      where += ` AND LOWER(provider) = $${params.length}`;
+    }
+    if (level) {
+      params.push(level);
+      where += ` AND UPPER(level) = $${params.length}`;
+    }
+    const exams = await pool.query(`SELECT id FROM exams ${where} ORDER BY provider, level, series_number, id`, params);
+    const results = [];
+    for (const exam of exams.rows) {
+      const result = await syncListeningAudioItemsFromExamContent(exam.id);
+      results.push({
+        examId: exam.id,
+        ok: !result.error,
+        itemCount: result.items?.length || 0,
+        error: result.error || null,
+      });
+    }
+    await auditAdminAction(req, "listening_audio.sync_all", "exam", null, {
+      provider: provider || null,
+      level: level || null,
+      examCount: results.length,
+      itemCount: results.reduce((sum, row) => sum + Number(row.itemCount || 0), 0),
+    });
+    return res.json({ ok: true, results });
+  } catch (err) {
+    console.error("Listening audio sync-all failed", err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.get("/api/admin/listening-audio/:examId/items", requireAdmin, async (req, res) => {
+  try {
+    await ensureListeningAudioProductionSchema();
+    const examId = Number(req.params.examId);
+    const items = await pool.query(
+      `SELECT i.*, a.status AS asset_status, a.byte_size, a.provider_model, a.voice_summary, a.updated_at AS asset_updated_at
+         FROM exam_listening_audio_items i
+         LEFT JOIN exam_audio_assets a ON a.id = i.generated_audio_asset_id
+        WHERE i.exam_id = $1
+        ORDER BY i.part_number, i.item_number, i.id`,
+      [examId]
+    );
+    return res.json({
+      ok: true,
+      providerStatus: getProviderStatus(),
+      voiceProfiles: await getVoiceProfiles(pool),
+      items: items.rows.map((item) => ({
+        ...item,
+        preview_url: item.generated_audio_asset_id ? `/api/audio/generated/${item.generated_audio_asset_id}` : "",
+        admin_transcript_preview: clipPlainText(item.admin_transcript, 900),
+      })),
+    });
+  } catch (err) {
+    console.error("Listening audio item lookup failed", err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.put("/api/admin/listening-audio/items/:itemId", requireAdmin, async (req, res) => {
+  try {
+    await ensureListeningAudioProductionSchema();
+    const itemId = Number(req.params.itemId);
+    if (!Number.isInteger(itemId)) return res.status(400).json({ ok: false, error: "Invalid audio item id" });
+    const title = cleanPublicText(req.body?.title, 180);
+    const transcript = String(req.body?.transcript ?? req.body?.adminTranscript ?? "").trim();
+    const listeningCount = Number(req.body?.listeningCount);
+    const audioEngineSettings = req.body?.audioEngineSettings && typeof req.body.audioEngineSettings === "object"
+      ? req.body.audioEngineSettings
+      : {};
+    const validationWarnings = Array.isArray(req.body?.validationWarnings)
+      ? req.body.validationWarnings.map((item) => cleanPublicText(item, 300)).filter(Boolean)
+      : [];
+    if (!transcript) return res.status(400).json({ ok: false, error: "Transcript is required" });
+    const updated = await pool.query(
+      `UPDATE exam_listening_audio_items
+          SET title = COALESCE(NULLIF($2, ''), title),
+              admin_transcript = $3,
+              listening_count = CASE WHEN $4::int BETWEEN 1 AND 3 THEN $4::int ELSE listening_count END,
+              audio_engine_settings = COALESCE($5::jsonb, audio_engine_settings),
+              validation_warnings = $6::jsonb,
+              audio_generation_status = CASE
+                WHEN generated_audio_asset_id IS NOT NULL THEN 'generated'
+                ELSE audio_generation_status
+              END,
+              updated_at = NOW()
+        WHERE id = $1
+        RETURNING *`,
+      [
+        itemId,
+        title,
+        transcript,
+        Number.isFinite(listeningCount) ? Math.round(listeningCount) : null,
+        JSON.stringify(audioEngineSettings),
+        JSON.stringify(validationWarnings),
+      ]
+    );
+    if (!updated.rows[0]) return res.status(404).json({ ok: false, error: "Audio item not found" });
+    await auditAdminAction(req, "listening_audio.item_update", "listening_audio_item", itemId, {
+      examId: updated.rows[0].exam_id,
+      hasTranscript: Boolean(transcript),
+    });
+    return res.json({ ok: true, item: updated.rows[0] });
+  } catch (err) {
+    console.error("Listening audio item update failed", err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.post("/api/admin/listening-audio/items/:itemId/generate", requireAdmin, async (req, res) => {
+  try {
+    await ensureListeningAudioProductionSchema();
+    const itemId = Number(req.params.itemId);
+    const itemResult = await pool.query(`SELECT * FROM exam_listening_audio_items WHERE id = $1`, [itemId]);
+    const item = itemResult.rows[0];
+    if (!item) return res.status(404).json({ ok: false, error: "Audio item not found" });
+    const profiles = await getVoiceProfiles(pool);
+    const audio = buildAudioFromListeningItem(item, profiles);
+    const provider = normalizeProvider(req.body?.provider || "elevenlabs");
+    await pool.query(
+      `UPDATE exam_listening_audio_items
+          SET audio_generation_status = 'generating',
+              admin_notes = NULL,
+              updated_at = NOW()
+        WHERE id = $1`,
+      [itemId]
+    );
+    const result = await generateAndStoreExamAudio({
+      pool,
+      examId: item.exam_id,
+      audio,
+      adminId: req.user.id,
+      provider,
+      force: Boolean(req.body?.force),
+    });
+    await pool.query(
+      `UPDATE exam_listening_audio_items
+          SET generated_audio_asset_id = $2,
+              generated_audio_url = $3,
+              audio_generation_status = 'generated',
+              voice_profile_map = $4::jsonb,
+              source_metadata = (COALESCE(source_metadata, '{}'::jsonb)
+                - 'browserTtsFallback'
+                - 'fallbackEngine'
+                - 'fallbackReason'
+                - 'fallbackMarkedAt') || jsonb_build_object('mp3GeneratedAt', NOW()),
+              validation_warnings = COALESCE(validation_warnings, '[]'::jsonb) || $5::jsonb,
+              updated_at = NOW()
+        WHERE id = $1`,
+      [
+        itemId,
+        result.asset?.id || null,
+        result.asset?.id ? `/api/audio/generated/${result.asset.id}` : "",
+        JSON.stringify(audio.speakers || []),
+        JSON.stringify([
+          {
+            at: new Date().toISOString(),
+            warning: "Clean voice audio generated. Background/SFX mixing is not enabled in this server runtime.",
+          },
+        ]),
+      ]
+    );
+    await appendAudioItemLog(itemId, {
+      action: "generate",
+      provider,
+      cached: Boolean(result.cached),
+      assetId: result.asset?.id || null,
+    });
+    await auditAdminAction(req, "listening_audio.generate", "exam_listening_audio_item", itemId, {
+      provider,
+      cached: Boolean(result.cached),
+      assetId: result.asset?.id,
+    });
+    return res.status(result.cached ? 200 : 201).json({
+      ok: true,
+      cached: Boolean(result.cached),
+      provider,
+      asset: result.asset,
+      previewUrl: result.asset?.id ? `/api/audio/generated/${result.asset.id}` : "",
+      warnings: ["Background/SFX mixing skipped; clean voice audio is ready for admin review."],
+    });
+  } catch (err) {
+    const status = err instanceof TtsConfigurationError ? 400 : 502;
+    const itemId = Number(req.params.itemId);
+    await pool.query(
+      `UPDATE exam_listening_audio_items
+          SET audio_generation_status = 'failed',
+              admin_notes = $2,
+              updated_at = NOW()
+        WHERE id = $1`,
+      [itemId, err.publicMessage || "Audio generation failed."]
+    ).catch(() => {});
+    await appendAudioItemLog(itemId, { action: "generate_failed", error: err.publicMessage || err.message }).catch(() => {});
+    console.error("Listening audio item generation failed", err.message);
+    return res.status(status).json({
+      ok: false,
+      setupRequired: err instanceof TtsConfigurationError,
+      error: err.publicMessage || "Audio generation failed.",
+    });
+  }
+});
+
+app.post("/api/admin/listening-audio/generate-batch", requireAdmin, async (req, res) => {
+  try {
+    await ensureListeningAudioProductionSchema();
+    const providerFilter = req.body?.examProvider ? String(req.body.examProvider).trim().toLowerCase() : "";
+    const levelFilter = req.body?.level ? String(req.body.level).trim().toUpperCase() : "";
+    const limit = Math.max(1, Math.min(100, Number(req.body?.limit) || 10));
+    const force = Boolean(req.body?.force);
+    const publish = req.body?.publish !== false;
+    const params = [];
+    let where = `
+      WHERE i.admin_transcript IS NOT NULL
+        AND LENGTH(TRIM(i.admin_transcript)) >= 20
+        AND (i.generated_audio_asset_id IS NULL OR i.audio_generation_status IN ('draft', 'failed', 'queued', 'generating') OR $1::boolean = TRUE)
+    `;
+    params.push(force);
+    if (providerFilter) {
+      params.push(providerFilter);
+      where += ` AND LOWER(i.provider) = $${params.length}`;
+    }
+    if (levelFilter) {
+      params.push(levelFilter);
+      where += ` AND UPPER(i.level) = $${params.length}`;
+    }
+    params.push(limit);
+    const items = await pool.query(
+      `SELECT i.*
+         FROM exam_listening_audio_items i
+        ${where}
+        ORDER BY i.provider, i.level, i.series_number, i.part_number, i.item_number, i.id
+        LIMIT $${params.length}`,
+      params
+    );
+    const profiles = await getVoiceProfiles(pool);
+    const results = [];
+    for (const item of items.rows) {
+      try {
+        const audio = buildAudioFromListeningItem(item, profiles);
+        const provider = normalizeProvider(req.body?.provider || "elevenlabs");
+        await pool.query(
+          `UPDATE exam_listening_audio_items
+              SET audio_generation_status = 'generating',
+                  admin_notes = NULL,
+                  updated_at = NOW()
+            WHERE id = $1`,
+          [item.id]
+        );
+        const generated = await generateAndStoreExamAudio({
+          pool,
+          examId: item.exam_id,
+          audio,
+          adminId: req.user.id,
+          provider,
+          force,
+        });
+        const nextStatus = publish ? "published" : "generated";
+        await pool.query(
+          `UPDATE exam_listening_audio_items
+              SET generated_audio_asset_id = $2,
+                  generated_audio_url = $3,
+                  audio_generation_status = $4,
+                  voice_profile_map = $5::jsonb,
+                  source_metadata = (COALESCE(source_metadata, '{}'::jsonb)
+                    - 'browserTtsFallback'
+                    - 'fallbackEngine'
+                    - 'fallbackReason'
+                    - 'fallbackMarkedAt') || jsonb_build_object('mp3GeneratedAt', NOW()),
+                  approved_at = CASE WHEN $4 IN ('approved','published') THEN COALESCE(approved_at, NOW()) ELSE approved_at END,
+                  published_at = CASE WHEN $4 = 'published' THEN NOW() ELSE published_at END,
+                  validation_warnings = COALESCE(validation_warnings, '[]'::jsonb) || $6::jsonb,
+                  updated_at = NOW()
+            WHERE id = $1`,
+          [
+            item.id,
+            generated.asset?.id || null,
+            generated.asset?.id ? `/api/audio/generated/${generated.asset.id}` : "",
+            nextStatus,
+            JSON.stringify(audio.speakers || []),
+            JSON.stringify([{ at: new Date().toISOString(), warning: "Clean voice MP3 generated; background/SFX mixing skipped on this runtime." }]),
+          ]
+        );
+        await appendAudioItemLog(item.id, {
+          action: "batch_generate",
+          provider,
+          cached: Boolean(generated.cached),
+          assetId: generated.asset?.id || null,
+          status: nextStatus,
+        });
+        results.push({ itemId: item.id, examId: item.exam_id, ok: true, assetId: generated.asset?.id || null, cached: Boolean(generated.cached), status: nextStatus });
+      } catch (err) {
+        await pool.query(
+          `UPDATE exam_listening_audio_items
+              SET audio_generation_status = 'failed',
+                  admin_notes = $2,
+                  updated_at = NOW()
+            WHERE id = $1`,
+          [item.id, err.publicMessage || err.message || "Audio generation failed."]
+        ).catch(() => {});
+        await appendAudioItemLog(item.id, { action: "batch_generate_failed", error: err.publicMessage || err.message }).catch(() => {});
+        results.push({ itemId: item.id, examId: item.exam_id, ok: false, setupRequired: err instanceof TtsConfigurationError, error: err.publicMessage || "Audio generation failed." });
+        if (err instanceof TtsConfigurationError || Number(err.status) === 401 || Number(err.status) === 402 || Number(err.status) === 429) {
+          break;
+        }
+      }
+    }
+    await auditAdminAction(req, "listening_audio.generate_batch", "exam_listening_audio_item", null, {
+      provider: req.body?.provider || "elevenlabs",
+      limit,
+      force,
+      publish,
+      generated: results.filter((row) => row.ok).length,
+      failed: results.filter((row) => !row.ok).length,
+    });
+    return res.json({ ok: true, requestedLimit: limit, processed: results.length, results });
+  } catch (err) {
+    console.error("Listening audio batch generation failed", err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.post("/api/admin/listening-audio/items/:itemId/approve", requireAdmin, async (req, res) => {
+  try {
+    const itemId = Number(req.params.itemId);
+    const result = await pool.query(
+      `UPDATE exam_listening_audio_items
+          SET audio_generation_status = 'approved',
+              approved_at = NOW(),
+              updated_at = NOW()
+        WHERE id = $1
+          AND generated_audio_asset_id IS NOT NULL
+          AND audio_generation_status IN ('generated', 'approved', 'published')
+        RETURNING *`,
+      [itemId]
+    );
+    if (!result.rows[0]) return res.status(400).json({ ok: false, error: "Generate audio before approving this item." });
+    await appendAudioItemLog(itemId, { action: "approve", adminId: req.user.id });
+    await auditAdminAction(req, "listening_audio.approve", "exam_listening_audio_item", itemId, {});
+    return res.json({ ok: true, item: result.rows[0] });
+  } catch (err) {
+    console.error("Listening audio approve failed", err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.post("/api/admin/listening-audio/items/:itemId/publish", requireAdmin, async (req, res) => {
+  try {
+    const itemId = Number(req.params.itemId);
+    const result = await pool.query(
+      `UPDATE exam_listening_audio_items
+          SET audio_generation_status = 'published',
+              approved_at = COALESCE(approved_at, NOW()),
+              published_at = NOW(),
+              updated_at = NOW()
+        WHERE id = $1
+          AND generated_audio_asset_id IS NOT NULL
+          AND audio_generation_status IN ('generated', 'approved', 'published')
+        RETURNING *`,
+      [itemId]
+    );
+    if (!result.rows[0]) return res.status(400).json({ ok: false, error: "Generate audio before publishing this item." });
+    await appendAudioItemLog(itemId, { action: "publish", adminId: req.user.id });
+    await auditAdminAction(req, "listening_audio.publish", "exam_listening_audio_item", itemId, {});
+    return res.json({ ok: true, item: result.rows[0] });
+  } catch (err) {
+    console.error("Listening audio publish failed", err);
     return res.status(500).json({ ok: false, error: "Server error" });
   }
 });
@@ -4094,6 +7090,47 @@ app.post("/api/admin/exams/import-wizard/analyze", requireAdmin, documentUpload.
   }
 });
 
+app.post("/api/admin/hoeren-import/foundation", requireAdmin, documentUpload.single("document"), async (req, res) => {
+  try {
+    if (!req.file?.buffer) {
+      return res.status(400).json({ ok: false, error: "DOCX document file is required" });
+    }
+    const filename = req.file.originalname || "";
+    if (!/\.docx$/i.test(filename)) {
+      return res.status(400).json({ ok: false, error: "Only DOCX files are supported in the Hören foundation step" });
+    }
+    const foundation = await buildHoerenParsedPreview({
+      buffer: req.file.buffer,
+      filename,
+      mimetype: req.file.mimetype,
+      provider: req.body?.provider,
+      level: req.body?.level,
+      maxSeries: req.body?.maxSeries ? Number(req.body.maxSeries) : null,
+    });
+    const saved = await saveListeningImportFoundationDraft({
+      pool,
+      foundation,
+      adminId: req.user.id,
+    });
+    await auditAdminAction(req, "hoeren_import.foundation_draft", "document_import", saved.import?.id || foundation.documentHash, {
+      duplicate: saved.duplicate,
+      filename,
+      provider: foundation.metadata.provider,
+      level: foundation.metadata.level,
+      markers: foundation.draft.markerCounts,
+    });
+    return res.status(saved.duplicate ? 200 : 201).json({
+      ok: true,
+      duplicate: saved.duplicate,
+      import: saved.import,
+      draft: saved.draft,
+    });
+  } catch (err) {
+    console.error("Hören import foundation failed", err);
+    return res.status(400).json({ ok: false, error: err.message || "Hören import foundation failed" });
+  }
+});
+
 app.get("/api/admin/exams/import-wizard/:id", requireAdmin, async (req, res) => {
   try {
     const row = await getExamImportDraft({ pool, importId: Number(req.params.id) });
@@ -4142,6 +7179,18 @@ app.post("/api/admin/exams/import-wizard/:id/validate", requireAdmin, async (req
 
 app.post("/api/admin/exams/import-wizard/:id/publish", requireAdmin, async (req, res) => {
   try {
+    const force = req.query.force === "true" || req.body?.force === true;
+    const row = await getExamImportDraft({ pool, importId: Number(req.params.id) });
+    if (!row) return res.status(404).json({ ok: false, error: "Import draft not found" });
+    const preValidation = validateImportDraftContent(row.draft_content);
+    if (!force && preValidation.warnings?.length) {
+      return res.status(409).json({
+        ok: false,
+        error: "Unresolved validation warnings found. Review them before publishing or publish with force after admin approval.",
+        validation: preValidation,
+        canForce: true,
+      });
+    }
     const result = await publishExamImportDraft({
       pool,
       importId: Number(req.params.id),
@@ -4230,6 +7279,19 @@ app.post("/api/admin/exams/import-document", requireAdmin, documentUpload.single
   } catch (err) {
     console.error("Document import failed", err);
     return res.status(400).json({ ok: false, error: err.message || "Document import failed" });
+  }
+});
+
+app.get("/api/admin/exams/:id/validation", requireAdmin, async (req, res) => {
+  try {
+    const examId = Number(req.params.id);
+    if (!Number.isInteger(examId)) return res.status(400).json({ ok: false, error: "Invalid exam id" });
+    const validation = await buildExamContentValidation(examId);
+    if (!validation) return res.status(404).json({ ok: false, error: "Exam not found" });
+    return res.json({ ok: true, validation });
+  } catch (err) {
+    console.error("Exam validation failed", err);
+    return res.status(500).json({ ok: false, error: "Server error" });
   }
 });
 

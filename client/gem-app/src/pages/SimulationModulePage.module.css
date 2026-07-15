@@ -683,6 +683,119 @@
   line-height: 1.75;
 }
 
+.exitDialogOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  display: grid;
+  place-items: center;
+  padding: max(14px, env(safe-area-inset-top, 0px)) max(14px, env(safe-area-inset-right, 0px)) max(14px, env(safe-area-inset-bottom, 0px)) max(14px, env(safe-area-inset-left, 0px));
+  overflow: hidden;
+  background: rgba(17, 24, 39, 0.56);
+  backdrop-filter: blur(6px);
+}
+
+.exitDialog {
+  width: min(420px, 100%);
+  max-height: calc(100dvh - 28px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: auto;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid rgba(254, 226, 226, 0.9);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(255, 250, 250, 0.98));
+  padding: clamp(18px, 3.4vw, 26px);
+  text-align: center;
+  box-shadow: 0 24px 70px rgba(17, 24, 39, 0.28);
+  animation: exitDialogIn 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.exitDialogOverlay,
+.exitDialog {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(193, 0, 22, 0.45) transparent;
+}
+
+.exitDialogOverlay::-webkit-scrollbar,
+.exitDialog::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.exitDialogOverlay::-webkit-scrollbar-track,
+.exitDialog::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.exitDialogOverlay::-webkit-scrollbar-thumb,
+.exitDialog::-webkit-scrollbar-thumb {
+  background: rgba(193, 0, 22, 0.35);
+  border-radius: 999px;
+}
+
+.exitDialog > svg {
+  width: 58px;
+  height: 58px;
+  margin: 0 auto;
+  padding: 14px;
+  border-radius: 999px;
+  background: #fff1f2;
+  color: #c10016;
+}
+
+.exitDialog h2 {
+  margin: 14px 0 7px;
+  color: #111827;
+  font-size: clamp(1.25rem, 4vw, 1.55rem);
+  line-height: 1.14;
+  text-align: center;
+}
+
+.exitDialog p {
+  max-width: 32ch;
+  margin: 0 auto;
+  color: #667085;
+  line-height: 1.42;
+  font-size: 0.92rem;
+  text-align: center;
+}
+
+.exitDialog > div {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.exitDialog .secondaryButton,
+.exitDialog .primaryButton {
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 14px;
+  white-space: normal;
+  line-height: 1.2;
+  text-align: center;
+}
+
+@keyframes exitDialogIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (max-width: 520px) {
+  .exitDialog > div {
+    grid-template-columns: 1fr;
+  }
+}
+
 .richExamText {
   color: #374151;
   font-weight: 400;
@@ -818,6 +931,209 @@
   font-size: 0.82rem;
   font-weight: 850;
   text-transform: uppercase;
+}
+
+.sprachExamLayout {
+  display: grid;
+  gap: 18px;
+}
+
+.sprachExamPane {
+  padding: 22px;
+  max-height: min(74vh, 820px);
+  overflow-y: auto;
+  overscroll-behavior-y: auto;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+}
+
+.sprachExamHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 8px 0 18px;
+}
+
+.sprachExamHeader h2 {
+  margin: 0 0 6px;
+  color: #111827;
+  line-height: 1.15;
+}
+
+.sprachExamHeader p {
+  margin: 0;
+  color: #667085;
+  font-weight: 800;
+}
+
+.sprachExamHeader > span {
+  border-radius: 999px;
+  background: var(--module-soft);
+  color: var(--module-accent);
+  padding: 8px 12px;
+  font-weight: 950;
+  white-space: nowrap;
+}
+
+.sprachArticle {
+  border: 1px solid #edf0f3;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: clamp(16px, 3vw, 26px);
+  color: #111827;
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.04);
+}
+
+.sprachInstructionLine,
+.sprachTextLine,
+.sprachArticleTitle {
+  margin: 0 0 11px;
+  line-height: 1.82;
+  white-space: pre-wrap;
+}
+
+.sprachInstructionLine {
+  color: #475467;
+  font-weight: 760;
+}
+
+.sprachArticleTitle {
+  margin-top: 8px;
+  color: #111827;
+  font-size: 1.12rem;
+  font-weight: 950;
+}
+
+.sprachInlineGap,
+.sprachInlineGapCompact {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0 4px;
+  vertical-align: baseline;
+}
+
+.sprachGapNumber {
+  min-width: 24px;
+  min-height: 24px;
+  border-radius: 999px;
+  background: var(--module-soft);
+  color: var(--module-accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.78rem;
+  font-weight: 950;
+}
+
+.sprachInlineGap select,
+.sprachInlineGapCompact select {
+  min-height: 34px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #111827;
+  padding: 0 28px 0 10px;
+  font: inherit;
+  font-weight: 850;
+}
+
+.sprachInlineGap select {
+  max-width: min(48vw, 260px);
+}
+
+.sprachInlineGapCompact select {
+  width: 74px;
+}
+
+.sprachOptionsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.sprachOptionGroup {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.sprachOptionGroup legend {
+  padding: 0 6px;
+  color: var(--module-accent);
+  font-weight: 950;
+}
+
+.sprachOptionChoices {
+  display: grid;
+  gap: 8px;
+}
+
+.sprachOptionButton,
+.sprachOptionSelected {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #111827;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sprachOptionSelected {
+  border-color: var(--module-accent);
+  background: var(--module-soft);
+}
+
+.sprachOptionButton span,
+.sprachOptionSelected span,
+.sprachBankItem span {
+  color: var(--module-accent);
+  font-weight: 950;
+}
+
+.sprachAnswerBank {
+  margin-top: 18px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #fbfcfe;
+  padding: 16px;
+}
+
+.sprachAnswerBank h3 {
+  margin: 0 0 12px;
+  color: #111827;
+}
+
+.sprachAnswerBankGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.sprachBankItem {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #111827;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sprachFeedbackGrid {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
 }
 
 .optionList {
@@ -1087,6 +1403,34 @@
   resize: vertical;
   line-height: 1.7;
   font-size: 1rem;
+}
+
+.germanCharacterToolbar {
+  border-top: 1px solid #e5e7eb;
+  padding: 10px 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  background: #f8fafc;
+}
+
+.germanCharacterToolbar button {
+  width: 38px;
+  height: 36px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #111827;
+  font: inherit;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.germanCharacterToolbar button:hover,
+.germanCharacterToolbar button:focus-visible {
+  border-color: var(--module-accent);
+  color: var(--module-accent);
+  outline: none;
 }
 
 .writingSupportGrid {
@@ -2116,6 +2460,350 @@
 .readingParagraph p {
   color: #333333;
   line-height: 1.65;
+}
+
+.goetheExamLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.goetheExamPane {
+  border: 1px solid var(--exam-border);
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: var(--exam-shadow-soft);
+  padding: clamp(18px, 3vw, 28px);
+  max-height: min(82dvh, 1000px);
+  overflow-y: auto;
+  overscroll-behavior-y: auto;
+  scrollbar-gutter: stable;
+}
+
+@media (min-width: 980px) {
+  .goetheExamPane {
+    min-height: clamp(820px, 120dvh, 1280px);
+    max-height: clamp(980px, 145dvh, 1560px);
+  }
+}
+
+@media (min-width: 1280px) {
+  .goetheExamPane {
+    min-height: clamp(980px, 128dvh, 1420px);
+    max-height: clamp(1180px, 155dvh, 1720px);
+  }
+}
+
+@media (max-width: 620px) {
+  .goetheExamPane {
+    max-height: 78dvh;
+  }
+}
+
+.goethePartHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid #edf0f3;
+  margin-bottom: 22px;
+}
+
+.goethePartHeader h2 {
+  margin: 8px 0 8px;
+  color: #111827;
+  font-size: clamp(1.35rem, 2vw, 1.9rem);
+  font-weight: 950;
+}
+
+.goethePartHeader p {
+  margin: 0;
+  color: #344054;
+  line-height: 1.55;
+}
+
+.goethePartHeader > span {
+  flex: 0 0 auto;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  background: #fff7db;
+  color: #7a5a00;
+  padding: 0 12px;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.goethePersonGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 22px;
+}
+
+.goethePersonCard,
+.goetheQuestionRow,
+.goetheChoiceGroup,
+.goetheBankItem {
+  border: 1px solid #edf0f3;
+  border-radius: 12px;
+  background: #fafafa;
+}
+
+.goethePersonCard {
+  padding: 16px;
+}
+
+.goethePersonCard h3,
+.goetheArticleTitle,
+.goetheBank h3 {
+  margin: 0 0 10px;
+  color: #111827;
+  font-size: 1rem;
+  font-weight: 950;
+}
+
+.goethePersonCard p,
+.goetheTextBlock p,
+.goetheInlineArticle,
+.goetheQuestionRow p {
+  color: #2f2f2f;
+  line-height: 1.72;
+}
+
+.goetheQuestionList,
+.goetheChoiceList {
+  display: grid;
+  gap: 12px;
+}
+
+.goetheQuestionRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 220px);
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+}
+
+.goetheQuestionRow p {
+  margin: 0;
+}
+
+.goetheSelectField {
+  display: grid;
+  gap: 6px;
+  color: #344054;
+  font-size: 0.8rem;
+  font-weight: 850;
+}
+
+.goetheSelectField select,
+.goetheInlineSelect select {
+  min-height: 42px;
+  border: 1px solid #d6dae1;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #111827;
+  padding: 0 10px;
+  font-weight: 850;
+}
+
+.goetheInlineSelect {
+  display: inline-flex;
+  vertical-align: middle;
+  margin: 0 6px;
+}
+
+.goetheInlineSelect select {
+  min-width: 74px;
+}
+
+.goetheGapNumber {
+  display: inline-flex;
+  color: var(--exam-red);
+  font-weight: 950;
+  margin-left: 4px;
+}
+
+.goetheMissingGap {
+  color: #98a2b3;
+  font-weight: 900;
+}
+
+.goetheArticle {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.goetheArticleTitle {
+  margin-top: 4px;
+}
+
+.goetheTextBlock {
+  margin: 0;
+}
+
+.goetheTextBlock p,
+.goetheInlineArticle {
+  margin: 0;
+}
+
+.goetheBank {
+  margin: 20px 0;
+  padding: 16px;
+  border-radius: 12px;
+  background: #fffdf4;
+  border: 1px solid #f8e7a6;
+}
+
+.goetheBankGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.goetheBankItem {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 12px;
+  background: #ffffff;
+}
+
+.goetheBankItem strong {
+  color: var(--exam-red);
+  font-weight: 950;
+}
+
+.goetheBankItem span {
+  color: #344054;
+  line-height: 1.5;
+}
+
+.goetheChoiceGroup {
+  padding: 14px;
+}
+
+.goetheChoiceGroup legend {
+  padding: 0 4px;
+  color: #111827;
+  font-weight: 900;
+  line-height: 1.5;
+}
+
+.goetheChoiceButtons {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.structuredAnswerList {
+  display: grid;
+  gap: 12px;
+}
+
+.structuredAnswerField {
+  display: grid;
+  gap: 6px;
+  color: #344054;
+  font-size: 0.8rem;
+  font-weight: 850;
+}
+
+.structuredAnswerField input,
+.structuredInlineInput input {
+  min-height: 42px;
+  border: 1px solid #d6dae1;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #111827;
+  padding: 0 10px;
+  font: inherit;
+  font-weight: 750;
+}
+
+.structuredAnswerField input:focus,
+.structuredInlineInput input:focus {
+  border-color: var(--exam-red);
+  outline: 3px solid rgb(201 34 41 / 12%);
+}
+
+.structuredInlineInput {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0;
+  margin: 0 5px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.structuredInlineInput strong {
+  color: #111827;
+  font-weight: 750;
+}
+
+.structuredInlineInput input {
+  width: clamp(76px, 10vw, 132px);
+  min-height: 36px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  padding-inline: 7px;
+}
+
+.structuredLockedExample,
+.structuredExample {
+  color: #20633d;
+  font-weight: 900;
+}
+
+.structuredLockedExample {
+  display: inline-flex;
+  margin: 0 5px;
+  padding: 3px 8px;
+  border-radius: 8px;
+  background: #eaf8ef;
+}
+
+.structuredExample {
+  width: fit-content;
+  margin: 4px 0 14px;
+  padding: 9px 12px;
+  border: 1px solid #bde6cb;
+  border-radius: 10px;
+  background: #f2fbf5;
+}
+
+@media (max-width: 760px) {
+  .goetheExamPane {
+    max-height: none;
+    padding: 16px;
+  }
+
+  .goethePartHeader {
+    display: grid;
+  }
+
+  .goethePartHeader > span {
+    justify-self: start;
+  }
+
+  .goethePersonGrid,
+  .goetheBankGrid,
+  .goetheChoiceButtons {
+    grid-template-columns: 1fr;
+  }
+
+  .goetheQuestionRow {
+    grid-template-columns: 1fr;
+  }
+
+  .structuredInlineInput input {
+    width: min(28vw, 118px);
+  }
 }
 
 .sectionLabel,
@@ -3207,6 +3895,31 @@
     min-height: 54px;
     padding: 0 8px;
     font-size: 0.88rem;
+  }
+}
+
+@media (max-width: 620px) {
+  .sprachExamPane {
+    padding: 16px;
+    max-height: none;
+  }
+
+  .sprachExamHeader {
+    display: grid;
+  }
+
+  .sprachOptionsGrid,
+  .sprachAnswerBankGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .sprachInlineGap,
+  .sprachInlineGapCompact {
+    margin: 2px 3px;
+  }
+
+  .sprachInlineGap select {
+    max-width: 72vw;
   }
 }
 

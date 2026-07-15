@@ -3,6 +3,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import API from "../services/api";
 import logo from "../assets/images/logo.png";
 import "./LoginPage.css";
+import BackButton from "../components/BackButton";
 
 export default function ResetPasswordPage() {
   const { token } = useParams();
@@ -48,10 +49,10 @@ export default function ResetPasswordPage() {
     <div className="login-layout">
       <div className="login-brand-panel">
         <div className="brand-content">
-          <div className="brand-logo-placeholder">
+          <Link className="brand-logo-placeholder" to="/">
             <img src={logo} alt="" width={32} height={32} />
             <span>Deutsch Prüfungen</span>
-          </div>
+          </Link>
           <div className="brand-text">
             <h2>Nouveau mot de passe</h2>
             <p>Le lien est temporaire et ne peut être utilisé qu'une seule fois.</p>
@@ -61,7 +62,7 @@ export default function ResetPasswordPage() {
 
       <div className="login-form-panel">
         <div className="form-container">
-          <Link className="auth-back-home" to="/login">← Retour connexion</Link>
+          <BackButton fallback="/login" label="Retour connexion" className="auth-back-home" />
           <div className="form-header">
             <h1>Réinitialiser le mot de passe</h1>
             <p>Choisissez un nouveau mot de passe sécurisé.</p>

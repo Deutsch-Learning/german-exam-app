@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { BookOpenCheck } from "lucide-react";
 import styles from "./SimulationSelectionPage.module.css";
@@ -12,7 +13,6 @@ import { useLanguage } from "../context/LanguageContext";
 import { clearAuthSession, isLoggedIn } from "../utils/access";
 import { useSimulationLanguage } from "../utils/simulationLanguage";
 import { examSimulations } from "../data/siteContent";
-import { fetchImportedSeries, hasPlayableImportedSeries } from "../services/importedExams";
 import API from "../services/api";
 import { clearDashboardCache } from "../services/dashboard";
 
@@ -39,14 +39,6 @@ const ClipboardIcon = () => (
   </svg>
 );
 
-const LoadingDots = () => (
-  <span className={styles.loadingDots} aria-label="Verfuegbarkeit wird geprueft">
-    <span />
-    <span />
-    <span />
-  </span>
-);
-
 export const OpenBookIcon = () => (
   <BookOpenCheck size={52} strokeWidth={1.8} />
 );
@@ -66,7 +58,7 @@ export const SimulationTopNav = ({ onGoHome, onGoAbout, onGoProfile, onGoDashboa
           src={logo}
           alt="Deutsch Prüfungen Logo"
           className={styles.logo}
-          onClick={loggedIn ? onGoDashboard : onGoHome}
+          onClick={onGoHome}
           style={{ cursor: "pointer" }}
         />
       </div>
@@ -231,7 +223,7 @@ export const StartConfirmationModal = ({
   };
 
   if (safeQuestionCount >= 0) {
-    return (
+    return createPortal((
       <div className={styles.modalOverlay} role="presentation">
         <section
           className={styles.confirmModal}
@@ -259,10 +251,10 @@ export const StartConfirmationModal = ({
           </div>
         </section>
       </div>
-    );
+    ), document.body);
   }
 
-  return (
+  return createPortal((
     <div className={styles.modalOverlay} role="presentation">
       <section
         className={styles.confirmModal}
@@ -290,13 +282,12 @@ export const StartConfirmationModal = ({
         </div>
       </section>
     </div>
-  );
+  ), document.body);
 };
 
 export default function SimulationSelectionPage() {
   const navigate = useNavigate();
-  const t = useSimulationLanguage();
-  const [availability, setAvailability] = useState({});
+  useSimulationLanguage();
   const logout = async () => {
     try {
       await API.post("/api/auth/logout");
@@ -307,32 +298,6 @@ export default function SimulationSelectionPage() {
     clearDashboardCache();
     navigate("/", { replace: true });
   };
-
-  useEffect(() => {
-    let cancelled = false;
-
-    examSimulations.forEach((exam) => {
-      fetchImportedSeries(exam.id)
-        .then((series) => {
-          if (cancelled) return;
-          setAvailability((current) => ({
-            ...current,
-            [exam.id]: { loading: false, available: hasPlayableImportedSeries(series), series },
-          }));
-        })
-        .catch(() => {
-          if (cancelled) return;
-          setAvailability((current) => ({
-            ...current,
-            [exam.id]: { loading: false, available: false, series: [] },
-          }));
-        });
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   return (
     <div className={styles.pageContainer}>
@@ -364,39 +329,18 @@ export default function SimulationSelectionPage() {
         <section className={styles.gridSection}>
           <div className={styles.cardGrid}>
             {examSimulations.map((exam) => (
-              (() => {
-                const state = availability[exam.id];
-                const isChecking = !state;
-                const available = Boolean(state?.available);
-                const questions = state?.series?.reduce(
-                  (sum, item) =>
-                    sum +
-                    Object.values(item.modules ?? {}).reduce(
-                      (moduleSum, module) => moduleSum + (Number(module?.questionCount) || 0),
-                      0
-                    ),
-                  0
-                );
-
-                return (
-                  <SimulationDisciplineCard
-                    key={exam.id}
-                    iconNode={<OpenBookIcon />}
-                    title={exam.name}
-                    time={available ? 240 : "Bald"}
-                    questions={available ? questions || 0 : 0}
-                    accent={exam.accent}
-                    badge={isChecking ? <LoadingDots /> : available ? "Verfuegbar" : "Demnaechst"}
-                    unavailable={!isChecking && !available}
-                    minuteLabel={available ? t.simulations.minutes : ""}
-                    questionLabel={available ? t.simulations.questions : "Fragen"}
-                    onClick={() => {
-                      if (isChecking) return;
-                      navigate(available ? exam.path : `/coming-soon/${exam.id}`);
-                    }}
-                  />
-                );
-              })()
+              <SimulationDisciplineCard
+                key={exam.id}
+                iconNode={<OpenBookIcon />}
+                title={exam.name}
+                time={20}
+                questions={exam.id.includes("telc") ? 5 : 4}
+                accent={exam.accent}
+                badge="Verfuegbar"
+                minuteLabel="Serien"
+                questionLabel="Module"
+                onClick={() => navigate(exam.path)}
+              />
             ))}
           </div>
         </section>

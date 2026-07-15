@@ -421,7 +421,8 @@
   z-index: 1000;
   display: grid;
   place-items: center;
-  padding: clamp(16px, 4vw, 28px);
+  padding: clamp(12px, 3vw, 22px);
+  overflow: hidden;
   background:
     radial-gradient(circle at 50% 18%, rgba(255, 255, 255, 0.18), transparent 30%),
     rgba(15, 23, 42, 0.62);
@@ -429,16 +430,42 @@
   animation: modalOverlayIn 180ms ease both;
 }
 
+.modalOverlay,
 .confirmModal {
-  width: min(100%, 560px);
-  max-height: calc(100dvh - 32px);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(220, 38, 38, 0.45) transparent;
+}
+
+.modalOverlay::-webkit-scrollbar,
+.confirmModal::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.modalOverlay::-webkit-scrollbar-track,
+.confirmModal::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.modalOverlay::-webkit-scrollbar-thumb,
+.confirmModal::-webkit-scrollbar-thumb {
+  background: rgba(220, 38, 38, 0.35);
+  border-radius: 999px;
+}
+
+.confirmModal {
+  width: min(100%, 500px);
+  max-height: calc(100dvh - 28px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  overflow-x: hidden;
   overflow-y: auto;
-  border-radius: 22px;
+  overscroll-behavior: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 18px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(255, 253, 247, 0.96));
   border: 1px solid rgba(226, 232, 240, 0.92);
   box-shadow: 0 30px 90px rgba(15, 23, 42, 0.28);
-  padding: clamp(24px, 5vw, 34px);
+  padding: clamp(16px, 3.2vw, 24px);
   text-align: left;
   animation: confirmModalIn 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
@@ -454,22 +481,22 @@
 .confirmModal h2 {
   margin: 0;
   color: var(--color-text-main);
-  font-size: clamp(1.65rem, 5vw, 2.25rem);
+  font-size: clamp(1.25rem, 3.4vw, 1.68rem);
   line-height: 1.08;
   letter-spacing: 0;
 }
 
 .modalBody {
-  margin: 18px 0 0;
+  margin: 14px 0 0;
   color: var(--color-text-muted);
-  font-size: clamp(0.98rem, 2.5vw, 1.06rem);
-  line-height: 1.72;
+  font-size: clamp(0.9rem, 2.2vw, 0.98rem);
+  line-height: 1.45;
 }
 
 .modalConfirmation {
-  margin: 22px 0 0;
-  padding: 14px 16px;
-  border-radius: 14px;
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border-radius: 12px;
   background: rgba(250, 204, 21, 0.16);
   border: 1px solid rgba(250, 204, 21, 0.32);
   color: #7c2d12;
@@ -483,7 +510,7 @@
   display: flex;
   justify-content: flex-end;
   gap: 12px;
-  margin-top: 28px;
+  margin-top: 16px;
 }
 
 .modalCancelButton,

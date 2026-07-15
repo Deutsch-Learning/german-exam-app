@@ -1,11 +1,11 @@
 import { Star } from "lucide-react";
 
-export default function TestimonialCard({ avatar, text, rating = 5 }) {
+export default function TestimonialCard({ avatar, text, rating = 5, name, role }) {
   const safeRating = Math.max(0, Math.min(5, Number(rating) || 0));
 
   return (
     <div className="testimonial-card">
-      <img src={avatar} alt="User Avatar" className="testimonial-avatar" />
+      <img src={avatar} alt="User Avatar" className="testimonial-avatar" loading="lazy" decoding="async" />
       <div className="testimonial-body">
         <div className="testimonial-rating" aria-label={`${safeRating} out of 5 stars`}>
           {Array.from({ length: 5 }).map((_, index) => (
@@ -18,6 +18,11 @@ export default function TestimonialCard({ avatar, text, rating = 5 }) {
           ))}
         </div>
         <p className="testimonial-text">"{text}"</p>
+        {name ? (
+          <p className="testimonial-author">
+            <strong>{name}</strong>{role ? <span>{role}</span> : null}
+          </p>
+        ) : null}
       </div>
     </div>
   );

@@ -202,7 +202,10 @@ export default function SeriesSimulationPage() {
       />
 
       <main className={styles.mainContent}>
-        <BackButton fallback={`/simulations/${examId}`} />
+        <BackButton
+          fallback={`/simulations/${examId}`}
+          forceFallback={Boolean(location.state?.fromSimulationExit)}
+        />
         <header className={styles.headerSection}>
           <h1 className={styles.title}>
             {series.examName} - {series.code}

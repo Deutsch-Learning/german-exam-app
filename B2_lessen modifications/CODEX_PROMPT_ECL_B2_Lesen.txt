@@ -1,0 +1,39 @@
+You are modifying the ECL B2 LESEVERSTEHEN module in my existing German exam preparation application.
+
+ATTACHED SOURCE
+Use "ECL_B2_LESEVERSTEHEN_20_Sujets_RESTRUCTURED_Admin_Codex.docx" as the structured source. Read all usage, schema and warning sections before coding.
+
+SCOPE
+- ECL > B2 > Leseverstehen only.
+- No audio or ElevenLabs.
+- Do not rewrite texts, options, questions or model solutions.
+
+SESSION
+- Each Sujet contains Teil 1 and Teil 2.
+- One global timer: 45 minutes. Never reset it between Teile.
+- 20 scored items at 1.25 points each = 25 points. Example [0] is displayed but not scored.
+- Autosave and restore progress.
+
+TEIL 1
+- Keep the article continuous.
+- Render [1]-[10] as inline selectors.
+- Show bank A-M. The example [0] is prefilled and locked; two choices remain unused.
+- Prevent duplicate option use and preserve exact numbering.
+
+TEIL 2
+- Keep the article continuous and show 10 German short-answer fields.
+- Normalise only case, outer whitespace and harmless terminal punctuation.
+- Do not use unrestricted fuzzy matching.
+- Use admin-approved accepted answers/concepts. Questions requiring min. 2 or (2) need all required concepts and receive no partial point unless the source explicitly says otherwise.
+- If an answer does not match but may be valid, flag it for manual review rather than silently marking it correct.
+
+VISIBILITY
+- Model answers and corrections remain hidden until final submission.
+- Transformed import metadata is admin-only.
+- No visual back button during active simulation or correction.
+
+EXECUTION
+1. Inspect current ECL B2 Lesen implementation and database, plan changes, and execute.
+2. Implement Sujet 01 first, including scoring and correction.
+3. Test mobile/desktop, refresh restoration and timer.
+4. check if it is good before importing Sujets 02-20.

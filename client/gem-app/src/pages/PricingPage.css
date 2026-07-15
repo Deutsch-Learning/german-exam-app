@@ -303,26 +303,206 @@
   font-weight: 650;
 }
 
+.pricing-payment-notice {
+  margin: 0 auto 22px;
+  max-width: 860px;
+  border: 1px solid #bbf7d0;
+  border-radius: 14px;
+  background: #f0fdf4;
+  color: #166534;
+  padding: 14px 18px;
+  text-align: center;
+  font-weight: 850;
+  line-height: 1.45;
+}
+
+.pricing-payment-notice.warning {
+  border-color: #fecaca;
+  background: #fff7f7;
+  color: #b42318;
+}
+
+.enterprise-pricing-section {
+  margin-top: 42px;
+  padding: clamp(22px, 4vw, 34px);
+  border: 1px solid rgba(190, 23, 33, 0.12);
+  border-radius: 20px;
+  background: linear-gradient(180deg, #ffffff, #fff7f7);
+  box-shadow: 0 18px 40px rgba(117, 20, 25, 0.08);
+}
+
+.enterprise-pricing-heading {
+  text-align: center;
+  max-width: 760px;
+  margin: 0 auto 22px;
+}
+
+.enterprise-pricing-heading h2 {
+  margin: 0;
+  font-size: clamp(1.8rem, 4vw, 2.7rem);
+}
+
+.enterprise-pricing-heading p:not(.pricing-kicker) {
+  margin: 10px auto 0;
+  color: #667085;
+  font-weight: 700;
+  line-height: 1.55;
+}
+
+.enterprise-card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.enterprise-card {
+  overflow: hidden;
+  border: 1px solid #fee2e2;
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 14px 24px rgba(15, 23, 42, 0.06);
+}
+
+.enterprise-card-top {
+  padding: 20px 16px 18px;
+  text-align: center;
+  color: #ffffff;
+  background: linear-gradient(135deg, #1f2937, #b90913);
+}
+
+.enterprise-card-top > span {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 900;
+  opacity: 0.9;
+}
+
+.enterprise-card-top h3 {
+  margin: 7px 0 10px;
+  font-size: 1.25rem;
+}
+
+.enterprise-card-top .official-price {
+  color: #ffffff;
+}
+
+.enterprise-card-body {
+  padding: 18px;
+  display: grid;
+  gap: 14px;
+}
+
+.enterprise-card-body p {
+  margin: 0;
+  color: #344054;
+  line-height: 1.5;
+  font-weight: 650;
+}
+
+.enterprise-card-body dl {
+  margin: 0;
+  display: grid;
+  gap: 9px;
+}
+
+.enterprise-card-body dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid #eef2f7;
+  padding-top: 9px;
+}
+
+.enterprise-card-body dt {
+  color: #667085;
+  font-weight: 800;
+}
+
+.enterprise-card-body dd {
+  margin: 0;
+  color: #111827;
+  text-align: right;
+  font-weight: 950;
+}
+
+.enterprise-button {
+  min-height: 42px;
+  border: 0;
+  border-radius: 10px;
+  background: #111827;
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 950;
+}
+
+.enterprise-button:hover {
+  background: #b90913;
+}
+
+.enterprise-modal .pricing-modal-button {
+  text-decoration: none;
+}
+
 .pricing-modal-backdrop {
   position: fixed;
   inset: 0;
   z-index: 60;
   display: grid;
   place-items: center;
-  padding: 18px;
+  padding: max(10px, env(safe-area-inset-top, 0px)) max(10px, env(safe-area-inset-right, 0px)) max(10px, env(safe-area-inset-bottom, 0px)) max(10px, env(safe-area-inset-left, 0px));
+  overflow: hidden;
   background: rgba(15, 23, 42, 0.44);
   backdrop-filter: blur(7px);
+  animation: pricingModalBackdropIn 0.18s ease both;
 }
 
 .pricing-modal,
 .checkout-panel {
   position: relative;
-  width: min(520px, 100%);
+  width: min(560px, 100%);
+  max-height: min(92dvh, 760px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: auto;
+  -webkit-overflow-scrolling: touch;
   border-radius: 18px;
   border: 1px solid #fee2e2;
   background: #ffffff;
-  padding: clamp(22px, 5vw, 34px);
+  padding: clamp(14px, 3vw, 22px);
   box-shadow: 0 28px 60px rgba(15, 23, 42, 0.22);
+  animation: pricingModalIn 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.pricing-modal-backdrop,
+.pricing-modal,
+.checkout-panel {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(190, 23, 33, 0.45) transparent;
+}
+
+.pricing-modal-backdrop::-webkit-scrollbar,
+.pricing-modal::-webkit-scrollbar,
+.checkout-panel::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.pricing-modal-backdrop::-webkit-scrollbar-track,
+.pricing-modal::-webkit-scrollbar-track,
+.checkout-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.pricing-modal-backdrop::-webkit-scrollbar-thumb,
+.pricing-modal::-webkit-scrollbar-thumb,
+.checkout-panel::-webkit-scrollbar-thumb {
+  background: rgba(190, 23, 33, 0.38);
+  border-radius: 999px;
 }
 
 .pricing-certification-modal {
@@ -331,16 +511,18 @@
 
 .pricing-modal h2,
 .checkout-panel h1 {
-  margin: 0 0 20px;
-  font-size: clamp(1.8rem, 5vw, 2.6rem);
+  margin: 0 0 10px;
+  padding-right: 34px;
+  font-size: clamp(1.25rem, 3.2vw, 1.78rem);
+  line-height: 1.12;
 }
 
 .pricing-modal-close {
   position: absolute;
   top: 14px;
   right: 14px;
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   border: 0;
   border-radius: 999px;
   background: #f3f4f6;
@@ -369,9 +551,10 @@
 .pricing-modal-message,
 .pricing-modal-status,
 .pricing-modal-error {
-  margin: 18px 0 0;
-  line-height: 1.55;
+  margin: 10px 0 0;
+  line-height: 1.42;
   font-weight: 700;
+  font-size: 0.9rem;
 }
 
 .pricing-modal-message {
@@ -379,8 +562,8 @@
 }
 
 .pricing-modal-message.compact {
-  margin-top: -8px;
-  margin-bottom: 18px;
+  margin-top: -4px;
+  margin-bottom: 10px;
 }
 
 .pricing-modal-status {
@@ -392,18 +575,34 @@
 }
 
 .pricing-modal-button {
-  margin-top: 22px;
+  margin-top: 12px;
+}
+
+.pricing-modal-button.verifying {
+  cursor: wait;
+  background: linear-gradient(90deg, #b90913, #ef4444, #b90913);
+  background-size: 180% 100%;
+  animation: pricingButtonVerify 1s ease-in-out infinite;
+}
+
+.pricing-button-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-top-color: #ffffff;
+  border-radius: 999px;
+  animation: pricingSpin 0.78s linear infinite;
 }
 
 .pricing-certification-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  margin: 18px 0;
+  gap: 8px;
+  margin: 10px 0;
 }
 
 .pricing-certification-option {
-  min-height: 76px;
+  min-height: 58px;
   border: 1px solid #fee2e2;
   border-radius: 14px;
   background: #ffffff;
@@ -413,7 +612,7 @@
   grid-template-rows: auto auto;
   align-content: center;
   gap: 3px 10px;
-  padding: 14px;
+  padding: 10px 12px;
   text-align: left;
   cursor: pointer;
   font-family: inherit;
@@ -421,7 +620,7 @@
 }
 
 .pricing-certification-option span {
-  font-size: 1rem;
+  font-size: 0.94rem;
   font-weight: 950;
 }
 
@@ -467,9 +666,256 @@
 }
 
 .pricing-modal-secondary {
-  margin-top: 10px;
+  margin-top: 8px;
   background: #111827;
   color: #ffffff;
+}
+
+.pricing-summary-card {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+  margin: 8px 0 12px;
+  border: 1px solid #fee2e2;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #fffafa, #ffffff);
+  padding: 10px;
+}
+
+.pricing-enterprise-access-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.pricing-enterprise-access {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 9px;
+  align-items: center;
+  border: 1px solid #bbf7d0;
+  border-radius: 12px;
+  background: #f0fdf4;
+  padding: 9px 10px;
+  color: #166534;
+}
+
+.pricing-enterprise-access svg {
+  grid-row: 1 / span 2;
+}
+
+.pricing-enterprise-access span {
+  color: #111827;
+  font-weight: 950;
+}
+
+.pricing-enterprise-access strong {
+  color: #166534;
+  font-size: 0.82rem;
+}
+
+.pricing-summary-card div {
+  min-width: 0;
+  border-radius: 10px;
+  background: #f8fafc;
+  padding: 8px 9px;
+}
+
+.pricing-summary-card span,
+.pricing-field span {
+  display: block;
+  color: #667085;
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.pricing-summary-card strong {
+  display: block;
+  margin-top: 3px;
+  color: #111827;
+  font-size: 0.84rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.pricing-payment-methods {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.pricing-payment-methods.compact {
+  margin-top: 10px;
+}
+
+.pricing-payment-method {
+  min-height: 72px;
+  border: 1px solid #fee2e2;
+  border-radius: 14px;
+  background: #ffffff;
+  color: #111827;
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  gap: 6px;
+  padding: 10px 12px;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.pricing-payment-method:hover,
+.pricing-payment-method.selected {
+  border-color: #d71920;
+  box-shadow: 0 12px 26px rgba(190, 23, 33, 0.12);
+  transform: translateY(-1px);
+}
+
+.pricing-payment-method span {
+  font-weight: 950;
+}
+
+.pricing-payment-method small {
+  color: #667085;
+  font-weight: 750;
+}
+
+.pricing-field {
+  display: grid;
+  gap: 5px;
+  margin: 8px 0;
+}
+
+.pricing-field input,
+.pricing-field select {
+  min-height: 44px;
+  width: 100%;
+  border: 1px solid #d0d5dd;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 10px 12px;
+  color: #111827;
+  font: inherit;
+  font-weight: 750;
+}
+
+.pricing-card-placeholder {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  border: 1px dashed #d0d5dd;
+  border-radius: 14px;
+  background: #f8fafc;
+  padding: 14px;
+}
+
+.pricing-card-field {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  border: 1px solid #e4e7ec;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #98a2b3;
+  padding: 0 12px;
+  font-weight: 800;
+}
+
+.pricing-card-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.pricing-processing {
+  display: grid;
+  place-items: center;
+  gap: 7px;
+  margin-top: 8px;
+  border-radius: 14px;
+  background: #f8fafc;
+  padding: 14px;
+  text-align: center;
+}
+
+.pricing-processingIcon {
+  color: #d71920;
+}
+
+.pricing-processingIcon.verifying {
+  animation: pricingPulse 0.9s ease-in-out infinite;
+}
+
+.pricing-verify-hint {
+  margin: 6px 0 0;
+  text-align: center;
+  color: #667085;
+  font-size: 0.84rem;
+  font-weight: 750;
+}
+
+.pricing-support-box {
+  margin-top: 8px;
+  border: 1px solid #fed7aa;
+  border-radius: 12px;
+  background: #fff7ed;
+  padding: 10px;
+}
+
+.pricing-support-box p {
+  margin: 0 0 8px;
+  color: #9a3412;
+  font-size: 0.84rem;
+  line-height: 1.35;
+  font-weight: 750;
+}
+
+.pricing-verification-alert {
+  margin-top: 10px;
+  border: 1px solid #fed7aa;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255, 247, 237, 0.98), rgba(255, 255, 255, 0.98));
+  padding: 12px;
+  box-shadow: 0 12px 30px rgba(154, 52, 18, 0.12);
+  animation: pricingResultIn 0.2s ease both;
+}
+
+.pricing-verification-alert strong {
+  display: block;
+  color: #9a3412;
+  font-size: 0.98rem;
+  font-weight: 950;
+  margin-bottom: 5px;
+}
+
+.pricing-verification-alert p {
+  margin: 0 0 7px;
+  color: #7c2d12;
+  font-size: 0.86rem;
+  line-height: 1.35;
+  font-weight: 750;
+}
+
+.pricing-processing h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.pricing-processing p {
+  margin: 0;
+  color: #344054;
+  font-weight: 750;
+  line-height: 1.38;
+  font-size: 0.9rem;
+}
+
+.pricing-processing small {
+  color: #667085;
+  font-weight: 850;
+  overflow-wrap: anywhere;
 }
 
 .checkout-shell {
@@ -489,6 +935,10 @@
 
   .official-pricing-card + .official-pricing-card {
     margin-left: 0;
+  }
+
+  .enterprise-card-grid {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -546,6 +996,12 @@
     grid-template-columns: 1fr;
   }
 
+  .pricing-summary-card,
+  .pricing-payment-methods,
+  .pricing-card-split {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .pricing-modal-summary strong {
     text-align: left;
     margin-top: -5px;
@@ -553,5 +1009,156 @@
 
   .pricing-certification-grid {
     grid-template-columns: 1fr;
+  }
+
+  .pricing-enterprise-access-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .pricing-modal,
+  .checkout-panel {
+    width: min(100%, 430px);
+    max-height: calc(100dvh - 20px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    padding: 13px;
+    border-radius: 16px;
+  }
+
+  .pricing-modal h2,
+  .checkout-panel h1 {
+    margin-bottom: 6px;
+    font-size: 1.2rem;
+  }
+
+  .pricing-kicker {
+    margin-bottom: 4px;
+  }
+
+  .pricing-summary-card {
+    margin: 6px 0 8px;
+    padding: 7px;
+  }
+
+  .pricing-step-method .pricing-summary-card,
+  .pricing-step-mobile .pricing-summary-card,
+  .pricing-step-processing .pricing-summary-card {
+    display: none;
+  }
+
+  .pricing-summary-card div {
+    padding: 6px 7px;
+  }
+
+  .pricing-summary-card span,
+  .pricing-field span {
+    font-size: 0.7rem;
+  }
+
+  .pricing-summary-card strong {
+    font-size: 0.76rem;
+  }
+
+  .pricing-modal-message,
+  .pricing-modal-status,
+  .pricing-modal-error {
+    margin-top: 6px;
+    font-size: 0.8rem;
+    line-height: 1.28;
+  }
+
+  .pricing-payment-method {
+    min-height: 60px;
+    gap: 4px;
+    padding: 8px 9px;
+  }
+
+  .pricing-payment-method small {
+    font-size: 0.72rem;
+  }
+
+  .pricing-field {
+    gap: 3px;
+    margin: 6px 0;
+  }
+
+  .pricing-field input,
+  .pricing-field select {
+    min-height: 39px;
+    padding: 8px 10px;
+  }
+
+  .pricing-processing {
+    margin-top: 6px;
+    padding: 10px;
+  }
+
+  .pricing-processing h3 {
+    font-size: 0.98rem;
+  }
+
+  .pricing-processing p,
+  .pricing-support-box p {
+    font-size: 0.78rem;
+    line-height: 1.28;
+  }
+
+  .pricing-support-box {
+    padding: 8px;
+  }
+}
+
+@media (max-width: 420px) {
+  .pricing-modal,
+  .checkout-panel {
+    padding: 11px;
+  }
+
+  .pricing-summary-card {
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+
+  .pricing-summary-card div {
+    padding: 7px 8px;
+  }
+}
+
+@keyframes pricingModalBackdropIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes pricingModalIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes pricingSpin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes pricingPulse {
+  0%, 100% { transform: scale(1); opacity: 0.78; }
+  50% { transform: scale(1.12); opacity: 1; }
+}
+
+@keyframes pricingButtonVerify {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 180% 50%; }
+}
+
+@keyframes pricingResultIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
