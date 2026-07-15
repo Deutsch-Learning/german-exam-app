@@ -12,13 +12,12 @@ export default function ComingSoonPage({ examId: examIdProp, title }) {
   const examId = examIdProp ?? params.examId;
   const exam = examSimulations.find((item) => item.id === examId);
   const loggedIn = isLoggedIn();
-  const homePath = loggedIn ? "/dashboard" : "/";
 
   return (
     <div className="simple-page">
       <main className="simple-shell">
         <div className="simple-topbar">
-          <Link className="simple-logo" to={homePath}>
+          <Link className="simple-logo" to="/">
             <img src={logo} alt="" />
             Deutsch Prüfungen
           </Link>

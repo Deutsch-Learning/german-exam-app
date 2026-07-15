@@ -690,15 +690,18 @@
   display: grid;
   place-items: center;
   padding: 20px;
+  overflow-y: auto;
   background: rgba(17, 24, 39, 0.56);
   backdrop-filter: blur(6px);
 }
 
 .exitDialog {
-  width: min(480px, 100%);
+  width: min(440px, 100%);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
   border-radius: 8px;
   background: #ffffff;
-  padding: clamp(22px, 5vw, 34px);
+  padding: clamp(18px, 4vw, 28px);
   text-align: center;
   box-shadow: 0 24px 70px rgba(17, 24, 39, 0.28);
 }

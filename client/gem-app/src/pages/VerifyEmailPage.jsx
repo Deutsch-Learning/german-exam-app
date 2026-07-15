@@ -97,10 +97,10 @@ export default function VerifyEmailPage() {
     <div className="login-layout">
       <div className="login-brand-panel">
         <div className="brand-content">
-          <div className="brand-logo-placeholder">
+          <Link className="brand-logo-placeholder" to="/">
             <img src={logo} alt="" width={32} height={32} />
             <span>N-Deutschprüfungen</span>
-          </div>
+          </Link>
           <div className="brand-text">
             <h2>Vérification email</h2>
             <p>Confirmez votre adresse pour sécuriser votre compte et recevoir les emails importants.</p>

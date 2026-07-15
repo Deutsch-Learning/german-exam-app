@@ -537,7 +537,7 @@ const createNotchPayPayment = async ({
     currency: paymentCurrency,
     email: user.email,
     phone: phone || String(user.phone || "").replace(/[^\d]/g, "") || undefined,
-    description: `N-Deutschprüfungen ${plan.level} ${plan.plan_name}`,
+    description: `N-Deutschpruefungen ${plan.level || "Enterprise"} ${plan.plan_name || plan.label || ""}`.trim(),
     reference,
     callback,
     locked_currency: paymentCurrency,
@@ -570,6 +570,17 @@ const processNotchPayMobileMoneyPayment = async ({ reference, channel, phone }) 
       },
     },
   });
+
+const getEnterpriseBillingPlan = async (client = pool) => {
+  const result = await client.query(
+    `SELECT id, level, plan_key, plan_name, duration_days, price_eur, currency,
+            writing_simulator_attempts, speaking_simulator_quota, certifications, unlocked_sections
+       FROM subscription_plans
+      WHERE level = 'B2' AND plan_key = 'intensif' AND is_active = TRUE
+      LIMIT 1`
+  );
+  return result.rows[0] || null;
+};
 
 const mergeTransactionMetadata = (metadata, next) => ({
   ...asPlainObject(metadata),
@@ -705,6 +716,7 @@ const activateSubscriptionFromTransaction = async ({ providerReference, provider
       await client.query("ROLLBACK");
       return { activated: false, reason: "transaction_not_found" };
     }
+    const transactionMetadata = asPlainObject(transaction.metadata);
 
     const metadata = mergeTransactionMetadata(transaction.metadata, {
       lastProviderEvent: eventType || null,
@@ -719,6 +731,95 @@ const activateSubscriptionFromTransaction = async ({ providerReference, provider
         WHERE id = $1`,
       [transaction.id, safeJson(metadata)]
     );
+
+    const isEnterprisePayment = transactionMetadata.offerType === "enterprise";
+    if (isEnterprisePayment) {
+      const enterpriseOffer = asPlainObject(transactionMetadata.enterpriseOffer);
+      const levels = ["B1", "B2"];
+      const existingEnterprise = await client.query(
+        `SELECT id
+           FROM user_subscriptions
+          WHERE payment_provider = $1
+            AND payment_reference = ANY($2::text[])
+          LIMIT 1`,
+        [transaction.provider, levels.map((level) => `${reference}:${level}`)]
+      );
+      if (existingEnterprise.rows[0]) {
+        await client.query("COMMIT");
+        return { activated: false, reason: "already_active", subscriptionId: existingEnterprise.rows[0].id };
+      }
+
+      const selectedCertifications = normalizeStringArray(
+        transactionMetadata.selectedCertifications || transaction.selected_certifications,
+        SUBSCRIPTION_CERTIFICATIONS
+      );
+      if (!selectedCertifications.length) {
+        await client.query("ROLLBACK");
+        return { activated: false, reason: "missing_selected_certifications" };
+      }
+
+      const createdSubscriptions = [];
+      for (const level of levels) {
+        const levelPlan = await client.query(
+          `SELECT id, plan_key, writing_simulator_attempts
+             FROM subscription_plans
+            WHERE level = $1 AND plan_key = 'intensif' AND is_active = TRUE
+            LIMIT 1`,
+          [level]
+        );
+        const planRow = levelPlan.rows[0];
+        if (!planRow) {
+          await client.query("ROLLBACK");
+          return { activated: false, reason: `missing_${level.toLowerCase()}_enterprise_plan` };
+        }
+        const subscriptionResult = await client.query(
+          `INSERT INTO user_subscriptions (
+             user_id, plan_id, level, plan_key, status, starts_at, expires_at,
+             payment_provider, payment_reference, selected_certifications, amount_paid,
+             currency, speaking_simulator_quota_override, grant_reason
+           )
+           VALUES (
+             $1, $2, $3, $4, 'active', NOW(), NOW() + ($5::int * INTERVAL '1 day'),
+             $6, $7, $8::jsonb, $9, $10, $11, $12
+           )
+           RETURNING id`,
+          [
+            transaction.user_id,
+            planRow.id,
+            level,
+            planRow.plan_key,
+            Number(enterpriseOffer.durationDays || transactionMetadata.durationDays || 30),
+            transaction.provider,
+            `${reference}:${level}`,
+            JSON.stringify(selectedCertifications),
+            Number(transaction.amount),
+            transaction.currency,
+            Number(enterpriseOffer.speakingSimulatorQuota || transactionMetadata.speakingSimulatorQuota || 0),
+            "Notch Pay verified enterprise payment",
+          ]
+        );
+        const subscriptionId = subscriptionResult.rows[0].id;
+        createdSubscriptions.push(subscriptionId);
+        await client.query(
+          `INSERT INTO writing_simulator_usage (user_id, subscription_id, level, attempts_allowed, attempts_used)
+           VALUES ($1, $2, $3, $4, 0)
+           ON CONFLICT (user_id, subscription_id, level)
+           DO UPDATE SET attempts_allowed = EXCLUDED.attempts_allowed, updated_at = NOW()`,
+          [transaction.user_id, subscriptionId, level, Number(planRow.writing_simulator_attempts ?? 10)]
+        );
+        await client.query(
+          `INSERT INTO subscription_admin_events (subscription_id, user_id, action, details)
+           VALUES ($1, $2, 'notchpay_enterprise_payment_activated', $3::jsonb)`,
+          [
+            subscriptionId,
+            transaction.user_id,
+            safeJson({ providerReference: reference, transactionId: transaction.id, eventType, enterpriseOffer }),
+          ]
+        );
+      }
+      await client.query("COMMIT");
+      return { activated: true, subscriptionIds: createdSubscriptions, transactionId: transaction.id, enterprise: true };
+    }
 
     const existing = await client.query(
       `SELECT id
@@ -1329,7 +1430,7 @@ async function ensureSchema() {
       plan_id INTEGER NOT NULL REFERENCES subscription_plans(id) ON DELETE RESTRICT,
       provider TEXT NOT NULL DEFAULT 'manual' CHECK (provider IN ('stripe', 'cinetpay', 'notchpay', 'notpay', 'manual')),
       provider_reference TEXT,
-      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'active', 'expired', 'cancelled', 'failed', 'succeeded')),
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'active', 'expired', 'cancelled', 'failed', 'succeeded')),
       amount NUMERIC(10,2) NOT NULL CHECK (amount >= 0),
       currency TEXT NOT NULL DEFAULT 'EUR',
       selected_certifications JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -1347,6 +1448,15 @@ async function ensureSchema() {
       ALTER TABLE payment_transactions
         ADD CONSTRAINT payment_transactions_provider_check
         CHECK (provider IN ('stripe', 'cinetpay', 'notchpay', 'notpay', 'manual'));
+    END $$;
+  `);
+  await pool.query(`
+    DO $$
+    BEGIN
+      ALTER TABLE payment_transactions DROP CONSTRAINT IF EXISTS payment_transactions_status_check;
+      ALTER TABLE payment_transactions
+        ADD CONSTRAINT payment_transactions_status_check
+        CHECK (status IN ('pending', 'processing', 'active', 'expired', 'cancelled', 'failed', 'succeeded'));
     END $$;
   `);
   await pool.query(`ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS speaking_simulator_quota INTEGER NOT NULL DEFAULT 0;`);
@@ -4955,8 +5065,62 @@ const getCheckoutPlanAndQuote = async ({ level, planKey, selectedCertifications,
   };
 };
 
+const getEnterpriseOfferAndQuote = async ({ offerKey, country = "CM" }) => {
+  const offerResult = await pool.query(
+    `SELECT id, offer_key, label, duration_days, access_months, billed_months, price_eur, currency,
+            speaking_simulator_quota, certifications, unlocked_sections
+       FROM industrial_subscription_offers
+      WHERE offer_key = $1 AND is_active = TRUE
+      LIMIT 1`,
+    [String(offerKey || "").trim()]
+  );
+  const offer = offerResult.rows[0];
+  if (!offer) return { offer: null, billingPlan: null, quote: null };
+  const billingPlan = await getEnterpriseBillingPlan();
+  if (!billingPlan) return { offer, billingPlan: null, quote: null };
+  const countryCode = normalizeMobileMoneyCountry(country) || "CM";
+  const countryConfig = MOBILE_MONEY_COUNTRIES[countryCode] || MOBILE_MONEY_COUNTRIES.CM;
+  const selectedCertifications = normalizeStringArray(offer.certifications, SUBSCRIPTION_CERTIFICATIONS);
+  const finalPriceEur = Number(offer.price_eur);
+  const paymentCurrency = countryConfig.currency;
+  const paymentAmount = eurToNotchPayAmount(finalPriceEur, paymentCurrency);
+  return {
+    offer,
+    billingPlan,
+    quote: {
+      offerType: "enterprise",
+      offerKey: offer.offer_key,
+      label: offer.label,
+      level: "B1+B2",
+      planKey: "enterprise",
+      planName: offer.label,
+      durationDays: Number(offer.duration_days),
+      accessMonths: Number(offer.access_months),
+      billedMonths: Number(offer.billed_months),
+      basePriceEur: finalPriceEur,
+      selectedCertifications,
+      selectedCertificationCount: selectedCertifications.length,
+      finalPriceEur,
+      paymentAmount,
+      paymentCurrency,
+      country: countryCode,
+      countryLabel: countryConfig.label,
+      exchangeRate: NOTCHPAY_XAF_PER_EUR,
+      writingSimulatorAttempts: 10,
+      speakingSimulatorQuota: Number(offer.speaking_simulator_quota ?? 0),
+      unlockedSections: normalizeStringArray(offer.unlocked_sections, SUBSCRIPTION_SECTIONS),
+    },
+  };
+};
+
 app.post("/api/checkout/quote", requireAuth, async (req, res) => {
   try {
+    const offerKey = String(req.body?.offerKey || "").trim();
+    if (offerKey) {
+      const { offer, quote } = await getEnterpriseOfferAndQuote({ offerKey, country: req.body?.country });
+      if (!offer || !quote) return res.status(404).json({ ok: false, error: "Offre entreprise introuvable." });
+      return res.json({ ok: true, quote });
+    }
     const level = normalizeSubscriptionLevel(req.body?.level);
     const planKey = normalizePlanKey(req.body?.planKey);
     const rawSelectedCertifications = Array.isArray(req.body?.selectedCertifications)
@@ -4987,6 +5151,7 @@ app.post("/api/checkout/quote", requireAuth, async (req, res) => {
 app.post("/api/checkout/session", requireAuth, async (req, res) => {
   try {
     const publicBaseUrl = getRequestPublicBaseUrl(req);
+    const offerKey = String(req.body?.offerKey || "").trim();
     const level = normalizeSubscriptionLevel(req.body?.level);
     const planKey = normalizePlanKey(req.body?.planKey);
     const provider = normalizePaymentProvider(req.body?.provider);
@@ -4996,13 +5161,13 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
       ? req.body.selectedCertifications
       : [];
     const selectedCertifications = normalizeStringArray(rawSelectedCertifications, SUBSCRIPTION_CERTIFICATIONS);
-    if (!level || !planKey) {
+    if (!offerKey && (!level || !planKey)) {
       return res.status(400).json({ ok: false, error: "A valid pricing plan is required" });
     }
-    if (!selectedCertifications.length) {
+    if (!offerKey && !selectedCertifications.length) {
       return res.status(400).json({ ok: false, error: "Select at least one certification" });
     }
-    if (selectedCertifications.length !== rawSelectedCertifications.length) {
+    if (!offerKey && selectedCertifications.length !== rawSelectedCertifications.length) {
       return res.status(400).json({ ok: false, error: "One or more selected certifications are invalid" });
     }
     if (paymentMethod !== "mobile_money") {
@@ -5016,12 +5181,20 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
     if (!mobileMoneyValidation.ok) {
       return res.status(400).json({ ok: false, error: mobileMoneyValidation.error });
     }
-    const { plan, quote } = await getCheckoutPlanAndQuote({
-      level,
-      planKey,
-      selectedCertifications,
-      country: mobileMoneyValidation.country,
-    });
+    const enterpriseQuoteResult = offerKey
+      ? await getEnterpriseOfferAndQuote({ offerKey, country: mobileMoneyValidation.country })
+      : null;
+    const normalQuoteResult = offerKey
+      ? null
+      : await getCheckoutPlanAndQuote({
+          level,
+          planKey,
+          selectedCertifications,
+          country: mobileMoneyValidation.country,
+        });
+    const plan = offerKey ? enterpriseQuoteResult?.billingPlan : normalQuoteResult?.plan;
+    const quote = offerKey ? enterpriseQuoteResult?.quote : normalQuoteResult?.quote;
+    const selectedForTransaction = quote?.selectedCertifications || selectedCertifications;
     if (!plan) return res.status(404).json({ ok: false, error: "Pricing plan not found" });
     if (idempotencyKey) {
       const existing = await pool.query(
@@ -5058,6 +5231,9 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
     const transactionMetadata = {
       ...quote,
       quote,
+      offerType: offerKey ? "enterprise" : "individual",
+      enterpriseOffer: offerKey ? quote : null,
+      selectedCertifications: selectedForTransaction,
       requestedProvider: provider,
       paymentMethod,
       idempotencyKey: idempotencyKey || null,
@@ -5081,7 +5257,7 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
         provider,
         quote.paymentAmount,
         quote.paymentCurrency,
-        JSON.stringify(selectedCertifications),
+        JSON.stringify(selectedForTransaction),
         safeJson(transactionMetadata),
       ]
     );
@@ -5096,7 +5272,7 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
         reference: merchantReference,
         amountEur: quote.finalPriceEur,
         plan,
-        selectedCertifications,
+        selectedCertifications: selectedForTransaction,
         callbackBaseUrl: publicBaseUrl,
         currency: quote.paymentCurrency,
         lockedCountry: mobileMoneyValidation.country,
@@ -5149,7 +5325,7 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
         planId: plan.id,
         amount: quote.finalPriceEur,
         ...quote,
-        certifications: selectedCertifications,
+        certifications: selectedForTransaction,
         unlockedSections: normalizeStringArray(plan.unlocked_sections, SUBSCRIPTION_SECTIONS),
         mobileMoney: transactionMetadata.mobileMoney,
         message: "Confirmez le paiement sur votre telephone pour terminer l'abonnement.",

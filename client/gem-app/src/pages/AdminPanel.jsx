@@ -392,10 +392,10 @@ function AdminShell({ children }) {
     <div className={styles.adminPage}>
       <div className={styles.layout}>
         <aside className={styles.sidebar}>
-          <div className={styles.brand}>
+          <Link className={styles.brand} to="/">
             <img src={logo} alt="" />
             <span>Admin</span>
-          </div>
+          </Link>
           <button
             type="button"
             className={styles.switchButton}

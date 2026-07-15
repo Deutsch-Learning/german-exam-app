@@ -57,7 +57,7 @@ export const SimulationTopNav = ({ onGoHome, onGoAbout, onGoProfile, onGoDashboa
           src={logo}
           alt="Deutsch Prüfungen Logo"
           className={styles.logo}
-          onClick={loggedIn ? onGoDashboard : onGoHome}
+          onClick={onGoHome}
           style={{ cursor: "pointer" }}
         />
       </div>

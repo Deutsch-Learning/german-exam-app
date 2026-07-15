@@ -79,10 +79,10 @@ export default function LoginPage() {
     <div className="login-layout">
       <div className="login-brand-panel">
         <div className="brand-content">
-          <div className="brand-logo-placeholder">
+          <Link className="brand-logo-placeholder" to="/">
             <img src={logo} alt="" width={32} height={32} />
             <span>Deutsch Prüfungen</span>
-          </div>
+          </Link>
           <div className="brand-text">
             <h2>{t.auth.loginBrandTitle}</h2>
             <p>{t.auth.loginBrandText}</p>

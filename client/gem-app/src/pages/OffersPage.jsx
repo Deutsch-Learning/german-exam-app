@@ -11,7 +11,33 @@ import {
   enterpriseOffers,
   formatEuro,
   pricingSections,
+  unlockedSections,
 } from "../data/pricingPlans";
+
+const SUPPORT_WHATSAPP_NUMBER = "237675150237";
+
+const buildEnterprisePlan = (offer) => ({
+  id: `enterprise-${offer.offerKey}`,
+  offerKey: offer.offerKey,
+  isEnterprise: true,
+  level: "B1 + B2",
+  planKey: "enterprise",
+  planName: offer.label,
+  priceEur: Number(offer.priceEur),
+  displayPrice: offer.displayPrice,
+  durationDays: offer.durationDays || offer.accessDays || 30,
+  writingSimulatorAttempts: 10,
+  availableCertifications: certificationOptions,
+  unlockedSections: unlockedSections.map((section) => section.title),
+  sectionDetails: unlockedSections,
+  currency: "EUR",
+  accessLabel: offer.accessLabel,
+  billedLabel: offer.billedLabel,
+  speakingSimulatorQuota: offer.speakingSimulatorQuota,
+});
+
+const getSupportName = (user) =>
+  user?.name || user?.full_name || user?.fullName || user?.username || user?.email || "Client";
 
 const PriceText = ({ value }) => {
   const [euros, cents = ""] = String(value).replace("€", "").split(",");
@@ -178,8 +204,10 @@ const CheckoutModalV2 = ({
   mobileProvider,
   mobilePhone,
   paymentStatus,
+  verifying,
   loading,
   error,
+  supportUrl,
   onClose,
   onToggleCertification,
   onContinue,
@@ -189,14 +217,18 @@ const CheckoutModalV2 = ({
   onSetMobileProvider,
   onSetMobilePhone,
   onPayMobileMoney,
+  onVerifyPayment,
 }) => {
   if (!plan) return null;
 
-  const selectedCount = selectedCertifications.length;
-  const totalPrice = Number((plan.priceEur * selectedCount).toFixed(2));
+  const isEnterprise = Boolean(plan.isEnterprise);
+  const selectedCount = isEnterprise ? 1 : selectedCertifications.length;
+  const totalPrice = isEnterprise
+    ? Number(plan.priceEur)
+    : Number((plan.priceEur * selectedCount).toFixed(2));
   const selectedLabels = certificationOptions
     .filter((option) => selectedCertifications.includes(option.key))
-    .map((option) => `${option.label} ${plan.level}`);
+    .map((option) => (isEnterprise ? `${option.label} B1 + B2` : `${option.label} ${plan.level}`));
   const country = getMobileCountry(mobileCountry);
   const providerOptions = Object.entries(country.providers);
   const selectedProviderConfig = country.providers[mobileProvider];
@@ -224,9 +256,9 @@ const CheckoutModalV2 = ({
           <div><span>Niveau</span><strong>{plan.level}</strong></div>
           <div><span>Pack</span><strong>{plan.planName}</strong></div>
           <div><span>Examens</span><strong>{selectedLabels.length ? selectedLabels.join(", ") : "Aucune selection"}</strong></div>
-          <div><span>Duree</span><strong>{plan.durationDays} jours</strong></div>
+          <div><span>Duree</span><strong>{plan.accessLabel || `${plan.durationDays} jours`}</strong></div>
           <div><span>Quantite</span><strong>{selectedCount || 0}</strong></div>
-          <div><span>Prix unitaire</span><strong>{formatEuro(plan.priceEur)}</strong></div>
+          <div><span>Prix</span><strong>{formatEuro(plan.priceEur)}</strong></div>
           <div><span>Total EUR</span><strong>{formatEuro(totalPrice)}</strong></div>
           <div>
             <span>Devise paiement</span>
@@ -234,7 +266,7 @@ const CheckoutModalV2 = ({
           </div>
         </div>
 
-        {step === "certifications" ? (
+        {step === "certifications" && !isEnterprise ? (
           <>
             <p className="pricing-modal-message compact">
               Choisissez les certifications que vous voulez debloquer pour ce pack.
@@ -260,6 +292,30 @@ const CheckoutModalV2 = ({
             <p className="pricing-modal-message">Vous allez finaliser le paiement a l'etape suivante.</p>
             {error ? <p className="pricing-modal-error">{error}</p> : null}
             <button className="pricing-modal-button" type="button" disabled={selectedCount < 1} onClick={onContinue}>
+              Continuer
+            </button>
+          </>
+        ) : null}
+
+        {step === "certifications" && isEnterprise ? (
+          <>
+            <p className="pricing-modal-message compact">
+              Ce pack entreprise debloque automatiquement les examens B1 et B2 pour Goethe, OSD, TELC et ECL apres confirmation securisee du paiement.
+            </p>
+            <div className="pricing-enterprise-access-grid" aria-label="Acces entreprise inclus">
+              {certificationOptions.map((option) => (
+                <div className="pricing-enterprise-access" key={option.key}>
+                  <CheckCircle2 size={18} />
+                  <span>{option.label}</span>
+                  <strong>B1 + B2</strong>
+                </div>
+              ))}
+            </div>
+            <p className="pricing-modal-message">
+              Validation automatique apres confirmation Notch Pay. L'activation manuelle reste reservee aux cas de recuperation support.
+            </p>
+            {error ? <p className="pricing-modal-error">{error}</p> : null}
+            <button className="pricing-modal-button" type="button" onClick={onContinue}>
               Continuer
             </button>
           </>
@@ -366,7 +422,11 @@ const CheckoutModalV2 = ({
             <div className="pricing-processing">
               <Smartphone size={34} />
               <h3>{paymentStatus?.status === "succeeded" ? "Paiement confirme" : "Confirmez sur votre telephone"}</h3>
-              <p>{paymentStatus?.message || checkout?.checkoutSession?.message || "Une demande Mobile Money vient d'etre envoyee. Validez-la sur votre telephone."}</p>
+              <p>
+                {paymentStatus?.status === "succeeded"
+                  ? "Paiement confirme. Votre acces aux examens a ete active."
+                  : paymentStatus?.message || checkout?.checkoutSession?.message || "Une demande Mobile Money vient d'etre envoyee. Validez-la sur votre telephone."}
+              </p>
               {checkout?.checkoutSession?.providerReference ? (
                 <small>Reference : {checkout.checkoutSession.providerReference}</small>
               ) : null}
@@ -375,7 +435,22 @@ const CheckoutModalV2 = ({
             {paymentStatus?.status === "succeeded" ? (
               <Link className="pricing-modal-button" to="/dashboard">Aller au dashboard</Link>
             ) : (
-              <button className="pricing-modal-secondary" type="button" onClick={onBack}>Choisir un autre moyen</button>
+              <>
+                <button className="pricing-modal-button" type="button" disabled={verifying} onClick={onVerifyPayment}>
+                  {verifying ? "Verification du paiement..." : "Verifier le paiement"}
+                </button>
+                <p className="pricing-verify-hint">Cliquez ici si le paiement a ete effectue.</p>
+                {paymentStatus?.checked && (paymentStatus?.status === "failed" || paymentStatus?.status === "pending" || paymentStatus?.status === "processing") ? (
+                  <div className="pricing-support-box">
+                    <p>
+                      Nous n'avons pas encore recu votre paiement. Si vous avez effectue le paiement mais que votre acces n'a pas ete active, contactez le service client.
+                    </p>
+                    <a className="pricing-modal-secondary" href={supportUrl} target="_blank" rel="noreferrer">
+                      Contacter le service client
+                    </a>
+                  </div>
+                ) : null}
+              </>
             )}
           </>
         ) : null}
@@ -388,7 +463,7 @@ export default function OffersPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [selectedPlan, setSelectedPlan] = useState(null);
-  const [selectedEnterpriseOffer, setSelectedEnterpriseOffer] = useState(null);
+  const [, setSelectedEnterpriseOffer] = useState(null);
   const [selectedCertifications, setSelectedCertifications] = useState([]);
   const [checkout, setCheckout] = useState(null);
   const [checkoutQuote, setCheckoutQuote] = useState(null);
@@ -400,6 +475,7 @@ export default function OffersPage() {
   const [mobileProvider, setMobileProvider] = useState("mtn");
   const [mobilePhone, setMobilePhone] = useState("");
   const [checkoutPaymentStatus, setCheckoutPaymentStatus] = useState(null);
+  const [verifyingPayment, setVerifyingPayment] = useState(false);
   const [idempotencyKey, setIdempotencyKey] = useState("");
   const [loadingPlanId, setLoadingPlanId] = useState("");
   const user = useMemo(() => getAuthUser(), []);
@@ -412,13 +488,30 @@ export default function OffersPage() {
   }[paymentStatus] || "";
 
   useEffect(() => {
+    if (!selectedPlan) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const handleEscape = (event) => {
+      if (event.key === "Escape" && checkoutStep !== "processing") {
+        setSelectedPlan(null);
+      }
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [checkoutStep, selectedPlan]);
+
+  useEffect(() => {
     if (!selectedPlan || selectedCertifications.length < 1 || !["method", "mobile"].includes(checkoutStep)) {
       return undefined;
     }
     let cancelled = false;
     getCheckoutQuote({
-      level: selectedPlan.level,
-      planKey: selectedPlan.planKey,
+      offerKey: selectedPlan.offerKey,
+      level: selectedPlan.isEnterprise ? undefined : selectedPlan.level,
+      planKey: selectedPlan.isEnterprise ? undefined : selectedPlan.planKey,
       selectedCertifications,
       country: mobileCountry,
     })
@@ -437,6 +530,12 @@ export default function OffersPage() {
   }, [checkoutStep, mobileCountry, selectedCertifications, selectedPlan]);
 
   useEffect(() => {
+    if (checkoutStep !== "processing" || checkoutPaymentStatus?.status !== "succeeded") return undefined;
+    const timeout = window.setTimeout(() => navigate("/dashboard?payment=success"), 1600);
+    return () => window.clearTimeout(timeout);
+  }, [checkoutPaymentStatus?.status, checkoutStep, navigate]);
+
+  useEffect(() => {
     const reference = checkout?.checkoutSession?.providerReference;
     if (checkoutStep !== "processing" || !reference || checkoutPaymentStatus?.status === "succeeded") return undefined;
     let cancelled = false;
@@ -444,7 +543,7 @@ export default function OffersPage() {
       try {
         const result = await getCheckoutSessionStatus(reference);
         if (cancelled) return;
-        setCheckoutPaymentStatus(result);
+        setCheckoutPaymentStatus((current) => ({ ...result, checked: Boolean(current?.checked) }));
         if (["succeeded", "failed"].includes(result.status)) {
           window.clearInterval(interval);
         }
@@ -481,10 +580,41 @@ export default function OffersPage() {
     setMobileProvider("mtn");
     setMobilePhone("");
     setCheckoutPaymentStatus(null);
+    setVerifyingPayment(false);
+    setIdempotencyKey(plan.id);
+  };
+
+  const openEnterpriseCheckout = (offer) => {
+    const userNow = getAuthUser();
+    if (!userNow?.id) {
+      navigate("/session-expired", {
+        state: {
+          offerId: offer.offerKey,
+          selectedEnterpriseOffer: offer,
+        },
+      });
+      return;
+    }
+    const plan = buildEnterprisePlan(offer);
+    const allCertifications = certificationOptions.map((option) => option.key);
+    setSelectedEnterpriseOffer(null);
+    setSelectedPlan(plan);
+    setSelectedCertifications(allCertifications);
+    setCheckout(null);
+    setCheckoutQuote(null);
+    setCheckoutError("");
+    setCheckoutStep("certifications");
+    setPaymentMethod("mobile_money");
+    setMobileCountry("CM");
+    setMobileProvider("mtn");
+    setMobilePhone("");
+    setCheckoutPaymentStatus(null);
+    setVerifyingPayment(false);
     setIdempotencyKey(plan.id);
   };
 
   const toggleCertification = (key) => {
+    if (selectedPlan?.isEnterprise) return;
     setSelectedCertifications((prev) =>
       prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]
     );
@@ -496,13 +626,15 @@ export default function OffersPage() {
   const continueCheckout = () => {
     setCheckoutError("");
     if (checkoutStep === "certifications") {
-      if (selectedCertifications.length < 1) {
+      if (!selectedPlan?.isEnterprise && selectedCertifications.length < 1) {
         setCheckoutError("Selectionnez au moins une certification.");
         return;
       }
       setQuoteLoading(true);
       setCheckoutStep("method");
-      setIdempotencyKey(`${selectedPlan.id}-${selectedCertifications.slice().sort().join("-")}`);
+      setIdempotencyKey(selectedPlan?.isEnterprise
+        ? selectedPlan.id
+        : `${selectedPlan.id}-${selectedCertifications.slice().sort().join("-")}`);
       return;
     }
     if (checkoutStep === "method" && paymentMethod === "mobile_money") {
@@ -538,11 +670,12 @@ export default function OffersPage() {
     try {
       const finalPriceEur = Number((selectedPlan.priceEur * selectedCertifications.length).toFixed(2));
       const session = await createCheckoutSession({
+        offerKey: selectedPlan.offerKey,
         ...selectedPlan,
         basePriceEur: selectedPlan.priceEur,
         selectedCertifications,
         selectedCertificationCount: selectedCertifications.length,
-        finalPriceEur,
+        finalPriceEur: selectedPlan.isEnterprise ? selectedPlan.priceEur : finalPriceEur,
         paymentMethod: "mobile_money",
         mobileMoney: {
           country: mobileCountry,
@@ -567,6 +700,47 @@ export default function OffersPage() {
       setLoadingPlanId("");
     }
   };
+
+  const verifyPayment = async () => {
+    const reference = checkout?.checkoutSession?.providerReference;
+    if (!reference || verifyingPayment) return;
+    setVerifyingPayment(true);
+    setCheckoutError("");
+    try {
+      const result = await getCheckoutSessionStatus(reference);
+      setCheckoutPaymentStatus({ ...result, checked: true });
+      if (result.status === "succeeded") {
+        setCheckoutError("");
+      } else if (result.status === "failed") {
+        setCheckoutError("Le paiement n'a pas ete confirme. Vous pouvez contacter le service client si le montant a ete debite.");
+      } else {
+        setCheckoutError("Nous n'avons pas encore recu votre paiement. La confirmation Mobile Money peut prendre un court instant.");
+      }
+    } catch (err) {
+      setCheckoutError(err.response?.data?.error || "Verification du paiement temporairement indisponible.");
+    } finally {
+      setVerifyingPayment(false);
+    }
+  };
+
+  const supportUrl = useMemo(() => {
+    const session = checkout?.checkoutSession || {};
+    const selectedLabel = selectedPlan
+      ? `${selectedPlan.level} ${selectedPlan.planName}`
+      : "Pack non precise";
+    const message = [
+      "Bonjour N-Deutschprufungen,",
+      "j'ai effectue un paiement mais mon acces n'est pas encore active.",
+      `Nom: ${getSupportName(user)}`,
+      `Email: ${user?.email || "Non renseigne"}`,
+      `Pack: ${selectedLabel}`,
+      `Prestataire: ${session.provider || "notchpay"}`,
+      `Reference: ${session.providerReference || "Non disponible"}`,
+      `Montant: ${session.paymentAmount || session.amount || ""} ${session.paymentCurrency || session.currency || ""}`.trim(),
+      `Date: ${new Date().toLocaleString("fr-FR")}`,
+    ].join("\n");
+    return `https://wa.me/${SUPPORT_WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
+  }, [checkout, selectedPlan, user]);
 
   return (
     <div className="official-pricing-page">
@@ -669,9 +843,9 @@ export default function OffersPage() {
                     <div><dt>Simulations orales</dt><dd>{offer.speakingSimulatorQuota}</dd></div>
                     <div><dt>Modules</dt><dd>B1 + B2 · Goethe, ÖSD, TELC, ECL</dd></div>
                   </dl>
-                  <button className="enterprise-button" type="button" onClick={() => setSelectedEnterpriseOffer(offer)}>
+                  <button className="enterprise-button" type="button" onClick={() => openEnterpriseCheckout(offer)}>
                     <CreditCard size={17} />
-                    Préparer le paiement
+                    S'abonner
                   </button>
                 </div>
               </article>
@@ -683,36 +857,6 @@ export default function OffersPage() {
           Tarifs valables pour les certifications ciblées : Goethe, ÖSD, TELC, ECL, à niveau et durée équivalents.
         </p>
       </main>
-
-      {selectedEnterpriseOffer ? (
-        <div className="pricing-modal-backdrop" role="presentation" onMouseDown={() => setSelectedEnterpriseOffer(null)}>
-          <section
-            className="pricing-modal enterprise-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="enterprise-modal-title"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <button className="pricing-modal-close" type="button" aria-label="Fermer" onClick={() => setSelectedEnterpriseOffer(null)}>
-              <X size={18} />
-            </button>
-            <p className="pricing-kicker">Paiement entreprise</p>
-            <h2 id="enterprise-modal-title">{selectedEnterpriseOffer.label}</h2>
-            <div className="pricing-modal-summary">
-              <span>Prix</span><strong>{formatEuro(selectedEnterpriseOffer.priceEur)}</strong>
-              <span>Accès</span><strong>{selectedEnterpriseOffer.accessLabel}</strong>
-              <span>Facturation</span><strong>{selectedEnterpriseOffer.billedLabel}</strong>
-              <span>Simulations orales</span><strong>{selectedEnterpriseOffer.speakingSimulatorQuota}</strong>
-            </div>
-            <p className="pricing-modal-message">
-              Le paiement automatique entreprise sera connecté au prestataire de paiement vérifié. Pour l’instant, ce pack est prêt pour activation manuelle par l’admin après validation du paiement.
-            </p>
-            <Link className="pricing-modal-button" to="/contact">
-              Demander l’activation
-            </Link>
-          </section>
-        </div>
-      ) : null}
 
       <CheckoutModalV2
         plan={selectedPlan}
@@ -726,8 +870,10 @@ export default function OffersPage() {
         mobileProvider={mobileProvider}
         mobilePhone={mobilePhone}
         paymentStatus={checkoutPaymentStatus}
+        verifying={verifyingPayment}
         loading={Boolean(loadingPlanId)}
         error={checkoutError}
+        supportUrl={supportUrl}
         onToggleCertification={toggleCertification}
         onContinue={continueCheckout}
         onBack={backCheckout}
@@ -742,14 +888,17 @@ export default function OffersPage() {
         }}
         onSetMobilePhone={setMobilePhone}
         onPayMobileMoney={confirmCheckout}
+        onVerifyPayment={verifyPayment}
         onClose={() => {
           setSelectedPlan(null);
+          setSelectedEnterpriseOffer(null);
           setSelectedCertifications([]);
           setCheckout(null);
           setCheckoutQuote(null);
           setCheckoutError("");
           setCheckoutStep("certifications");
           setCheckoutPaymentStatus(null);
+          setVerifyingPayment(false);
         }}
       />
     </div>

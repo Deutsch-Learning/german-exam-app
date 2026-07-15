@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import API from "../services/api";
 import logo from "../assets/images/logo.png";
 import "./LoginPage.css";
@@ -30,10 +31,10 @@ export default function ForgotPasswordPage() {
     <div className="login-layout">
       <div className="login-brand-panel">
         <div className="brand-content">
-          <div className="brand-logo-placeholder">
+          <Link className="brand-logo-placeholder" to="/">
             <img src={logo} alt="" width={32} height={32} />
             <span>Deutsch Prüfungen</span>
-          </div>
+          </Link>
           <div className="brand-text">
             <h2>Réinitialisation sécurisée</h2>
             <p>Recevez un lien temporaire pour choisir un nouveau mot de passe.</p>

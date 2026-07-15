@@ -1,12 +1,14 @@
 import API from "./api";
 
 export const getCheckoutQuote = async ({
+  offerKey,
   level,
   planKey,
   selectedCertifications,
   country = "CM",
 }) => {
   const response = await API.post("/api/checkout/quote", {
+    offerKey,
     level,
     planKey,
     selectedCertifications,
@@ -16,6 +18,7 @@ export const getCheckoutQuote = async ({
 };
 
 export const createCheckoutSession = async ({
+  offerKey,
   level,
   planKey,
   planName,
@@ -33,6 +36,7 @@ export const createCheckoutSession = async ({
   provider = "manual",
 }) => {
   const payload = {
+    offerKey,
     level,
     planKey,
     planName,

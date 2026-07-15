@@ -455,6 +455,7 @@
   display: grid;
   place-items: center;
   padding: 18px;
+  overflow-y: auto;
   background: rgba(15, 23, 42, 0.44);
   backdrop-filter: blur(7px);
 }
@@ -463,10 +464,12 @@
 .checkout-panel {
   position: relative;
   width: min(520px, 100%);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
   border-radius: 18px;
   border: 1px solid #fee2e2;
   background: #ffffff;
-  padding: clamp(22px, 5vw, 34px);
+  padding: clamp(18px, 4vw, 28px);
   box-shadow: 0 28px 60px rgba(15, 23, 42, 0.22);
 }
 
@@ -476,8 +479,8 @@
 
 .pricing-modal h2,
 .checkout-panel h1 {
-  margin: 0 0 20px;
-  font-size: clamp(1.8rem, 5vw, 2.6rem);
+  margin: 0 0 14px;
+  font-size: clamp(1.45rem, 4vw, 2.05rem);
 }
 
 .pricing-modal-close {
@@ -628,6 +631,39 @@
   padding: 14px;
 }
 
+.pricing-enterprise-access-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.pricing-enterprise-access {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 9px;
+  align-items: center;
+  border: 1px solid #bbf7d0;
+  border-radius: 12px;
+  background: #f0fdf4;
+  padding: 10px 12px;
+  color: #166534;
+}
+
+.pricing-enterprise-access svg {
+  grid-row: 1 / span 2;
+}
+
+.pricing-enterprise-access span {
+  color: #111827;
+  font-weight: 950;
+}
+
+.pricing-enterprise-access strong {
+  color: #166534;
+  font-size: 0.82rem;
+}
+
 .pricing-summary-card div {
   min-width: 0;
   border-radius: 10px;
@@ -754,6 +790,30 @@
   text-align: center;
 }
 
+.pricing-verify-hint {
+  margin: 8px 0 0;
+  text-align: center;
+  color: #667085;
+  font-size: 0.84rem;
+  font-weight: 750;
+}
+
+.pricing-support-box {
+  margin-top: 12px;
+  border: 1px solid #fed7aa;
+  border-radius: 12px;
+  background: #fff7ed;
+  padding: 12px;
+}
+
+.pricing-support-box p {
+  margin: 0 0 10px;
+  color: #9a3412;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  font-weight: 750;
+}
+
 .pricing-processing h3 {
   margin: 0;
   font-size: 1.25rem;
@@ -862,6 +922,10 @@
   }
 
   .pricing-certification-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .pricing-enterprise-access-grid {
     grid-template-columns: 1fr;
   }
 }
