@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { CheckCircle2, CreditCard, X } from "lucide-react";
 import "./PricingPage.css";
 import logo from "../assets/images/logo.png";
@@ -98,7 +98,7 @@ const CheckoutModal = ({
         )}
 
         <p className="pricing-modal-message">
-          Paiement bientôt disponible. Ce pack est prêt pour l’intégration du paiement.
+          Apres confirmation, vous serez redirige vers le paiement securise Notch Pay.
         </p>
         {checkout?.checkoutSession?.status ? (
           <p className="pricing-modal-status">
@@ -122,6 +122,7 @@ const CheckoutModal = ({
 
 export default function OffersPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [selectedPlan, setSelectedPlan] = useState(null);
   const [selectedEnterpriseOffer, setSelectedEnterpriseOffer] = useState(null);
   const [selectedCertifications, setSelectedCertifications] = useState([]);
@@ -129,6 +130,13 @@ export default function OffersPage() {
   const [checkoutError, setCheckoutError] = useState("");
   const [loadingPlanId, setLoadingPlanId] = useState("");
   const user = useMemo(() => getAuthUser(), []);
+  const paymentStatus = searchParams.get("payment");
+  const paymentNotice = {
+    failed: "Le paiement n'a pas abouti. Vous pouvez réessayer ou choisir un autre moyen de paiement.",
+    pending: "Le paiement est en cours de vérification. L'accès sera activé automatiquement après confirmation.",
+    verification_error: "Nous n'avons pas pu vérifier ce paiement pour le moment. Si le montant a été débité, contactez le support.",
+    missing_reference: "La référence du paiement est manquante. Veuillez relancer le paiement depuis cette page.",
+  }[paymentStatus] || "";
 
   const openPlanSelector = (plan) => {
     const userNow = getAuthUser();
@@ -204,6 +212,12 @@ export default function OffersPage() {
           <h1>Grille Tarifaire Officielle</h1>
           <p>Packs de révision pour la préparation aux examens d’allemand - Niveaux B1 & B2</p>
         </section>
+
+        {paymentNotice ? (
+          <div className={`pricing-payment-notice ${paymentStatus === "failed" || paymentStatus === "verification_error" ? "warning" : ""}`}>
+            {paymentNotice}
+          </div>
+        ) : null}
 
         {pricingSections.map((section) => (
           <section className="pricing-level-section" key={section.level} aria-labelledby={`pricing-${section.level}`}>

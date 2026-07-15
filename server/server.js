@@ -112,6 +112,16 @@ const originAllowed = (origin) => {
   if (allowedOrigins.has(normalized)) return true;
   return isVercelPreviewOrigin(origin);
 };
+
+const getRequestPublicBaseUrl = (req) => {
+  const origin = normalizePublicUrl(req.get("origin") || "");
+  if (origin && originAllowed(origin)) return origin;
+  const host = String(req.get("x-forwarded-host") || req.get("host") || "").trim();
+  if (!host) return FRONTEND_URL;
+  const protocol = String(req.get("x-forwarded-proto") || req.protocol || "https").split(",")[0].trim() || "https";
+  return normalizePublicUrl(`${protocol}://${host}`);
+};
+
 const JWT_SECRET =
   process.env.JWT_SECRET ||
   "dev-only-change-me-german-exam-app-secret";
@@ -397,14 +407,25 @@ const notchPayRequest = async (pathName, { method = "GET", body } = {}) => {
   return data;
 };
 
-const createNotchPayPayment = async ({ user, transactionId, reference, amountEur, plan, selectedCertifications }) => {
+const createNotchPayPayment = async ({
+  user,
+  transactionId,
+  reference,
+  amountEur,
+  plan,
+  selectedCertifications,
+  callbackBaseUrl,
+}) => {
   const amount = eurToNotchPayAmount(amountEur);
   if (!amount) {
     const error = new Error("Invalid Notch Pay amount.");
     error.status = 400;
     throw error;
   }
-  const callback = `${NOTCHPAY_CALLBACK_URL}?reference=${encodeURIComponent(reference)}`;
+  const callbackRoot = callbackBaseUrl
+    ? `${normalizePublicUrl(callbackBaseUrl)}/api/payments/notchpay/callback`
+    : NOTCHPAY_CALLBACK_URL;
+  const callback = `${callbackRoot}?reference=${encodeURIComponent(reference)}`;
   const payload = {
     amount,
     currency: NOTCHPAY_CURRENCY,
@@ -415,13 +436,6 @@ const createNotchPayPayment = async ({ user, transactionId, reference, amountEur
     callback,
     locked_currency: NOTCHPAY_CURRENCY,
     locked_country: NOTCHPAY_LOCKED_COUNTRY,
-    items: [
-      {
-        name: `${plan.level} ${plan.plan_name}`,
-        quantity: 1,
-        price: amount,
-      },
-    ],
     customer_meta: {
       userId: user.id,
       transactionId,
@@ -433,7 +447,8 @@ const createNotchPayPayment = async ({ user, transactionId, reference, amountEur
       currency: NOTCHPAY_CURRENCY,
     },
   };
-  return notchPayRequest("/payments", { method: "POST", body: payload });
+  const session = await notchPayRequest("/payments", { method: "POST", body: payload });
+  return { ...session, callback };
 };
 
 const retrieveNotchPayPayment = async (reference) =>
@@ -4782,6 +4797,7 @@ app.get("/api/subscriptions/access", requireAuth, async (req, res) => {
 
 app.post("/api/checkout/session", requireAuth, async (req, res) => {
   try {
+    const publicBaseUrl = getRequestPublicBaseUrl(req);
     const level = normalizeSubscriptionLevel(req.body?.level);
     const planKey = normalizePlanKey(req.body?.planKey);
     const provider = normalizePaymentProvider(req.body?.provider);
@@ -4853,8 +4869,14 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
         amountEur: finalPriceEur,
         plan,
         selectedCertifications,
+        callbackBaseUrl: publicBaseUrl,
       });
       authorizationUrl = notchPaySession.authorization_url || notchPaySession.authorizationUrl || "";
+      if (!authorizationUrl) {
+        const error = new Error("Notch Pay did not return a checkout URL.");
+        error.status = 502;
+        throw error;
+      }
       await pool.query(
         `UPDATE payment_transactions
             SET provider_reference = $2,
@@ -4870,7 +4892,7 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
               amount: notchAmount,
               currency: NOTCHPAY_CURRENCY,
               authorizationUrl,
-              callbackUrl: `${NOTCHPAY_CALLBACK_URL}?reference=${encodeURIComponent(providerReference)}`,
+              callbackUrl: notchPaySession.callback,
               transaction: getNotchPayTransactionObject(notchPaySession),
             },
           }),
@@ -4901,18 +4923,29 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
         speakingSimulatorQuota: Number(plan.speaking_simulator_quota ?? 0),
         certifications: selectedCertifications,
         unlockedSections: normalizeStringArray(plan.unlocked_sections, SUBSCRIPTION_SECTIONS),
-        message: "Paiement bientôt disponible. Ce pack est prêt pour l’intégration du paiement.",
+        message: "Session de paiement securisee prete.",
       },
     });
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ ok: false, error: "Server error" });
+    const status = Number(err.status || err.statusCode || 500);
+    const providerMessage =
+      err?.data?.message ||
+      err?.data?.error ||
+      err?.message ||
+      "Payment session could not be prepared.";
+    return res.status(status >= 400 && status < 500 ? status : 502).json({
+      ok: false,
+      error: "La session de paiement n'a pas pu etre preparee. Veuillez reessayer dans quelques instants.",
+      details: isProduction ? undefined : providerMessage,
+    });
   }
 });
 
 app.get("/api/payments/notchpay/callback", async (req, res) => {
   const reference = String(req.query.reference || req.query.transaction_id || req.query.transaction || "").trim();
-  const redirectBase = `${FRONTEND_URL}/offers`;
+  const redirectRoot = getRequestPublicBaseUrl(req);
+  const redirectBase = `${redirectRoot}/offers`;
   if (!reference) return res.redirect(`${redirectBase}?payment=missing_reference`);
   try {
     const payment = await retrieveNotchPayPayment(reference);
@@ -4923,7 +4956,7 @@ app.get("/api/payments/notchpay/callback", async (req, res) => {
         providerPayload: payment,
         eventType: "callback",
       });
-      return res.redirect(`${FRONTEND_URL}/dashboard?payment=success`);
+      return res.redirect(`${redirectRoot}/dashboard?payment=success`);
     }
     if (isFailedPaymentStatus(status)) {
       await pool.query(
