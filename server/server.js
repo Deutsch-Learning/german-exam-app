@@ -658,19 +658,113 @@ const getNotchPayAuthorizationUrlFromPayload = (payload = {}) => {
   return candidates.map((item) => String(item || "").trim()).find(Boolean) || "";
 };
 
-const processNotchPayMobileMoneyPayment = async ({ reference, channel, phone, clientIp }) =>
+const buildNotchPayProcessPayload = ({ channel, phone, clientIp }) => ({
+  channel,
+  data: {
+    phone: Number(String(phone || "").replace(/[^\d]/g, "")),
+    account_number: String(phone || "").replace(/[^\d]/g, ""),
+    country: String(phone || "").replace(/[^\d]/g, "").startsWith("237") ? "CM" : undefined,
+  },
+  client_ip: clientIp || undefined,
+});
+
+const processNotchPayMobileMoneyPayment = async ({ reference, channel, phone, clientIp, method = "POST" }) =>
   notchPayRequest(`/payments/${encodeURIComponent(reference)}`, {
-    method: "PUT",
-    body: {
-      channel,
-      data: {
-        phone: Number(String(phone || "").replace(/[^\d]/g, "")),
-        account_number: String(phone || "").replace(/[^\d]/g, ""),
-        country: String(phone || "").replace(/[^\d]/g, "").startsWith("237") ? "CM" : undefined,
-      },
-      client_ip: clientIp || undefined,
-    },
+    method,
+    body: buildNotchPayProcessPayload({ channel, phone, clientIp }),
   });
+
+const processNotchPayMobileMoneyPaymentWithFallback = async ({ reference, channel, phone, clientIp }) => {
+  let lastError = null;
+  for (const method of ["POST", "PUT"]) {
+    try {
+      const result = await processNotchPayMobileMoneyPayment({ reference, channel, phone, clientIp, method });
+      return { result, method };
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError;
+};
+
+const startNotchPayMobileMoneyPrompt = async ({ references, channel, phone, clientIp }) => {
+  const processReferences = [...new Set((references || []).filter(Boolean))];
+  let lastProcessError = null;
+  for (const processReference of processReferences) {
+    try {
+      const processed = await processNotchPayMobileMoneyPaymentWithFallback({
+        reference: processReference,
+        channel,
+        phone,
+        clientIp,
+      });
+      return {
+        providerReference: processReference,
+        processing: processed.result,
+        processMethod: processed.method,
+        providerStatus: getNotchPayStatusFromPayload(processed.result) || "processing",
+      };
+    } catch (err) {
+      lastProcessError = err;
+    }
+  }
+  throw lastProcessError;
+};
+
+const getNotchPayPromptErrorDetails = (err) => ({
+  status: Number(err?.status || err?.statusCode || 0) || null,
+  message:
+    err?.data?.message ||
+    err?.data?.error ||
+    err?.message ||
+    "Notch Pay Mobile Money prompt could not be started immediately.",
+});
+
+const updateNotchPayTransactionPromptMetadata = async ({
+  transactionId,
+  providerReference,
+  merchantReference,
+  authorizationUrl = "",
+  notchPaySession = null,
+  processing = null,
+  processingError = null,
+  providerStatus = "processing",
+  processMethod = "",
+  customerMessage,
+}) =>
+  pool.query(
+    `UPDATE payment_transactions
+        SET provider_reference = $2,
+            status = 'processing',
+            metadata = (metadata || ($3::jsonb - 'notchpay')) ||
+              jsonb_build_object(
+                'notchpay',
+                COALESCE(metadata->'notchpay', '{}'::jsonb) || COALESCE($3::jsonb->'notchpay', '{}'::jsonb)
+              ),
+            updated_at = NOW()
+      WHERE id = $1`,
+    [
+      transactionId,
+      providerReference,
+      safeJson({
+        notchpay: {
+          reference: providerReference,
+          merchantReference,
+          amount: notchPaySession?.notchAmount,
+          currency: notchPaySession?.notchCurrency,
+          authorizationUrl,
+          callbackUrl: notchPaySession?.callback,
+          transaction: notchPaySession ? getNotchPayTransactionObject(notchPaySession) : undefined,
+          processing: processing ? getNotchPayTransactionObject(processing) : null,
+          processingError,
+          processMethod,
+          providerStatus,
+          promptRequestedAt: new Date().toISOString(),
+        },
+        customerMessage,
+      }),
+    ]
+  );
 
 const getEnterpriseBillingPlan = async (client = pool) => {
   const result = await client.query(
@@ -5313,11 +5407,77 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
       if (existingTransaction) {
         const existingMetadata = asPlainObject(existingTransaction.metadata);
         const existingNotchPay = asPlainObject(existingMetadata.notchpay);
-        const existingReference =
+        let existingReference =
           existingTransaction.provider_reference ||
           existingNotchPay.reference ||
           existingNotchPay.merchantReference ||
-          existingTransaction.id;
+          "";
+        let existingMerchantReference = existingNotchPay.merchantReference || "";
+        let existingAuthorizationUrl = existingNotchPay.authorizationUrl || "";
+        let customerMessage = existingMetadata.customerMessage || "Paiement deja en cours. Verifiez votre telephone.";
+
+        if (provider === "notchpay" && ["pending", "processing"].includes(normalizePaymentStatus(existingTransaction.status))) {
+          let notchPaySession = null;
+          let processing = null;
+          let processingError = null;
+          let providerStatus = "processing";
+          let processMethod = "";
+          try {
+            if (!existingReference) {
+              existingMerchantReference = existingMerchantReference || buildNotchPayReference(existingTransaction.id);
+              notchPaySession = await createNotchPayPayment({
+                user: req.user,
+                transactionId: existingTransaction.id,
+                reference: existingMerchantReference,
+                amountEur: quote.finalPriceEur,
+                plan,
+                selectedCertifications: selectedForTransaction,
+                callbackBaseUrl: publicBaseUrl,
+                currency: quote.paymentCurrency,
+                lockedCountry: mobileMoneyValidation.country,
+                phone: mobileMoneyValidation.phone,
+              });
+              existingReference = getNotchPayReferenceFromPayload(notchPaySession) || existingMerchantReference;
+              existingAuthorizationUrl = getNotchPayAuthorizationUrlFromPayload(notchPaySession);
+            }
+            const prompt = await startNotchPayMobileMoneyPrompt({
+              references: [existingReference, existingMerchantReference],
+              channel: mobileMoneyValidation.channel,
+              phone: mobileMoneyValidation.phone,
+              clientIp: getRequestClientIp(req),
+            });
+            existingReference = prompt.providerReference || existingReference;
+            processing = prompt.processing;
+            providerStatus = prompt.providerStatus;
+            processMethod = prompt.processMethod;
+            customerMessage = "Nouvelle demande Mobile Money envoyee. Validez-la sur votre telephone pour terminer l'abonnement.";
+          } catch (err) {
+            processingError = getNotchPayPromptErrorDetails(err);
+            customerMessage = processingError.message
+              ? `La demande Mobile Money n'a pas encore pu etre envoyee: ${processingError.message}. Vous pouvez verifier le paiement ou reessayer dans quelques instants.`
+              : "La demande Mobile Money n'a pas encore pu etre envoyee. Vous pouvez verifier le paiement ou reessayer dans quelques instants.";
+            console.warn("Existing Notch Pay Mobile Money prompt retry failed", {
+              transactionId: existingTransaction.id,
+              providerReference: existingReference,
+              status: processingError.status,
+              message: processingError.message,
+            });
+          }
+          await updateNotchPayTransactionPromptMetadata({
+            transactionId: existingTransaction.id,
+            providerReference: existingReference || existingTransaction.id,
+            merchantReference: existingMerchantReference,
+            authorizationUrl: existingAuthorizationUrl,
+            notchPaySession,
+            processing,
+            processingError,
+            providerStatus,
+            processMethod,
+            customerMessage,
+          });
+        }
+
+        existingReference = existingReference || existingTransaction.provider_reference || existingTransaction.id;
         return res.json({
           ok: true,
           duplicate: true,
@@ -5327,11 +5487,11 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
             status: existingTransaction.status,
             transactionId: existingTransaction.id,
             providerReference: existingReference,
-            merchantReference: existingNotchPay.merchantReference || "",
-            authorizationUrl: existingNotchPay.authorizationUrl || "",
+            merchantReference: existingMerchantReference,
+            authorizationUrl: existingAuthorizationUrl,
             ...(existingMetadata.quote || quote),
             mobileMoney: existingMetadata.mobileMoney,
-            message: existingMetadata.customerMessage || "Paiement deja en cours. Verifiez votre telephone.",
+            message: customerMessage,
           },
         });
       }
@@ -5393,37 +5553,20 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
       let processing = null;
       let processingError = null;
       let providerStatus = "processing";
+      let processMethod = "";
       try {
-        const processReferences = [...new Set([providerReference, merchantReference].filter(Boolean))];
-        let lastProcessError = null;
-        for (let index = 0; index < processReferences.length; index += 1) {
-          const processReference = processReferences[index];
-          try {
-            processing = await processNotchPayMobileMoneyPayment({
-              reference: processReference,
-              channel: mobileMoneyValidation.channel,
-              phone: mobileMoneyValidation.phone,
-              clientIp: getRequestClientIp(req),
-            });
-            providerReference = processReference;
-            lastProcessError = null;
-            break;
-          } catch (err) {
-            lastProcessError = err;
-            if (index >= processReferences.length - 1) break;
-          }
-        }
-        if (lastProcessError) throw lastProcessError;
-        providerStatus = getNotchPayStatusFromPayload(processing) || "processing";
+        const prompt = await startNotchPayMobileMoneyPrompt({
+          references: [providerReference, merchantReference],
+          channel: mobileMoneyValidation.channel,
+          phone: mobileMoneyValidation.phone,
+          clientIp: getRequestClientIp(req),
+        });
+        providerReference = prompt.providerReference || providerReference;
+        processing = prompt.processing;
+        providerStatus = prompt.providerStatus;
+        processMethod = prompt.processMethod;
       } catch (err) {
-        processingError = {
-          status: Number(err.status || err.statusCode || 0) || null,
-          message:
-            err?.data?.message ||
-            err?.data?.error ||
-            err?.message ||
-            "Notch Pay Mobile Money prompt could not be started immediately.",
-        };
+        processingError = getNotchPayPromptErrorDetails(err);
         console.warn("Notch Pay Mobile Money prompt was delayed", {
           transactionId,
           providerReference,
@@ -5435,33 +5578,18 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
             ? `La demande Mobile Money n'a pas encore pu etre envoyee: ${processingError.message}. Vous pouvez verifier le paiement ou reessayer dans quelques instants.`
             : "La demande Mobile Money n'a pas encore pu etre envoyee. Vous pouvez verifier le paiement ou reessayer dans quelques instants.";
       }
-      await pool.query(
-        `UPDATE payment_transactions
-            SET provider_reference = $2,
-                status = 'processing',
-                metadata = metadata || $3::jsonb,
-                updated_at = NOW()
-          WHERE id = $1`,
-        [
-          transactionId,
-          providerReference,
-          safeJson({
-            notchpay: {
-              reference: providerReference,
-              merchantReference,
-              amount: notchPaySession.notchAmount,
-              currency: notchPaySession.notchCurrency,
-              authorizationUrl,
-              callbackUrl: notchPaySession.callback,
-              transaction: getNotchPayTransactionObject(notchPaySession),
-              processing: processing ? getNotchPayTransactionObject(processing) : null,
-              processingError,
-              providerStatus,
-            },
-            customerMessage: checkoutCustomerMessage,
-          }),
-        ]
-      );
+      await updateNotchPayTransactionPromptMetadata({
+        transactionId,
+        providerReference,
+        merchantReference,
+        authorizationUrl,
+        notchPaySession,
+        processing,
+        processingError,
+        providerStatus,
+        processMethod,
+        customerMessage: checkoutCustomerMessage,
+      });
     }
 
     return res.json({
