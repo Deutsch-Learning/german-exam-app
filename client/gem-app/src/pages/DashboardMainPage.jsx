@@ -1,5 +1,6 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import styles from "./DashboardPage.module.css";
 import API from "../services/api";
@@ -475,6 +476,18 @@ export default function DashboardMainPage() {
       </div>
 
       <button className={styles.floatingCta} onClick={goToSimulations}>{t.dashboard.newSimulation}</button>
+      {typeof document !== "undefined"
+        ? createPortal(
+            <button
+              type="button"
+              className={`${styles.floatingCta} ${styles.mobileFloatingCta} ${sidebarOpen ? styles.mobileFloatingCtaHidden : ""}`}
+              onClick={goToSimulations}
+            >
+              {t.dashboard.newSimulation}
+            </button>,
+            document.body
+          )
+        : null}
     </div>
   );
 }

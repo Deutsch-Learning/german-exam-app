@@ -2481,8 +2481,15 @@
 
 @media (min-width: 980px) {
   .goetheExamPane {
-    min-height: min(660px, calc(100dvh - 138px));
-    max-height: calc(100dvh - 112px);
+    min-height: clamp(820px, 120dvh, 1280px);
+    max-height: clamp(980px, 145dvh, 1560px);
+  }
+}
+
+@media (min-width: 1280px) {
+  .goetheExamPane {
+    min-height: clamp(980px, 128dvh, 1420px);
+    max-height: clamp(1180px, 155dvh, 1720px);
   }
 }
 
