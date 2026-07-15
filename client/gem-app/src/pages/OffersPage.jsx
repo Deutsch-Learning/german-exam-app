@@ -93,6 +93,18 @@ const normalizeMobilePhoneForUi = (value, countryKey) => {
 const formatMobileAmount = (amount, currency) =>
   `${Number(amount || 0).toLocaleString("fr-FR")} ${currency || ""}`.trim();
 
+const CLIENT_EUR_TO_XAF = 656;
+
+const buildEstimatedQuote = (priceEur, countryKey) => {
+  const amount = Math.round(Number(priceEur || 0) * CLIENT_EUR_TO_XAF);
+  if (!amount) return null;
+  return {
+    paymentAmount: amount,
+    paymentCurrency: countryKey === "CM" ? "XAF" : countryKey,
+    estimated: true,
+  };
+};
+
 const wait = (ms) => new Promise((resolve) => window.setTimeout(resolve, Math.max(0, ms)));
 
 // Kept temporarily as a compatibility reference while the payment modal is migrated.
@@ -236,6 +248,8 @@ const CheckoutModalV2 = ({
   const providerOptions = Object.entries(country.providers);
   const selectedProviderConfig = country.providers[mobileProvider];
   const normalizedPhone = normalizeMobilePhoneForUi(mobilePhone, mobileCountry);
+  const estimatedQuote = buildEstimatedQuote(totalPrice, mobileCountry);
+  const visibleQuote = quote || estimatedQuote;
   const clientPhoneLooksValid =
     Boolean(selectedProviderConfig) &&
     selectedProviderConfig.prefixes.some((pattern) => pattern.test(normalizedPhone.replace(/\s+/g, "")));
@@ -288,7 +302,13 @@ const CheckoutModalV2 = ({
           <div><span>Total EUR</span><strong>{formatEuro(totalPrice)}</strong></div>
           <div>
             <span>Devise paiement</span>
-            <strong>{quoteLoading ? "Calcul..." : quote ? formatMobileAmount(quote.paymentAmount, quote.paymentCurrency) : "A confirmer"}</strong>
+            <strong>
+              {visibleQuote
+                ? `${formatMobileAmount(visibleQuote.paymentAmount, visibleQuote.paymentCurrency)}${visibleQuote.estimated && quoteLoading ? " estime" : ""}`
+                : quoteLoading
+                  ? "Calcul..."
+                  : "A confirmer"}
+            </strong>
           </div>
         </div>
 
@@ -434,7 +454,7 @@ const CheckoutModalV2 = ({
               onClick={onPayMobileMoney}
             >
               <Smartphone size={18} />
-              {loading ? "Paiement en cours..." : `Payer ${quote ? formatMobileAmount(quote.paymentAmount, quote.paymentCurrency) : ""}`}
+              {loading ? "Paiement en cours..." : `Payer ${visibleQuote ? formatMobileAmount(visibleQuote.paymentAmount, visibleQuote.paymentCurrency) : ""}`}
             </button>
             <button className="pricing-modal-secondary" type="button" disabled={loading} onClick={onBack}>Retour</button>
           </>
@@ -515,8 +535,6 @@ export default function OffersPage() {
 
   useEffect(() => {
     if (!selectedPlan) return undefined;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
     const handleEscape = (event) => {
       if (event.key === "Escape" && checkoutStep !== "processing") {
         setSelectedPlan(null);
@@ -524,13 +542,13 @@ export default function OffersPage() {
     };
     window.addEventListener("keydown", handleEscape);
     return () => {
-      document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", handleEscape);
     };
   }, [checkoutStep, selectedPlan]);
 
   useEffect(() => {
-    if (!selectedPlan || selectedCertifications.length < 1 || !["method", "mobile"].includes(checkoutStep)) {
+    const canQuote = selectedPlan?.isEnterprise || selectedCertifications.length > 0;
+    if (!selectedPlan || !canQuote || !["method", "mobile"].includes(checkoutStep)) {
       return undefined;
     }
     let cancelled = false;

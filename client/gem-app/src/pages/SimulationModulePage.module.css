@@ -700,7 +700,7 @@
   max-height: calc(100dvh - 28px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
   overflow-x: hidden;
   overflow-y: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior: auto;
   -webkit-overflow-scrolling: touch;
   border: 1px solid rgba(254, 226, 226, 0.9);
   border-radius: 18px;
@@ -750,13 +750,16 @@
   color: #111827;
   font-size: clamp(1.25rem, 4vw, 1.55rem);
   line-height: 1.14;
+  text-align: center;
 }
 
 .exitDialog p {
-  margin: 0;
+  max-width: 32ch;
+  margin: 0 auto;
   color: #667085;
   line-height: 1.42;
   font-size: 0.92rem;
+  text-align: center;
 }
 
 .exitDialog > div {
@@ -764,6 +767,16 @@
   grid-template-columns: 1fr 1fr;
   gap: 10px;
   margin-top: 18px;
+}
+
+.exitDialog .secondaryButton,
+.exitDialog .primaryButton {
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 14px;
+  white-space: normal;
+  line-height: 1.2;
+  text-align: center;
 }
 
 @keyframes exitDialogIn {

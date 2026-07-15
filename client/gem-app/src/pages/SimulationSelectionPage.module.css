@@ -458,7 +458,7 @@
   max-height: calc(100dvh - 28px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
   overflow-x: hidden;
   overflow-y: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior: auto;
   -webkit-overflow-scrolling: touch;
   border-radius: 18px;
   background:
