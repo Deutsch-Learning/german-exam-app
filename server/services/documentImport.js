@@ -6,6 +6,7 @@ const { execFile } = require("child_process");
 const { promisify } = require("util");
 const mammoth = require("mammoth");
 const { parseGoetheB2LesenSeries } = require("./goetheB2LesenParser");
+const { parseB2StructuredLesenSeries } = require("./b2StructuredLesenParser");
 
 const execFileAsync = promisify(execFile);
 
@@ -4007,6 +4008,16 @@ const parseStructuredContent = (text, metadata) => {
     const series = parseGoetheB2LesenSeries(text, metadata);
     if (series.length) return series;
   }
+  if (
+    ["ecl", "telc", "osd"].includes(provider) &&
+    metadata.level === "B2" &&
+    metadata.sectionType === "read" &&
+    /DOCUMENT_USAGE_CONTRACT/i.test(text) &&
+    /IMPORT_SCHEMA_REFERENCE/i.test(text)
+  ) {
+    const series = parseB2StructuredLesenSeries(text, metadata);
+    if (series.length) return series;
+  }
   if (provider === "telc" && metadata.level === "B2" && metadata.sectionType === "read") {
     const series = parseB2NumberedSeries(text, metadata);
     if (series.length > 1) return series;
@@ -4155,6 +4166,11 @@ const extractDocumentText = async ({ buffer, filename, mimetype }) => {
 
 const validateParsedDocument = (parsed) => {
   const warnings = [...(parsed.extraction?.warnings || [])];
+  parsed.series?.forEach((series) => {
+    if (Array.isArray(series.metadata?.sourceWarnings)) {
+      warnings.push(...series.metadata.sourceWarnings);
+    }
+  });
   if (!parsed.series.length) warnings.push("No exam series could be detected; fallback parser created one generic series.");
   const questionCount = parsed.series.reduce(
     (sum, series) => sum + series.sections.reduce((sectionSum, section) => sectionSum + section.questions.length, 0),
@@ -4850,6 +4866,19 @@ const publishExamImportDraft = async ({ pool, importId, adminId = null }) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    const replacePublishedScope = parsed.series?.some((series) => series.metadata?.replacePublishedScope === true);
+    if (replacePublishedScope) {
+      await client.query(
+        `UPDATE exams
+         SET is_active = FALSE,
+             updated_at = NOW()
+         WHERE LOWER(provider) = LOWER($1)
+           AND UPPER(COALESCE(level, '')) = UPPER($2)
+           AND section_type = $3
+           AND is_active = TRUE`,
+        [parsed.metadata?.provider, parsed.metadata?.level, parsed.metadata?.sectionType]
+      );
+    }
     const importedExams = await insertParsedExamsForImport({ client, parsed, importRow, adminId, isActive: true });
     const updated = await client.query(
       `UPDATE exam_document_imports

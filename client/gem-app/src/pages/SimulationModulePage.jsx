@@ -1331,6 +1331,14 @@ const normalizeText = (value) =>
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
 
+const normalizeStrictGermanAnswer = (value, trimTerminalPunctuation = false) => {
+  const normalized = String(value ?? "")
+    .trim()
+    .toLocaleLowerCase("de-DE")
+    .replace(/\s+/g, " ");
+  return trimTerminalPunctuation ? normalized.replace(/[.!?;,]+$/g, "").trim() : normalized;
+};
+
 const formatTime = (seconds) => {
   const safeSeconds = Math.max(0, Number(seconds) || 0);
   const minutes = Math.floor(safeSeconds / 60);
@@ -1491,7 +1499,10 @@ const buildExamParts = (module) => {
     if (!part.instructions && task.partInstructions) part.instructions = task.partInstructions;
     if (!part.durationMinutes && task.partDurationMinutes) part.durationMinutes = task.partDurationMinutes;
     if (!part.points && task.partPoints) part.points = task.partPoints;
-    if (!part.sourceMetadata?.goetheB2Lesen && task.partSourceMetadata?.goetheB2Lesen) {
+    if (
+      (!part.sourceMetadata?.goetheB2Lesen && task.partSourceMetadata?.goetheB2Lesen) ||
+      (!part.sourceMetadata?.structuredB2Lesen && task.partSourceMetadata?.structuredB2Lesen)
+    ) {
       part.sourceMetadata = task.partSourceMetadata;
     }
   });
@@ -1570,6 +1581,19 @@ const isAnswerCorrect = (task, answer) => {
   if (!isQuestionAnswered(task, answer)) return false;
 
   if (task.type === "blank") {
+    if (String(task.answerNormalization || "").startsWith("strict-german")) {
+      if (task.sourcePrefixMismatch) return false;
+      const trimPunctuation = task.answerNormalization === "strict-german-terminal-punctuation";
+      const normalized = normalizeStrictGermanAnswer(answer, trimPunctuation);
+      const accepted = [task.correct, ...(task.alternatives ?? [])]
+        .map((value) => normalizeStrictGermanAnswer(value, trimPunctuation))
+        .filter(Boolean);
+      if (accepted.includes(normalized)) return true;
+      const requiredConcepts = (task.requiredConcepts || [])
+        .map((value) => normalizeStrictGermanAnswer(value, trimPunctuation))
+        .filter(Boolean);
+      return requiredConcepts.length > 0 && requiredConcepts.every((concept) => normalized.includes(concept));
+    }
     const normalized = normalizeText(answer);
     const accepted = [task.correct, ...(task.alternatives ?? [])].map(normalizeText);
     return accepted.includes(normalized);
@@ -1958,15 +1982,21 @@ const buildResultSummary = (module, answers) => {
     }
 
     const isCorrect = isAnswerCorrect(task, answers[index]);
+    const requiresManualReview = Boolean(
+      isQuestionAnswered(task, answers[index]) && !isCorrect && task.manualReviewOnMismatch
+    );
     return {
       id: task.id,
       number: index + 1,
       title: toPlainDisplayText(task.question, `Aufgabe ${index + 1}`),
       typeLabel: toPlainDisplayText(task.typeLabel),
-      isCorrect,
+      isCorrect: requiresManualReview ? null : isCorrect,
       userAnswer: getAnswerLabel(task, answers[index]),
       correctAnswer: getCorrectLabel(task),
-      explanation: toPlainDisplayText(task.explanation),
+      explanation: requiresManualReview
+        ? "Diese Antwort wird manuell geprueft; sie wird nicht automatisch als falsch bewertet."
+        : toPlainDisplayText(task.explanation),
+      requiresManualReview,
     };
   });
 
@@ -1983,14 +2013,15 @@ function FeedbackBox({ task, answer }) {
   if (!isQuestionAnswered(task, answer)) return null;
 
   const correct = isAnswerCorrect(task, answer);
+  const requiresManualReview = !correct && task.manualReviewOnMismatch;
 
   if (task?.id) {
     return (
-      <div className={`${styles.feedbackBox} ${correct ? styles.feedbackCorrect : styles.feedbackWrong}`}>
-        {correct ? <CheckCircle2 size={20} /> : <XCircle size={20} />}
+      <div className={`${styles.feedbackBox} ${correct ? styles.feedbackCorrect : requiresManualReview ? "" : styles.feedbackWrong}`}>
+        {correct ? <CheckCircle2 size={20} /> : requiresManualReview ? <WandSparkles size={20} /> : <XCircle size={20} />}
         <div>
-          <strong>{correct ? "Richtig" : "Noch einmal pruefen"}</strong>
-          <p>{task.explanation}</p>
+          <strong>{correct ? "Richtig" : requiresManualReview ? "Manuelle Pruefung" : "Noch einmal pruefen"}</strong>
+          <p>{requiresManualReview ? "Die Antwort wird manuell geprueft und nicht automatisch als falsch markiert." : task.explanation}</p>
         </div>
       </div>
     );
@@ -2218,7 +2249,10 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const isGoetheB2LesenCurrentPart =
     module.id === "read" &&
     Boolean(currentPart?.sourceMetadata?.goetheB2Lesen?.partType || currentTask?.sourceMetadata?.goetheB2Lesen);
-  const usesFullPartNavigation = module.id === "sprach" || isGoetheB2LesenCurrentPart;
+  const isStructuredB2LesenCurrentPart =
+    module.id === "read" &&
+    Boolean(currentPart?.sourceMetadata?.structuredB2Lesen?.partType || currentTask?.sourceMetadata?.structuredB2Lesen);
+  const usesFullPartNavigation = module.id === "sprach" || isGoetheB2LesenCurrentPart || isStructuredB2LesenCurrentPart;
   const moduleItemSingular = isTopicModule(module.id) ? "Thema" : "Frage";
   const moduleItemPlural = getModuleCountLabel(module.id);
   const currentTaskDuration = getTaskDuration(module, currentTask);
@@ -4025,7 +4059,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     module.id === "read" &&
     Boolean(currentPart?.sourceMetadata?.goetheB2Lesen?.partType || currentTask?.sourceMetadata?.goetheB2Lesen);
 
-  const getGoethePartMeta = () => currentPart?.sourceMetadata?.goetheB2Lesen || {};
+  const getGoethePartMeta = () =>
+    currentPart?.sourceMetadata?.goetheB2Lesen || currentPart?.sourceMetadata?.structuredB2Lesen || {};
 
   const setGoetheAnswer = (taskIndex, value) => {
     const meta = getGoethePartMeta();
@@ -4281,8 +4316,199 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     );
   };
 
+  const isStructuredB2LesenModule =
+    module.id === "read" &&
+    Boolean(currentPart?.sourceMetadata?.structuredB2Lesen?.partType || currentTask?.sourceMetadata?.structuredB2Lesen);
+
+  const getStructuredB2Meta = () => currentPart?.sourceMetadata?.structuredB2Lesen || {};
+
+  const renderStructuredChoiceGroup = ({ taskIndex, task }) => (
+    <fieldset key={task.id} className={styles.goetheChoiceGroup}>
+      <legend translate="no">{task.sourceQuestionNumber}. {task.question}</legend>
+      <div className={styles.goetheChoiceButtons}>
+        {(task.options || []).map((option) => {
+          const selected = answers[taskIndex] === option.value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              className={selected ? styles.sprachOptionSelected : styles.sprachOptionButton}
+              onClick={() => setGoetheAnswer(taskIndex, option.value)}
+              aria-pressed={selected}
+            >
+              <span>{String(option.value).toUpperCase()}</span>
+              <strong translate="no">{getProtectedChoiceLabel(task, option)}</strong>
+            </button>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
+
+  const renderStructuredTextInput = ({ taskIndex, task, compact = false, prefix = "" }) => (
+    <label className={compact ? styles.structuredInlineInput : styles.structuredAnswerField}>
+      {!compact ? <span>Aufgabe {task.sourceQuestionNumber ?? taskIndex + 1}</span> : null}
+      {prefix ? <strong translate="no">{prefix}</strong> : null}
+      <input
+        type="text"
+        value={answers[taskIndex] ?? ""}
+        onChange={(event) => setAnswerForIndex(taskIndex, event.target.value)}
+        onFocus={() => setCurrentIndex(taskIndex)}
+        aria-label={`Aufgabe ${task.sourceQuestionNumber ?? taskIndex + 1}`}
+        autoComplete="off"
+        spellCheck={false}
+      />
+    </label>
+  );
+
+  const renderNumberedGapArticle = (article, pattern, keyPrefix, renderGap) =>
+    String(article || "")
+      .replace(/\r/g, "")
+      .split(/\n{2,}/)
+      .map((block) => block.trim())
+      .filter(Boolean)
+      .map((block, blockIndex) => {
+        const elements = [];
+        let cursor = 0;
+        const regex = new RegExp(pattern.source, pattern.flags);
+        for (const match of block.matchAll(regex)) {
+          if (match.index > cursor) elements.push(block.slice(cursor, match.index));
+          elements.push(renderGap(Number(match[1]), match, `${keyPrefix}-${blockIndex}-${match.index}`));
+          cursor = match.index + match[0].length;
+        }
+        if (cursor < block.length) elements.push(block.slice(cursor));
+        const isTitle = blockIndex === 0 && block.length < 90 && !/[.!?]$/.test(block);
+        return isTitle
+          ? <h3 key={`${keyPrefix}-${blockIndex}`} className={styles.goetheArticleTitle} translate="no">{elements}</h3>
+          : <p key={`${keyPrefix}-${blockIndex}`} className={styles.goetheInlineArticle} translate="no">{elements}</p>;
+      });
+
+  const renderStructuredB2Lesen = () => {
+    const meta = getStructuredB2Meta();
+    const tasks = getCurrentPartTasks();
+    const provider = String(meta.provider || selectedSeries?.provider || "").toUpperCase();
+    const answeredInPart = tasks.filter(({ taskIndex, task }) => getTaskAnswered(module, task, answers[taskIndex])).length;
+    const header = (
+      <div className={styles.goethePartHeader}>
+        <div>
+          <div className={styles.sectionLabel}><BookOpen size={18} />{provider} B2 Lesen</div>
+          <h2 translate="no">{currentPart?.displayTitle ?? "Lesen"}</h2>
+          <p translate="no">{meta.instruction}</p>
+        </div>
+        <span>{answeredInPart}/{tasks.length} bearbeitet</span>
+      </div>
+    );
+    const frame = (content) => (
+      <div className={styles.goetheExamLayout}>
+        <section className={styles.goetheExamPane} onWheel={handleReadableWheel}>
+          {header}
+          {content}
+          {renderGoetheFeedback(tasks)}
+        </section>
+      </div>
+    );
+
+    if (meta.partType === "inline_letter_gap" || meta.partType === "inline_sentence_gap") {
+      const isEcl = meta.partType === "inline_letter_gap";
+      const pattern = isEcl ? /\[\s*(\d{1,2})\s*\]\s*_{3,}/g : /_{2,}\s*(1[6-9]|20)\s*_{2,}/g;
+      const article = renderNumberedGapArticle(meta.article, pattern, `${provider}-gaps`, (number, _match, key) => {
+        if (number === 0) {
+          return <span key={key} className={styles.structuredLockedExample}>[0] {meta.example?.value || "I"}</span>;
+        }
+        const gap = getGoetheTaskByNumber(number);
+        return (
+          <Fragment key={key}>
+            <span className={styles.goetheGapNumber}>{isEcl ? `[${number}]` : number}</span>
+            {gap ? renderGoetheSelect({ ...gap, compact: true }) : <span className={styles.goetheMissingGap}>_____</span>}
+          </Fragment>
+        );
+      });
+      return frame(<>
+        <article className={styles.goetheArticle}>{article}</article>
+        {isEcl && meta.example ? <p className={styles.structuredExample}>Beispiel [0]: <strong>{meta.example.value}</strong></p> : null}
+        {renderGoetheBank(meta.bank, isEcl ? "Antwortbank A-M" : "Satzbank A-H")}
+      </>);
+    }
+
+    if (meta.partType === "short_answer") {
+      return frame(<>
+        <article className={styles.goetheArticle}>{renderGoetheTextBlocks(meta.article, "ecl-short-article")}</article>
+        <div className={styles.structuredAnswerList}>
+          {tasks.map(({ taskIndex, task }) => (
+            <article key={task.id} className={styles.goetheQuestionRow}>
+              <p translate="no"><strong>{task.sourceQuestionNumber}.</strong> {task.question}</p>
+              {renderStructuredTextInput({ taskIndex, task })}
+            </article>
+          ))}
+        </div>
+      </>);
+    }
+
+    if (meta.partType === "three_way_choice" || meta.partType === "single_choice") {
+      return frame(<>
+        <article className={styles.goetheArticle}>{renderGoetheTextBlocks(meta.article, `${provider}-choice-article`)}</article>
+        <div className={styles.goetheChoiceList}>{tasks.map(renderStructuredChoiceGroup)}</div>
+      </>);
+    }
+
+    if (meta.partType === "advertisement_matching" || meta.partType === "heading_matching") {
+      const items = meta.advertisements || meta.headings || [];
+      return frame(<>
+        {renderGoetheBank(items, meta.partType === "advertisement_matching" ? "Anzeigen A-F" : "Ueberschriften A-F")}
+        <div className={styles.goetheQuestionList}>
+          {tasks.map(({ taskIndex, task }) => (
+            <article key={task.id} className={styles.goetheQuestionRow}>
+              <p translate="no"><strong>{task.sourceQuestionNumber}.</strong> {task.question}</p>
+              {renderGoetheSelect({ taskIndex, task })}
+            </article>
+          ))}
+        </div>
+      </>);
+    }
+
+    if (meta.partType === "missing_letters") {
+      let gapIndex = 0;
+      const article = String(meta.article || "")
+        .replace(/\r/g, "")
+        .split(/\n{2,}/)
+        .map((block) => block.trim())
+        .filter(Boolean)
+        .map((block, blockIndex) => {
+          const elements = [];
+          let cursor = 0;
+          for (const match of block.matchAll(/([\p{L}\u00df\u00c4\u00d6\u00dc\u00e4\u00f6\u00fc-]+)_{3,}/gu)) {
+            if (match.index > cursor) elements.push(block.slice(cursor, match.index));
+            const gap = tasks[gapIndex++];
+            elements.push(gap
+              ? <Fragment key={`osd-letter-${blockIndex}-${match.index}`}>
+                  <span className={styles.goetheGapNumber}>{gap.task.sourceQuestionNumber}.</span>
+                  {renderStructuredTextInput({ ...gap, compact: true, prefix: match[1] })}
+                </Fragment>
+              : match[0]);
+            cursor = match.index + match[0].length;
+          }
+          if (cursor < block.length) elements.push(block.slice(cursor));
+          return <p key={`osd-letter-block-${blockIndex}`} className={styles.goetheInlineArticle} translate="no">{elements}</p>;
+        });
+      return frame(<article className={styles.goetheArticle}>{article}</article>);
+    }
+
+    if (meta.partType === "missing_word") {
+      const article = renderNumberedGapArticle(meta.article, /\(__?(\d{1,2})__?\)/g, "osd-word", (number, _match, key) => {
+        const gap = getGoetheTaskByNumber(number);
+        return gap
+          ? <Fragment key={key}><span className={styles.goetheGapNumber}>{number}.</span>{renderStructuredTextInput({ ...gap, compact: true })}</Fragment>
+          : <span key={key} className={styles.goetheMissingGap}>_____</span>;
+      });
+      return frame(<article className={styles.goetheArticle}>{article}</article>);
+    }
+
+    return frame(<div className={styles.goetheQuestionList}>{tasks.map(renderStructuredChoiceGroup)}</div>);
+  };
+
   const renderReading = () => (
     isGoetheB2LesenModule ? renderGoetheB2Lesen() :
+    isStructuredB2LesenModule ? renderStructuredB2Lesen() :
     isTelcSprachbausteineModule ? renderTelcSprachbausteine() :
     <div className={styles.readingLayout}>
       <section className={styles.passagePane} onWheel={handleReadableWheel}>

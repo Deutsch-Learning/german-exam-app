@@ -2638,7 +2638,10 @@ const toPublicSeriesList = (rows, routeMeta = {}) => {
       title: title || moduleMeta.label,
       questionCount: Number(row.question_count) || 0,
       sectionCount: Number(row.section_count) || 0,
-      durationMinutes: Number(row.duration_minutes) || moduleMeta.defaultMinutes,
+      durationMinutes:
+        Number(row.duration_minutes) ||
+        Number(metadata.globalDurationMinutes || metadata.scoring?.globalDurationMinutes) ||
+        moduleMeta.defaultMinutes,
     };
   }
 
@@ -2794,6 +2797,7 @@ const buildListeningTask = (question, index = 0, listeningAudioMap = new Map()) 
 
 const buildReadingTask = (question, index = 0) => {
   const questionType = String(question.question_type || "").toLowerCase();
+  const correctAnswerData = asJsonObject(question.correct_answer);
   const correctValue = extractCorrectValue(question.correct_answer);
   const options = normalizeChoiceOptions(question.options);
   const metadata = asJsonObject(question.source_metadata);
@@ -2811,6 +2815,39 @@ const buildReadingTask = (question, index = 0) => {
     points: Number.isFinite(taskPoints) ? taskPoints : 1,
     ...buildTaskPartMeta(question, index),
   };
+
+  if (metadata.structuredB2Lesen) {
+    const acceptedAnswers = Array.isArray(correctAnswerData.acceptedAnswers)
+      ? correctAnswerData.acceptedAnswers.map((value) => cleanPlainText(value)).filter(Boolean)
+      : [];
+    if (options.length >= 2) {
+      return {
+        ...base,
+        type: questionType.includes("multiple") ? "multiple" : "select",
+        options,
+        correct: correctValue || options[0].value,
+        alternatives: correctValue ? [correctValue.toLowerCase(), correctValue.toUpperCase()] : [],
+        uniqueAnswers: metadata.uniqueAnswers === true,
+        sourceKeyReviewRequired: metadata.sourceKeyReviewRequired === true,
+      };
+    }
+    return {
+      ...base,
+      type: "blank",
+      correct: correctValue,
+      alternatives: acceptedAnswers.filter((value) => value !== correctValue),
+      answerNormalization: metadata.answerNormalization || "strict-german",
+      manualReviewOnMismatch:
+        metadata.manualReviewOnMismatch === true || correctAnswerData.manualReviewOnMismatch === true,
+      sourcePrefixMismatch:
+        metadata.sourcePrefixMismatch === true || correctAnswerData.sourcePrefixMismatch === true,
+      visiblePrefix: metadata.visiblePrefix || correctAnswerData.visiblePrefix || "",
+      expectedWord: metadata.expectedWord || correctAnswerData.expectedWord || "",
+      requiredConcepts: Array.isArray(correctAnswerData.requiredConcepts)
+        ? correctAnswerData.requiredConcepts
+        : Array.isArray(metadata.requiredConcepts) ? metadata.requiredConcepts : [],
+    };
+  }
 
   if (metadata.goetheB2Lesen && options.length >= 2) {
     return {

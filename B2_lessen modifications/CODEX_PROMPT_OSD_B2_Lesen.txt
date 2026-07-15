@@ -1,0 +1,42 @@
+You are modifying the ÖSD B2 LESEN module in my existing German exam preparation application.
+
+ATTACHED SOURCE
+Use "OeSD_B2_LESEN_20_Modellpruefungen_RESTRUCTURED_Admin_Codex.docx" as the structured source. Read DOCUMENT_USAGE_CONTRACT, SOURCE_VALIDATION_WARNINGS and IMPORT_SCHEMA_REFERENCE first.
+
+SCOPE
+- ÖSD > B2 > Lesen only.
+- No audio, ElevenLabs or Hören logic.
+- Preserve all source wording, prefixes, gaps, choices and printed corrections.
+
+SESSION
+- Each Prüfung contains Aufgabe 1-4 in one global 90-minute session.
+- Total 20 points, 5 points per Aufgabe.
+- Autosave answers and restore after refresh.
+
+AUFGABE 1
+- Continuous article plus five A/B/C single-choice questions.
+
+AUFGABE 2
+- Six headings A-F and five paragraphs; one heading remains unused.
+- Each heading may be used at most once.
+
+AUFGABE 3
+- This task asks for missing LETTERS, not the whole word.
+- Keep each visible word prefix exactly as printed (for example Bela___) and place a compact inline suffix field immediately after the prefix.
+- The source correction contains the completed word. Derive the expected suffix from visible prefix + completed solution.
+- Store typed suffix and computed completed word for auditing.
+- Score case-insensitively while preserving German umlauts/ß; 20 items total, 0.25 point each.
+
+AUFGABE 4
+- Keep the passage continuous with inline fields for (__1__) to (__10__).
+- One missing word per field; 0.5 point each.
+
+CORRECTION
+- Hide all answer keys and French Piège/Hint notes until final submission.
+- Piège/Hint notes are correction/admin content, never question content.
+
+EXECUTION
+1. Inspect the existing project and check exact routes, components, data model and files to modify.
+2. Implement Prüfung 01 first.
+3. Test all four tasks, 90-minute timer, score calculation, autosave and correction.
+4. check if it is good before importing Prüfungen 02-20.

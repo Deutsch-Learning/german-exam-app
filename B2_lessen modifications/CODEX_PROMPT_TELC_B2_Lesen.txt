@@ -1,0 +1,42 @@
+You are modifying the TELC B2 LESEN module in my existing German exam preparation application.
+
+ATTACHED SOURCE
+Use the attached file "TELC_B2_LESEN_20_Uebungshefte_RESTRUCTURED_Admin_Codex.docx" as the only structured import source for these 20 Übungshefte. Read DOCUMENT_USAGE_CONTRACT, SOURCE_VALIDATION_WARNINGS and IMPORT_SCHEMA_REFERENCE before coding.
+
+SCOPE
+- TELC > B2 > Lesen only.
+- Do not modify Hören, Schreiben, Sprechen or Sprachbausteine.
+- No ElevenLabs or audio logic.
+- Do not rewrite source text or silently change printed answer keys.
+
+SESSION AND NAVIGATION
+- Each Übungsheft contains Teil 1-3 in one session.
+- The source PDF does not specify a duration. Inspect the existing validated TELC B2 configuration and reuse its global duration. Do not invent a timer.
+- Autosave every answer and restore the session after refresh.
+- No visual back button during the active simulation or correction screen. Use the project-wide simulation exit confirmation for browser/device back actions.
+
+TEIL 1
+- Keep the long text continuous.
+- Render 10 statements, each with Richtig, Falsch, Nicht im Text.
+- Store R/F/N only; do not show answers before final submit.
+
+TEIL 2
+- Display advertisements A-F and statements 11-15.
+- Each statement selects one advertisement.
+- Keep the content readable on mobile and desktop.
+
+TEIL 3
+- Keep the passage continuous and place gaps 16-20 inline.
+- Display sentence bank A-H; three sentences remain unused.
+- Use accessible dropdowns and optionally drag-and-drop, with duplicate-use prevention.
+
+CORRECTION AND SOURCE WARNINGS
+- Show the printed correction only after final submission.
+- Import printed keys unchanged, but set source_key_review_required=true because some Teil 3 keys may be contextually inconsistent.
+- Provide an admin editor to approve/correct a key without changing the original imported source record.
+
+EXECUTION
+1. Inspect current routes, components and Supabase tables first. check exact files/tables to change and execute.
+2. implement Übungsheft 01 first and test all three Teile.
+3. check if it is good. Import 02-20 only after Übungsheft 01 is acceptable.
+4. Preserve existing B1 and all unrelated modules.
