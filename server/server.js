@@ -356,13 +356,49 @@ const normalizeMobileMoneyCountry = (value) => {
   return MOBILE_MONEY_COUNTRIES[country] ? country : "";
 };
 
-const normalizePaymentStatus = (value) => String(value ?? "").trim().toLowerCase();
+const normalizePaymentStatus = (value) =>
+  String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
 
 const isSuccessfulPaymentStatus = (value) =>
-  ["complete", "completed", "success", "successful", "succeeded", "paid", "active"].includes(normalizePaymentStatus(value));
+  [
+    "complete",
+    "completed",
+    "success",
+    "successful",
+    "succeeded",
+    "paid",
+    "active",
+    "approved",
+    "accepted",
+    "payment_complete",
+    "payment_completed",
+    "payment_success",
+    "payment_successful",
+  ].includes(normalizePaymentStatus(value));
 
 const isFailedPaymentStatus = (value) =>
-  ["failed", "cancelled", "canceled", "expired", "declined", "rejected", "insufficient_funds", "insufficient_balance"].includes(normalizePaymentStatus(value));
+  [
+    "failed",
+    "failure",
+    "cancelled",
+    "canceled",
+    "expired",
+    "declined",
+    "rejected",
+    "refused",
+    "aborted",
+    "error",
+    "insufficient_funds",
+    "insufficient_balance",
+    "payment_failed",
+    "payment_cancelled",
+    "payment_canceled",
+    "payment_expired",
+    "payment_declined",
+  ].includes(normalizePaymentStatus(value));
 
 const eurToNotchPayAmount = (amountEur, currency = NOTCHPAY_CURRENCY) => {
   const amount = Number(amountEur);
@@ -452,6 +488,20 @@ const getNotchPayTransactionObject = (payload = {}) => {
   return body.transaction || body.data?.transaction || body.data || body.payment || body;
 };
 
+const collectPayloadValues = (value, keys, output = [], depth = 0) => {
+  if (!value || depth > 5) return output;
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectPayloadValues(item, keys, output, depth + 1));
+    return output;
+  }
+  if (typeof value !== "object") return output;
+  Object.entries(value).forEach(([key, item]) => {
+    if (keys.includes(String(key).toLowerCase())) output.push(item);
+    if (item && typeof item === "object") collectPayloadValues(item, keys, output, depth + 1);
+  });
+  return output;
+};
+
 const getNotchPayReferenceFromPayload = (payload = {}) => {
   const body = parseJsonBody(payload);
   const transaction = getNotchPayTransactionObject(body);
@@ -469,7 +519,26 @@ const getNotchPayReferenceFromPayload = (payload = {}) => {
 const getNotchPayStatusFromPayload = (payload = {}) => {
   const body = parseJsonBody(payload);
   const transaction = getNotchPayTransactionObject(body);
-  return String(transaction.status || transaction.payment_status || body.status || body.event || body.type || "").trim();
+  const directCandidates = [
+    transaction.status,
+    transaction.payment_status,
+    transaction.transaction_status,
+    transaction.gateway_status,
+    body.status,
+    body.payment_status,
+    body.transaction_status,
+    body.event,
+    body.type,
+  ];
+  const recursiveCandidates = collectPayloadValues(body, [
+    "status",
+    "payment_status",
+    "transaction_status",
+    "gateway_status",
+    "state",
+  ]);
+  const candidates = [...directCandidates, ...recursiveCandidates].map((item) => String(item || "").trim()).filter(Boolean);
+  return candidates.find((item) => isSuccessfulPaymentStatus(item) || isFailedPaymentStatus(item)) || candidates[0] || "";
 };
 
 const getNotchPayMessageFromPayload = (payload = {}) => {
@@ -489,6 +558,16 @@ const getNotchPayMessageFromPayload = (payload = {}) => {
     transaction.reason,
     transaction.failure_reason,
     transaction.gateway_response,
+    ...collectPayloadValues(body, [
+      "message",
+      "error",
+      "description",
+      "reason",
+      "failure_reason",
+      "gateway_response",
+      "processor_response",
+      "response_message",
+    ]),
   ];
   return candidates.map((item) => String(item || "").trim()).find(Boolean) || "";
 };
@@ -623,6 +702,20 @@ const createNotchPayPayment = async ({
 
 const retrieveNotchPayPayment = async (reference) =>
   notchPayRequest(`/payments/${encodeURIComponent(reference)}`);
+
+const retrieveNotchPayPaymentWithFallback = async (references = []) => {
+  const uniqueReferences = [...new Set(references.map((item) => String(item || "").trim()).filter(Boolean))];
+  let lastError = null;
+  for (const lookupReference of uniqueReferences) {
+    try {
+      const payment = await retrieveNotchPayPayment(lookupReference);
+      return { payment, reference: lookupReference };
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError;
+};
 
 const getRequestClientIp = (req) =>
   String(req.get("cf-connecting-ip") || req.get("x-real-ip") || req.get("x-forwarded-for") || req.ip || "")
@@ -5654,14 +5747,18 @@ app.get("/api/checkout/session/:reference/status", requireAuth, async (req, res)
     let activated = null;
     const transactionMetadata = asPlainObject(transaction.metadata);
     const notchPayMetadata = asPlainObject(transactionMetadata.notchpay);
-    const providerLookupReference =
-      transaction.provider_reference ||
-      notchPayMetadata.reference ||
-      notchPayMetadata.merchantReference ||
-      reference;
+    const providerLookupReferences = [
+      transaction.provider_reference,
+      notchPayMetadata.reference,
+      notchPayMetadata.merchantReference,
+      reference,
+    ];
+    let providerLookupReference = providerLookupReferences.find(Boolean) || reference;
     if (transaction.provider === "notchpay" && ["pending", "processing"].includes(status)) {
       try {
-        const payment = await retrieveNotchPayPayment(providerLookupReference);
+        const lookup = await retrieveNotchPayPaymentWithFallback(providerLookupReferences);
+        const payment = lookup.payment;
+        providerLookupReference = lookup.reference || providerLookupReference;
         providerStatus = getNotchPayStatusFromPayload(payment);
         providerMessage = getNotchPayMessageFromPayload(payment);
         if (isSuccessfulPaymentStatus(providerStatus)) {
@@ -5681,10 +5778,31 @@ app.get("/api/checkout/session/:reference/status", requireAuth, async (req, res)
               WHERE id = $1`,
             [transaction.id, safeJson({ notchpayStatusCheck: payment, notchpayStatus: providerStatus, notchpayMessage: providerMessage })]
           );
+        } else {
+          await pool.query(
+            `UPDATE payment_transactions
+                SET metadata = metadata || $2::jsonb,
+                    updated_at = NOW()
+              WHERE id = $1`,
+            [transaction.id, safeJson({ notchpayStatusCheck: payment, notchpayStatus: providerStatus, notchpayMessage: providerMessage })]
+          );
         }
       } catch (error) {
         console.warn("Notch Pay status check failed", error?.message || error);
         providerMessage = error?.data?.message || error?.data?.error || error?.message || "";
+        const metadataStatus =
+          notchPayMetadata.providerStatus ||
+          notchPayMetadata.processing?.status ||
+          notchPayMetadata.processing?.payment_status ||
+          notchPayMetadata.processingError?.status ||
+          "";
+        const metadataMessage =
+          notchPayMetadata.processingError?.message ||
+          notchPayMetadata.notchpayMessage ||
+          notchPayMetadata.message ||
+          "";
+        providerStatus = providerStatus || metadataStatus;
+        providerMessage = providerMessage || metadataMessage;
       }
     }
 
