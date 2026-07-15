@@ -169,9 +169,13 @@ export default function OffersPage() {
         selectedCertifications,
         selectedCertificationCount: selectedCertifications.length,
         finalPriceEur,
-        provider: "manual",
+        provider: "notchpay",
       });
       setCheckout(session);
+      const checkoutUrl = session?.checkoutSession?.authorizationUrl;
+      if (checkoutUrl) {
+        window.location.assign(checkoutUrl);
+      }
     } catch (err) {
       setCheckoutError(
         err.response?.data?.error ||

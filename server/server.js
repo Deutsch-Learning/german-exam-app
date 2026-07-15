@@ -145,6 +145,16 @@ const SUBSCRIPTION_PLAN_SEEDS = [
   { level: "B2", planKey: "standard", planName: "Standard", durationDays: 15, priceEur: 34.99, writingSimulatorAttempts: 6 },
   { level: "B2", planKey: "intensif", planName: "Intensif", durationDays: 30, priceEur: 64.99, writingSimulatorAttempts: 10 },
 ];
+const NOTCHPAY_API_BASE_URL = process.env.NOTCHPAY_API_BASE_URL || "https://api.notchpay.co";
+const NOTCHPAY_PUBLIC_KEY = process.env.NOTCHPAY_PUBLIC_KEY || "";
+const NOTCHPAY_SECRET_KEY = process.env.NOTCHPAY_SECRET_KEY || process.env.NOTCHPAY_PRIVATE_KEY || "";
+const NOTCHPAY_WEBHOOK_HASH = process.env.NOTCHPAY_WEBHOOK_HASH || process.env.NOTCHPAY_HASH_KEY || "";
+const NOTCHPAY_CURRENCY = String(process.env.NOTCHPAY_CURRENCY || "XAF").toUpperCase();
+const NOTCHPAY_LOCKED_COUNTRY = process.env.NOTCHPAY_LOCKED_COUNTRY || "CM";
+const NOTCHPAY_XAF_PER_EUR = Number(process.env.NOTCHPAY_XAF_PER_EUR || 656);
+const NOTCHPAY_CALLBACK_URL =
+  process.env.NOTCHPAY_CALLBACK_URL ||
+  `${normalizePublicUrl(process.env.API_BASE_URL || FRONTEND_URL)}/api/payments/notchpay/callback`;
 const INDUSTRIAL_OFFERS = [
   { offerKey: "industrial_1_month", label: "Industrial 1 month", accessMonths: 1, billedMonths: 1, durationDays: 30, priceEur: 450.99, speakingSimulatorQuota: 240 },
   { offerKey: "industrial_6_months", label: "Industrial 6 months", accessMonths: 6, billedMonths: 6, durationDays: 180, priceEur: 2500.99, speakingSimulatorQuota: 600 },
@@ -171,7 +181,12 @@ app.use(
     credentials: true,
   })
 );
-app.use(express.json({ limit: "8mb" }));
+app.use(express.json({
+  limit: "8mb",
+  verify: (req, _res, buf) => {
+    req.rawBody = Buffer.from(buf || "");
+  },
+}));
 
 const documentUpload = multer({
   storage: multer.memoryStorage(),
@@ -280,8 +295,155 @@ const normalizePlanKey = (value) => {
 
 const normalizePaymentProvider = (value) => {
   const provider = String(value ?? "").trim().toLowerCase();
-  return ["stripe", "cinetpay", "notpay", "manual"].includes(provider) ? provider : "manual";
+  if (provider === "notpay") return "notchpay";
+  return ["stripe", "cinetpay", "notchpay", "manual"].includes(provider) ? provider : "manual";
 };
+
+const normalizePaymentStatus = (value) => String(value ?? "").trim().toLowerCase();
+
+const isSuccessfulPaymentStatus = (value) =>
+  ["complete", "completed", "success", "successful", "succeeded", "paid", "active"].includes(normalizePaymentStatus(value));
+
+const isFailedPaymentStatus = (value) =>
+  ["failed", "cancelled", "canceled", "expired", "declined", "rejected"].includes(normalizePaymentStatus(value));
+
+const eurToNotchPayAmount = (amountEur) => {
+  const amount = Number(amountEur);
+  if (!Number.isFinite(amount) || amount <= 0) return 0;
+  if (NOTCHPAY_CURRENCY === "XAF") return Math.round(amount * NOTCHPAY_XAF_PER_EUR);
+  return Number(amount.toFixed(2));
+};
+
+const buildNotchPayReference = (transactionId) =>
+  `ndp_${Date.now()}_${transactionId}_${crypto.randomBytes(4).toString("hex")}`;
+
+const safeJson = (value) => {
+  try {
+    return JSON.stringify(value ?? {});
+  } catch {
+    return "{}";
+  }
+};
+
+const parseJsonBody = (value) => {
+  if (!value) return {};
+  if (typeof value === "object") return value;
+  try {
+    return JSON.parse(String(value));
+  } catch {
+    return {};
+  }
+};
+
+const getNotchPayTransactionObject = (payload = {}) => {
+  const body = parseJsonBody(payload);
+  return body.transaction || body.data?.transaction || body.data || body.payment || body;
+};
+
+const getNotchPayReferenceFromPayload = (payload = {}) => {
+  const body = parseJsonBody(payload);
+  const transaction = getNotchPayTransactionObject(body);
+  return String(
+    transaction.reference ||
+      transaction.provider_reference ||
+      transaction.id ||
+      body.reference ||
+      body.transaction_reference ||
+      body.payment_reference ||
+      ""
+  ).trim();
+};
+
+const getNotchPayStatusFromPayload = (payload = {}) => {
+  const body = parseJsonBody(payload);
+  const transaction = getNotchPayTransactionObject(body);
+  return String(transaction.status || transaction.payment_status || body.status || body.event || body.type || "").trim();
+};
+
+const verifyNotchPaySignature = (rawBody, signature) => {
+  if (!NOTCHPAY_WEBHOOK_HASH || !signature) return false;
+  const payload = Buffer.isBuffer(rawBody) ? rawBody : Buffer.from(String(rawBody || ""));
+  const expected = crypto.createHmac("sha256", NOTCHPAY_WEBHOOK_HASH).update(payload).digest("hex");
+  const received = String(signature || "").replace(/^sha256=/i, "").trim();
+  if (!received || expected.length !== received.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(expected, "utf8"), Buffer.from(received, "utf8"));
+};
+
+const notchPayRequest = async (pathName, { method = "GET", body } = {}) => {
+  if (!NOTCHPAY_SECRET_KEY) {
+    const error = new Error("Notch Pay secret key is not configured.");
+    error.status = 503;
+    throw error;
+  }
+  const response = await fetch(`${NOTCHPAY_API_BASE_URL}${pathName}`, {
+    method,
+    headers: {
+      Authorization: NOTCHPAY_SECRET_KEY,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const text = await response.text();
+  const data = parseJsonBody(text);
+  if (!response.ok) {
+    const error = new Error(data.message || data.error || `Notch Pay request failed with status ${response.status}`);
+    error.status = response.status;
+    error.data = data;
+    throw error;
+  }
+  return data;
+};
+
+const createNotchPayPayment = async ({ user, transactionId, reference, amountEur, plan, selectedCertifications }) => {
+  const amount = eurToNotchPayAmount(amountEur);
+  if (!amount) {
+    const error = new Error("Invalid Notch Pay amount.");
+    error.status = 400;
+    throw error;
+  }
+  const callback = `${NOTCHPAY_CALLBACK_URL}?reference=${encodeURIComponent(reference)}`;
+  const payload = {
+    amount,
+    currency: NOTCHPAY_CURRENCY,
+    email: user.email,
+    phone: String(user.phone || "").replace(/[^\d]/g, "") || undefined,
+    description: `N-Deutschprüfungen ${plan.level} ${plan.plan_name}`,
+    reference,
+    callback,
+    locked_currency: NOTCHPAY_CURRENCY,
+    locked_country: NOTCHPAY_LOCKED_COUNTRY,
+    items: [
+      {
+        name: `${plan.level} ${plan.plan_name}`,
+        quantity: 1,
+        price: amount,
+      },
+    ],
+    customer_meta: {
+      userId: user.id,
+      transactionId,
+      level: plan.level,
+      planKey: plan.plan_key,
+      selectedCertifications,
+      amountEur,
+      amount,
+      currency: NOTCHPAY_CURRENCY,
+    },
+  };
+  return notchPayRequest("/payments", { method: "POST", body: payload });
+};
+
+const retrieveNotchPayPayment = async (reference) =>
+  notchPayRequest(`/payments/${encodeURIComponent(reference)}`);
+
+const mergeTransactionMetadata = (metadata, next) => ({
+  ...asPlainObject(metadata),
+  ...next,
+});
+
+const asPlainObject = (value) =>
+  value && typeof value === "object" && !Array.isArray(value) ? value : {};
 
 const normalizeStringArray = (value, allowed = []) => {
   const raw = Array.isArray(value)
@@ -382,6 +544,121 @@ const userHasSubscriptionAccess = (user, subscription, certification, section) =
     (!cert || subscription.certifications.includes(cert)) &&
     (!unlockedSection || subscription.unlockedSections.includes(unlockedSection))
   );
+};
+
+const activateSubscriptionFromTransaction = async ({ providerReference, providerPayload = {}, eventType = "" }) => {
+  const reference = String(providerReference || "").trim();
+  if (!reference) return { activated: false, reason: "missing_reference" };
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const transactionResult = await client.query(
+      `SELECT pt.id, pt.user_id, pt.plan_id, pt.provider, pt.provider_reference, pt.status,
+              pt.amount, pt.currency, pt.selected_certifications, pt.metadata,
+              sp.level, sp.plan_key, sp.duration_days, sp.writing_simulator_attempts,
+              sp.speaking_simulator_quota
+         FROM payment_transactions pt
+         JOIN subscription_plans sp ON sp.id = pt.plan_id
+        WHERE pt.provider_reference = $1
+        FOR UPDATE`,
+      [reference]
+    );
+    const transaction = transactionResult.rows[0];
+    if (!transaction) {
+      await client.query("ROLLBACK");
+      return { activated: false, reason: "transaction_not_found" };
+    }
+
+    const metadata = mergeTransactionMetadata(transaction.metadata, {
+      lastProviderEvent: eventType || null,
+      lastProviderPayload: providerPayload,
+      paidAt: new Date().toISOString(),
+    });
+    await client.query(
+      `UPDATE payment_transactions
+          SET status = 'succeeded',
+              metadata = $2::jsonb,
+              updated_at = NOW()
+        WHERE id = $1`,
+      [transaction.id, safeJson(metadata)]
+    );
+
+    const existing = await client.query(
+      `SELECT id
+         FROM user_subscriptions
+        WHERE payment_provider = $1
+          AND payment_reference = $2
+        LIMIT 1`,
+      [transaction.provider, reference]
+    );
+    if (existing.rows[0]) {
+      await client.query("COMMIT");
+      return { activated: false, reason: "already_active", subscriptionId: existing.rows[0].id };
+    }
+
+    const selectedCertifications = normalizeStringArray(transaction.selected_certifications, SUBSCRIPTION_CERTIFICATIONS);
+    if (!selectedCertifications.length) {
+      await client.query("ROLLBACK");
+      return { activated: false, reason: "missing_selected_certifications" };
+    }
+
+    const subscriptionResult = await client.query(
+      `INSERT INTO user_subscriptions (
+         user_id, plan_id, level, plan_key, status, starts_at, expires_at,
+         payment_provider, payment_reference, selected_certifications, amount_paid,
+         currency, speaking_simulator_quota_override, grant_reason
+       )
+       VALUES (
+         $1, $2, $3, $4, 'active', NOW(), NOW() + ($5::int * INTERVAL '1 day'),
+         $6, $7, $8::jsonb, $9, $10, $11, $12
+       )
+       RETURNING id`,
+      [
+        transaction.user_id,
+        transaction.plan_id,
+        transaction.level,
+        transaction.plan_key,
+        Number(transaction.duration_days),
+        transaction.provider,
+        reference,
+        JSON.stringify(selectedCertifications),
+        Number(transaction.amount),
+        transaction.currency,
+        Number(transaction.speaking_simulator_quota ?? 0),
+        "Notch Pay verified payment",
+      ]
+    );
+    const subscriptionId = subscriptionResult.rows[0].id;
+    await client.query(
+      `INSERT INTO writing_simulator_usage (user_id, subscription_id, level, attempts_allowed, attempts_used)
+       VALUES ($1, $2, $3, $4, 0)
+       ON CONFLICT (user_id, subscription_id, level)
+       DO UPDATE SET attempts_allowed = EXCLUDED.attempts_allowed, updated_at = NOW()`,
+      [
+        transaction.user_id,
+        subscriptionId,
+        transaction.level,
+        Number(transaction.writing_simulator_attempts ?? 0),
+      ]
+    );
+    await client.query(
+      `INSERT INTO subscription_admin_events (subscription_id, user_id, action, details)
+       VALUES ($1, $2, 'notchpay_payment_activated', $3::jsonb)`,
+      [
+        subscriptionId,
+        transaction.user_id,
+        safeJson({ providerReference: reference, transactionId: transaction.id, eventType }),
+      ]
+    );
+    await client.query("COMMIT");
+    return { activated: true, subscriptionId, transactionId: transaction.id };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 };
 
 const cleanPublicText = (value, max = 1000) =>
@@ -914,7 +1191,7 @@ async function ensureSchema() {
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       plan_id INTEGER NOT NULL REFERENCES subscription_plans(id) ON DELETE RESTRICT,
-      provider TEXT NOT NULL DEFAULT 'manual' CHECK (provider IN ('stripe', 'cinetpay', 'notpay', 'manual')),
+      provider TEXT NOT NULL DEFAULT 'manual' CHECK (provider IN ('stripe', 'cinetpay', 'notchpay', 'notpay', 'manual')),
       provider_reference TEXT,
       status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'active', 'expired', 'cancelled', 'failed', 'succeeded')),
       amount NUMERIC(10,2) NOT NULL CHECK (amount >= 0),
@@ -927,6 +1204,15 @@ async function ensureSchema() {
   `);
   await pool.query(`ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS selected_certifications JSONB NOT NULL DEFAULT '[]'::jsonb;`);
   await pool.query(`ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS selected_certifications JSONB NOT NULL DEFAULT '[]'::jsonb;`);
+  await pool.query(`
+    DO $$
+    BEGIN
+      ALTER TABLE payment_transactions DROP CONSTRAINT IF EXISTS payment_transactions_provider_check;
+      ALTER TABLE payment_transactions
+        ADD CONSTRAINT payment_transactions_provider_check
+        CHECK (provider IN ('stripe', 'cinetpay', 'notchpay', 'notpay', 'manual'));
+    END $$;
+  `);
   await pool.query(`ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS speaking_simulator_quota INTEGER NOT NULL DEFAULT 0;`);
   await pool.query(`ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS plan_category TEXT NOT NULL DEFAULT 'standard';`);
   await pool.query(`ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS access_months INTEGER;`);
@@ -980,6 +1266,15 @@ async function ensureSchema() {
   await pool.query(`
     CREATE INDEX IF NOT EXISTS payment_transactions_user_created_idx
       ON payment_transactions(user_id, created_at DESC);
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS payment_transactions_provider_reference_idx
+      ON payment_transactions(provider, provider_reference);
+  `);
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS user_subscriptions_payment_reference_unique_idx
+      ON user_subscriptions(payment_provider, payment_reference)
+      WHERE payment_reference IS NOT NULL;
   `);
   await pool.query(`ALTER TABLE subscription_plans ENABLE ROW LEVEL SECURITY;`);
   await pool.query(`ALTER TABLE user_subscriptions ENABLE ROW LEVEL SECURITY;`);
@@ -3156,7 +3451,10 @@ const levelActivityHandler = async (req, res) => {
     return res.json({ ok: true, level: snapshot });
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ ok: false, error: "Server error" });
+    return res.status(err.status && err.status < 500 ? err.status : 500).json({
+      ok: false,
+      error: err.status && err.status < 500 ? err.message : "Server error",
+    });
   }
 };
 
@@ -4512,6 +4810,19 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
     const basePriceEur = Number(plan.price_eur);
     const selectedCertificationCount = selectedCertifications.length;
     const finalPriceEur = Number((basePriceEur * selectedCertificationCount).toFixed(2));
+    const transactionMetadata = {
+      level: plan.level,
+      planKey: plan.plan_key,
+      planName: plan.plan_name,
+      durationDays: Number(plan.duration_days),
+      basePriceEur,
+      selectedCertifications,
+      selectedCertificationCount,
+      finalPriceEur,
+      writingSimulatorAttempts: Number(plan.writing_simulator_attempts),
+      speakingSimulatorQuota: Number(plan.speaking_simulator_quota ?? 0),
+      requestedProvider: provider,
+    };
 
     const transaction = await pool.query(
       `INSERT INTO payment_transactions (user_id, plan_id, provider, status, amount, currency, selected_certifications, metadata)
@@ -4524,28 +4835,55 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
         finalPriceEur,
         plan.currency,
         JSON.stringify(selectedCertifications),
-        JSON.stringify({
-          level: plan.level,
-          planKey: plan.plan_key,
-          planName: plan.plan_name,
-          durationDays: Number(plan.duration_days),
-          basePriceEur,
-          selectedCertifications,
-          selectedCertificationCount,
-          finalPriceEur,
-          writingSimulatorAttempts: Number(plan.writing_simulator_attempts),
-          speakingSimulatorQuota: Number(plan.speaking_simulator_quota ?? 0),
-          requestedProvider: provider,
-        }),
+        safeJson(transactionMetadata),
       ]
     );
+    const transactionId = transaction.rows[0].id;
+    let providerReference = "";
+    let authorizationUrl = "";
+    if (provider === "notchpay") {
+      providerReference = buildNotchPayReference(transactionId);
+      const notchAmount = eurToNotchPayAmount(finalPriceEur);
+      const notchPaySession = await createNotchPayPayment({
+        user: req.user,
+        transactionId,
+        reference: providerReference,
+        amountEur: finalPriceEur,
+        plan,
+        selectedCertifications,
+      });
+      authorizationUrl = notchPaySession.authorization_url || notchPaySession.authorizationUrl || "";
+      await pool.query(
+        `UPDATE payment_transactions
+            SET provider_reference = $2,
+                metadata = metadata || $3::jsonb,
+                updated_at = NOW()
+          WHERE id = $1`,
+        [
+          transactionId,
+          providerReference,
+          safeJson({
+            notchpay: {
+              reference: providerReference,
+              amount: notchAmount,
+              currency: NOTCHPAY_CURRENCY,
+              authorizationUrl,
+              callbackUrl: `${NOTCHPAY_CALLBACK_URL}?reference=${encodeURIComponent(providerReference)}`,
+              transaction: getNotchPayTransactionObject(notchPaySession),
+            },
+          }),
+        ]
+      );
+    }
 
     return res.json({
       ok: true,
       checkoutSession: {
         provider,
         status: transaction.rows[0].status,
-        transactionId: transaction.rows[0].id,
+        transactionId,
+        providerReference,
+        authorizationUrl,
         planId: plan.id,
         level: plan.level,
         planKey: plan.plan_key,
@@ -4567,6 +4905,93 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
   } catch (err) {
     console.error(err);
     return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.get("/api/payments/notchpay/callback", async (req, res) => {
+  const reference = String(req.query.reference || req.query.transaction_id || req.query.transaction || "").trim();
+  const redirectBase = `${FRONTEND_URL}/offers`;
+  if (!reference) return res.redirect(`${redirectBase}?payment=missing_reference`);
+  try {
+    const payment = await retrieveNotchPayPayment(reference);
+    const status = getNotchPayStatusFromPayload(payment);
+    if (isSuccessfulPaymentStatus(status)) {
+      await activateSubscriptionFromTransaction({
+        providerReference: reference,
+        providerPayload: payment,
+        eventType: "callback",
+      });
+      return res.redirect(`${FRONTEND_URL}/dashboard?payment=success`);
+    }
+    if (isFailedPaymentStatus(status)) {
+      await pool.query(
+        `UPDATE payment_transactions
+            SET status = 'failed',
+                metadata = metadata || $2::jsonb,
+                updated_at = NOW()
+          WHERE provider = 'notchpay' AND provider_reference = $1`,
+        [reference, safeJson({ notchpayCallback: payment, notchpayStatus: status })]
+      );
+      return res.redirect(`${redirectBase}?payment=failed`);
+    }
+    await pool.query(
+      `UPDATE payment_transactions
+          SET metadata = metadata || $2::jsonb,
+              updated_at = NOW()
+        WHERE provider = 'notchpay' AND provider_reference = $1`,
+      [reference, safeJson({ notchpayCallback: payment, notchpayStatus: status })]
+    );
+    return res.redirect(`${redirectBase}?payment=pending`);
+  } catch (err) {
+    console.error("Notch Pay callback failed", err);
+    return res.redirect(`${redirectBase}?payment=verification_error`);
+  }
+});
+
+app.post("/api/payments/notchpay/webhook", async (req, res) => {
+  try {
+    const rawPayload = req.rawBody || Buffer.from(JSON.stringify(req.body || {}));
+    const signature = req.get("x-notch-signature");
+    if (!verifyNotchPaySignature(rawPayload, signature)) {
+      return res.status(403).json({ ok: false, error: "Invalid signature" });
+    }
+    const event = req.body || parseJsonBody(rawPayload.toString("utf8"));
+    const reference = getNotchPayReferenceFromPayload(event);
+    const status = getNotchPayStatusFromPayload(event);
+    const eventType = String(event.event || event.type || event.action || status || "").trim();
+    if (!reference) return res.status(202).json({ ok: true, ignored: "missing_reference" });
+
+    if (isSuccessfulPaymentStatus(status) || /payment\.(complete|completed|success|successful|paid)/i.test(eventType)) {
+      const activated = await activateSubscriptionFromTransaction({
+        providerReference: reference,
+        providerPayload: event,
+        eventType,
+      });
+      return res.json({ ok: true, received: true, activated });
+    }
+    if (isFailedPaymentStatus(status) || /payment\.(failed|cancelled|canceled|expired|declined)/i.test(eventType)) {
+      await pool.query(
+        `UPDATE payment_transactions
+            SET status = 'failed',
+                metadata = metadata || $2::jsonb,
+                updated_at = NOW()
+          WHERE provider = 'notchpay' AND provider_reference = $1`,
+        [reference, safeJson({ notchpayWebhook: event, notchpayStatus: status, eventType })]
+      );
+      return res.json({ ok: true, received: true, status: "failed" });
+    }
+
+    await pool.query(
+      `UPDATE payment_transactions
+          SET metadata = metadata || $2::jsonb,
+              updated_at = NOW()
+        WHERE provider = 'notchpay' AND provider_reference = $1`,
+      [reference, safeJson({ notchpayWebhook: event, notchpayStatus: status, eventType })]
+    );
+    return res.json({ ok: true, received: true, status: "pending" });
+  } catch (err) {
+    console.error("Notch Pay webhook failed", err);
+    return res.status(500).json({ ok: false, error: "Webhook processing failed" });
   }
 });
 
