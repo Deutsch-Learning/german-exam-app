@@ -78,7 +78,7 @@ const normalizeSpeakerLabel = (value) => {
 
 const isProductionOnlyLabel = (value) =>
   /^(?:text|track|audio|teil)\s*\d*$/i.test(normalizeText(value)) ||
-  /^(?:script|dialog|dialogue|gespr[aä]ch|gespraech|monolog|monologue|interview|radio|thema|aufgabe|aufgaben|frage|fragen|multiple-choice|richtig\/falsch|richtig falsch|loesung|lösung|antwort|skript|geh[oö]rt|format|transkription|transcription|type de t[aâ]che|heute|dann|erstens|zweitens|drittens|au[ßs]erdem|vorteile|nachteile|optionen|zum abschluss)$/i.test(normalizeText(value));
+  /^(?:(?:der|die|das)\s+.+|sie|script|dialog|dialogue|gespr[aä]ch|gespraech|monolog|monologue|interview|radio|thema|das thema|aufgabe|aufgaben|frage|fragen|multiple-choice|richtig\/falsch|richtig falsch|loesung|lösung|antwort|skript|geh[oö]rt|format|transkription|transcription|type de t[aâ]che|heute|und|dann|erstens|zweitens|drittens|au[ßs]erdem|überraschungen|ueberraschungen|kluft|weltbild|sprache|achtsamkeit|pakete|qualit[aä]tsfinanzierung|qualitaetsfinanzierung|vorteile|nachteile|optionen|zum abschluss)$/i.test(normalizeText(value));
 
 const cleanMatchedSpeakerLabel = (label) => {
   const normalized = normalizeSpeakerLabel(label);
@@ -91,7 +91,7 @@ const splitSpeakerTurns = (text, trackIndex = 0) => {
   let normalized = stripProductionMarkers(text);
   if (!normalized) return [];
   normalized = normalized.replace(/^\s*(?:format|transkription|transcription)\s*:\s*/i, "").trim();
-  if (/^\s*(?:thema|aufgabe|aufgaben|frage|fragen|multiple-choice|richtig\/falsch|richtig falsch|loesung|lösung|antwort|skript|format|transkription|transcription|type de t[aâ]che|heute|dann|erstens|zweitens|drittens|au[ßs]erdem|vorteile|nachteile|optionen|zum abschluss)\s*:/i.test(normalized)) {
+  if (/^\s*(?:(?:der|die|das)\s+[^:]+|sie|thema|das thema|aufgabe|aufgaben|frage|fragen|multiple-choice|richtig\/falsch|richtig falsch|loesung|lösung|antwort|skript|format|transkription|transcription|type de t[aâ]che|heute|und|dann|erstens|zweitens|drittens|au[ßs]erdem|überraschungen|ueberraschungen|kluft|weltbild|sprache|achtsamkeit|pakete|qualit[aä]tsfinanzierung|qualitaetsfinanzierung|vorteile|nachteile|optionen|zum abschluss)\s*:/i.test(normalized)) {
     return [];
   }
   const matches = Array.from(normalized.matchAll(/(^|[\s.!?\n])((?:Herr|Frau|Dr\.?|Moderator|Moderatorin|Reporter|Reporterin|Sprecher|Sprecherin|Person|Mann|Frau|[A-ZÄÖÜ][\p{Ll}.'-]+)(?:\s+(?:[A-ZÄÖÜ][\p{Ll}.'-]+|[A-Z]|\d+)){0,4})\s*:\s*/gu))
@@ -215,7 +215,7 @@ const findSpeakerSettings = (audio, speakerName) => {
     const labels = [speaker.speaker, speaker.voiceName, speaker.id, speaker.role]
       .map(normalizeKey)
       .filter(Boolean);
-    if (labels.some((label) => folded && (label === folded || folded.includes(label) || label.includes(folded)))) return true;
+    if (labels.some((label) => folded && (label === folded || folded.includes(label)))) return true;
     if (textNumber && labels.some((label) => parseTextNumbers(label).includes(textNumber))) return true;
     return false;
   }) || speakers[0] || {};

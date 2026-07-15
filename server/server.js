@@ -3931,7 +3931,7 @@ const ensureListeningAudioProductionSchema = async () => {
 
 const inferListeningVoiceSettings = ({ transcript, itemNumber, audioSettings = {}, profiles = [] }) => {
   const text = `${transcript || ""}\n${JSON.stringify(audioSettings || {})}`;
-  const ignoredLabel = /^(?:text|track|audio|teil|thema|aufgabe|aufgaben|frage|fragen|multiple-choice|richtig\/falsch|richtig falsch|loesung|lösung|antwort|skript|geh[oö]rt|format|transkription|transcription|type de t[aâ]che|heute|dann|erstens|zweitens|drittens|au[ßs]erdem|vorteile|nachteile|optionen|zum abschluss)\s*\d*$/i;
+  const ignoredLabel = /^(?:(?:der|die|das)\s+.+|sie|text|track|audio|teil|thema|das thema|aufgabe|aufgaben|frage|fragen|multiple-choice|richtig\/falsch|richtig falsch|loesung|lösung|antwort|skript|geh[oö]rt|format|transkription|transcription|type de t[aâ]che|heute|und|dann|erstens|zweitens|drittens|au[ßs]erdem|überraschungen|ueberraschungen|kluft|weltbild|sprache|achtsamkeit|pakete|qualit[aä]tsfinanzierung|qualitaetsfinanzierung|vorteile|nachteile|optionen|zum abschluss)\s*\d*$/i;
   const dialogueLabels = parseSpeakerSegments({
     transcript,
     tracks: [{
@@ -3951,7 +3951,7 @@ const inferListeningVoiceSettings = ({ transcript, itemNumber, audioSettings = {
     const folded = foldPlain(name);
     const match = configuredSpeakers.find((speaker) => {
       const labels = [speaker.speaker, speaker.voiceName, speaker.id].map(foldPlain).filter(Boolean);
-      return labels.some((label) => folded && (folded === label || folded.includes(label) || label.includes(folded)));
+      return labels.some((label) => folded && (folded === label || folded.includes(label)));
     });
     return String(match?.suggestedGender || match?.gender || "").toLowerCase();
   };
@@ -3977,11 +3977,15 @@ const inferListeningVoiceSettings = ({ transcript, itemNumber, audioSettings = {
     if (!key || seen.has(key)) return;
     seen.add(key);
     const configuredGender = configuredGenderFor(name);
-    const looksFemale = /\b(?:frau|mutter|tochter|freundin|anna|julia|julie|maria|sara|clara|eva|gabi|moderatorin|sprecherin)\b/i.test(name);
-    const looksMale = /\b(?:herr|vater|sohn|freund|ben|daniel|frank|mike|moderator|sprecher)\b/i.test(name);
-    const gender = configuredGender === "male" || configuredGender === "female"
+    const looksFemale = /\b(?:frau|mutter|tochter|freundin|kundin|mitarbeiterin|beraterin|reiseberaterin|anna|julia|julie|maria|sara|clara|eva|gabi|moderatorin|sprecherin|reporterin|katrin|monika|lena|hannah|nadja|klara|nina|mira|petra|sabine|lara|greta|sophie)\b/i.test(name);
+    const looksMale = /\b(?:herr|vater|sohn|freund|ben|daniel|frank|mike|moderator|sprecher|reporter|thomas|klaus|marco|tobias|lukas|pawel|bernd|otto|markus|stefan|robert|tim|felix|karl|ralf|tom|kunde|student|reisender|dr\.\s*(?:felix|stark|haas|schulz))\b/i.test(name);
+    const gender = looksFemale && !looksMale
+      ? "female"
+      : looksMale && !looksFemale
+        ? "male"
+        : configuredGender === "male" || configuredGender === "female"
       ? configuredGender
-      : looksMale && !looksFemale ? "male" : "female";
+      : "female";
     const list = gender === "male" ? maleProfiles : femaleProfiles;
     const profile = pick(list, speakers.filter((speaker) => speaker.gender === gender).length);
     speakers.push({
@@ -4004,27 +4008,39 @@ const isListeningTemplateTranscript = (transcript) =>
   /_{3,}/.test(transcript);
 
 const isListeningProductionLine = (line) =>
-  /^(?:thema|aufgabe|aufgaben|frage|fragen|multiple-choice|richtig\/falsch|richtig falsch|loesung|lösung|antwort|skript|format|transkription|transcription|type de t[aâ]che|heute|dann|erstens|zweitens|drittens|au[ßs]erdem|vorteile|nachteile|optionen|zum abschluss)\s*:/i.test(line) ||
+  /^(?:(?:der|die|das)\s+[^:]+|sie|thema|das thema|aufgabe|aufgaben|frage|fragen|multiple-choice|richtig\/falsch|richtig falsch|loesung|lösung|antwort|skript|format|transkription|transcription|type de t[aâ]che|heute|und|dann|erstens|zweitens|drittens|au[ßs]erdem|überraschungen|ueberraschungen|kluft|weltbild|sprache|achtsamkeit|pakete|qualit[aä]tsfinanzierung|qualitaetsfinanzierung|vorteile|nachteile|optionen|zum abschluss)\s*:/i.test(line) ||
   /^\s*(?:n|■|-)?\s*\[?(?:anfang|ende|pause|sfx|audio script|zweite wiedergabe|wiederholung)\]?/i.test(line);
 
 const extractListeningDialogueSpeakerLabels = ({ transcript, settings }) => {
-  const labels = [];
-  const add = (value) => {
+  const settingLabels = [];
+  const transcriptLabels = [];
+  const add = (target, value) => {
     const normalized = String(value || "")
       .replace(/^\s*(?:n|■|-)\s*/i, "")
       .replace(/\s*\([^)]*\)\s*$/g, "")
       .trim();
-    if (!normalized || /^(?:text|track|audio|teil|thema|aufgabe|aufgaben|frage|fragen|multiple-choice|richtig\/falsch|richtig falsch|loesung|lösung|antwort|skript|geh[oö]rt|format|transkription|transcription|type de t[aâ]che|heute|dann|erstens|zweitens|drittens|au[ßs]erdem|vorteile|nachteile|optionen|zum abschluss)\s*\d*$/i.test(normalized)) return;
+    if (!normalized || /^(?:(?:der|die|das)\s+.+|sie|text|track|audio|teil|thema|das thema|aufgabe|aufgaben|frage|fragen|multiple-choice|richtig\/falsch|richtig falsch|loesung|lösung|antwort|skript|geh[oö]rt|format|transkription|transcription|type de t[aâ]che|heute|und|dann|erstens|zweitens|drittens|au[ßs]erdem|überraschungen|ueberraschungen|kluft|weltbild|sprache|achtsamkeit|pakete|qualit[aä]tsfinanzierung|qualitaetsfinanzierung|vorteile|nachteile|optionen|zum abschluss)\s*\d*$/i.test(normalized)) return;
     const folded = foldPlain(normalized);
-    if (!folded || labels.some((label) => foldPlain(label) === folded)) return;
-    labels.push(normalized);
+    if (!folded || target.some((label) => foldPlain(label) === folded)) return;
+    target.push(normalized);
   };
   const speakers = Array.isArray(settings?.speakers) ? settings.speakers : [];
-  speakers.forEach((speaker) => add(speaker.speaker || speaker.voiceName || speaker.id));
-  Array.from(String(transcript || "").matchAll(/(?:^|\n)\s*(?:n|■|-)?\s*((?:Moderator|Moderatorin|Gast|Reporter|Reporterin|Sprecher|Sprecherin)(?:\s+[A-ZÄÖÜ][^:\n]{0,36})?)\s*:/g))
-    .forEach((match) => add(match[1]));
-  const preferred = labels.filter((label) => /^(?:Moderator|Moderatorin|Gast|Reporter|Reporterin|Sprecher|Sprecherin)\b/i.test(label));
-  return preferred.length >= 2 ? preferred.slice(0, 4) : labels.slice(0, 4);
+  speakers.forEach((speaker) => add(settingLabels, speaker.speaker || speaker.voiceName || speaker.id));
+  Array.from(String(transcript || "").matchAll(/(?:^|\n)\s*(?:n|■|-)?\s*((?:Herr|Frau|Dr\.?\s+[A-ZÄÖÜ][^:\n]{0,28}|Moderator|Moderatorin|Gast|Reporter|Reporterin|Sprecher|Sprecherin)(?:\s+[A-ZÄÖÜ][^:\n]{0,36})?)\s*:/g))
+    .forEach((match) => add(transcriptLabels, match[1]));
+  if (transcriptLabels.length < 2 && settingLabels.length < 2) {
+    Array.from(String(transcript || "").matchAll(/(?:^|\n)\s*([A-ZÄÖÜ][^:\n]{1,36})\s*:/gu))
+      .forEach((match) => add(transcriptLabels, match[1]));
+  }
+  return (transcriptLabels.length >= 2 ? transcriptLabels : settingLabels).slice(0, 4);
+};
+
+const findKnownListeningSpeakerLabel = (label, speakerLabels) => {
+  const folded = foldPlain(label);
+  return speakerLabels.find((speaker) => {
+    const speakerFolded = foldPlain(speaker);
+    return folded === speakerFolded || folded.includes(speakerFolded);
+  }) || "";
 };
 
 const prepareListeningTranscriptForTts = ({ transcript, title, settings }) => {
@@ -4041,8 +4057,15 @@ const prepareListeningTranscriptForTts = ({ transcript, title, settings }) => {
     const line = rawLine.replace(/^\s*(?:format|transkription|transcription)\s*:\s*/i, "").trim();
     if (isListeningProductionLine(line)) return lines;
     if (/^\s*(?:n|■|-)?\s*(?:Moderator|Moderatorin|Gast|Reporter|Reporterin|Sprecher|Sprecherin)\b[^:\n]*:/i.test(line)) return lines;
-    if (/^\s*[A-ZÄÖÜ][^:\n]{1,48}\s*:/u.test(line)) {
-      lines.push(line.replace(/^\s*(?:n|■|-)\s*/i, ""));
+    const labelMatch = line.match(/^\s*(?:n|■|-)?\s*([A-ZÄÖÜ][^:\n]{1,48})\s*:\s*(.*)$/u);
+    if (labelMatch) {
+      const knownLabel = findKnownListeningSpeakerLabel(labelMatch[1], speakerLabels);
+      if (knownLabel) {
+        lines.push(`${knownLabel}: ${labelMatch[2]}`.trim());
+      } else if (labelMatch[2]) {
+        lines.push(`${speakerLabels[turnIndex % speakerLabels.length]}: ${labelMatch[2]}`.trim());
+        turnIndex += 1;
+      }
       return lines;
     }
     lines.push(`${speakerLabels[turnIndex % speakerLabels.length]}: ${line}`);
