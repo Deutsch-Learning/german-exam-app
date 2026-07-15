@@ -5,7 +5,7 @@ import { CheckCircle2, CreditCard, Landmark, Smartphone, X } from "lucide-react"
 import "./PricingPage.css";
 import logo from "../assets/images/logo.png";
 import { createCheckoutSession, getCheckoutQuote, getCheckoutSessionStatus } from "../services/checkout";
-import { getAuthUser, updateStoredUser } from "../utils/access";
+import { getAuthSession, getAuthUser, storeAuthSession, updateStoredUser } from "../utils/access";
 import { SUPPORT_WHATSAPP_NUMBER } from "../config/support";
 import {
   certificationOptions,
@@ -829,7 +829,15 @@ export default function OffersPage() {
       await wait(1400 - (Date.now() - startedAt));
       setCheckoutPaymentStatus({ ...result, checked: true });
       if (result.status === "succeeded") {
-        if (result.user) updateStoredUser(result.user);
+        if (result.user && result.accessToken) {
+          const session = getAuthSession();
+          storeAuthSession(
+            { user: result.user, token: result.accessToken, expiresIn: result.expiresIn || session?.expiresIn || "15m" },
+            Boolean(session?.remember)
+          );
+        } else if (result.user) {
+          updateStoredUser(result.user);
+        }
         setCheckoutError("");
         window.setTimeout(() => navigate("/dashboard"), 1200);
       } else if (result.status === "failed") {

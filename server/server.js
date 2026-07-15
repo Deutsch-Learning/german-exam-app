@@ -11,7 +11,7 @@ const rateLimit = require("express-rate-limit");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const nodemailer = require("nodemailer");
-const { createAuthMiddleware } = require("./middleware/auth");
+const { createAuthMiddleware, getBearerToken } = require("./middleware/auth");
 const adminMiddleware = require("./middleware/admin");
 const {
   analyzeExamDocument,
@@ -2185,6 +2185,43 @@ const requireAuth = createAuthMiddleware({
   emailVerificationRequired: EMAIL_VERIFICATION_REQUIRED,
 });
 const requireAdmin = [requireAuth, adminMiddleware];
+
+const optionalPaymentAuth = async (req, _res, next) => {
+  try {
+    const token = getBearerToken(req);
+    if (!token) return next();
+    const payload = jwt.verify(token, JWT_SECRET, {
+      issuer: JWT_ISSUER,
+      audience: JWT_AUDIENCE,
+      ignoreExpiration: true,
+    });
+    const userId = Number(payload.sub ?? payload.id);
+    if (!Number.isInteger(userId) || userId <= 0) return next();
+    if (payload.jti) {
+      const revoked = await pool.query(`SELECT 1 FROM revoked_tokens WHERE jti = $1 LIMIT 1`, [payload.jti]);
+      if (revoked.rows[0]) return next();
+    }
+    const result = await pool.query(
+      `SELECT id, email, username, first_name, last_name, date_of_birth, role, status,
+              email_verified, has_full_access, partial_access, current_level, target_level,
+              marketing_emails_enabled,
+              created_at, last_login_at
+         FROM users
+        WHERE id = $1`,
+      [userId]
+    );
+    const user = result.rows[0];
+    if (!user || user.status !== "active" || !["user", "admin"].includes(String(user.role)) || payload.role !== user.role) {
+      return next();
+    }
+    req.token = token;
+    req.authPayload = payload;
+    req.user = user;
+  } catch {
+    // Payment status can still be checked by reference; normal protected routes remain strict.
+  }
+  return next();
+};
 
 const auditAdminAction = async (req, action, targetType, targetId, metadata = {}) => {
   try {
@@ -5720,23 +5757,22 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
   }
 });
 
-app.get("/api/checkout/session/:reference/status", requireAuth, async (req, res) => {
+app.get("/api/checkout/session/:reference/status", optionalPaymentAuth, async (req, res) => {
   try {
     const reference = String(req.params.reference || "").trim();
     if (!reference) return res.status(400).json({ ok: false, error: "Reference de paiement manquante." });
     const result = await pool.query(
       `SELECT id, user_id, provider, provider_reference, status, amount, currency, metadata
          FROM payment_transactions
-        WHERE user_id = $1
-          AND (
-            provider_reference = $2
-            OR metadata #>> '{notchpay,merchantReference}' = $2
-            OR metadata #>> '{notchpay,reference}' = $2
-            OR id::text = $2
-          )
+        WHERE (
+          provider_reference = $1
+          OR metadata #>> '{notchpay,merchantReference}' = $1
+          OR metadata #>> '{notchpay,reference}' = $1
+          OR id::text = $1
+        )
         ORDER BY created_at DESC
         LIMIT 1`,
-      [req.user.id, reference]
+      [reference]
     );
     const transaction = result.rows[0];
     if (!transaction) return res.status(404).json({ ok: false, error: "Paiement introuvable." });
@@ -5807,6 +5843,8 @@ app.get("/api/checkout/session/:reference/status", requireAuth, async (req, res)
     }
 
     const responseMessage = buildPaymentStatusMessage(status, providerStatus, providerMessage);
+    const ownsTransaction = Number(req.user?.id) === Number(transaction.user_id);
+    const refreshedAuth = status === "succeeded" && ownsTransaction ? signAccessToken(req.user) : null;
     return res.json({
       ok: true,
       status,
@@ -5817,7 +5855,9 @@ app.get("/api/checkout/session/:reference/status", requireAuth, async (req, res)
       transactionId: transaction.id,
       quote: transactionMetadata.quote || null,
       mobileMoney: transactionMetadata.mobileMoney || null,
-      user: status === "succeeded" ? await sanitizeUserWithSubscriptions(req.user) : null,
+      user: status === "succeeded" && ownsTransaction ? await sanitizeUserWithSubscriptions(req.user) : null,
+      accessToken: refreshedAuth?.token || null,
+      expiresIn: refreshedAuth?.expiresIn || null,
       message: responseMessage,
     });
   } catch (err) {
