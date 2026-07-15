@@ -5405,12 +5405,13 @@ app.get("/api/checkout/session/:reference/status", requireAuth, async (req, res)
       providerReference: transaction.provider_reference,
       quote: asPlainObject(transaction.metadata).quote || null,
       mobileMoney: asPlainObject(transaction.metadata).mobileMoney || null,
+      user: status === "succeeded" ? await sanitizeUserWithSubscriptions(req.user) : null,
       message:
         status === "succeeded"
-          ? "Paiement confirme. Votre acces est active."
+          ? "Paiement confirmé. Votre accès aux examens a été activé."
           : status === "failed"
-            ? "Le paiement a echoue ou a ete annule."
-            : "Paiement en attente. Confirmez la demande sur votre telephone.",
+            ? "Nous n'avons pas encore reçu votre paiement."
+            : "Nous n'avons pas encore reçu votre paiement. La confirmation peut prendre un court instant.",
     });
   } catch (err) {
     console.error(err);

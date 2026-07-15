@@ -454,23 +454,37 @@
   z-index: 60;
   display: grid;
   place-items: center;
-  padding: 18px;
-  overflow-y: auto;
+  padding: max(10px, env(safe-area-inset-top, 0px)) max(10px, env(safe-area-inset-right, 0px)) max(10px, env(safe-area-inset-bottom, 0px)) max(10px, env(safe-area-inset-left, 0px));
+  overflow: hidden;
   background: rgba(15, 23, 42, 0.44);
   backdrop-filter: blur(7px);
+  animation: pricingModalBackdropIn 0.18s ease both;
 }
 
 .pricing-modal,
 .checkout-panel {
   position: relative;
-  width: min(520px, 100%);
-  max-height: calc(100dvh - 32px);
-  overflow-y: auto;
+  width: min(560px, 100%);
+  max-height: min(92dvh, 760px);
+  overflow: hidden;
   border-radius: 18px;
   border: 1px solid #fee2e2;
   background: #ffffff;
-  padding: clamp(18px, 4vw, 28px);
+  padding: clamp(14px, 3vw, 22px);
   box-shadow: 0 28px 60px rgba(15, 23, 42, 0.22);
+  animation: pricingModalIn 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.pricing-modal-backdrop,
+.pricing-modal,
+.checkout-panel {
+  scrollbar-width: none;
+}
+
+.pricing-modal-backdrop::-webkit-scrollbar,
+.pricing-modal::-webkit-scrollbar,
+.checkout-panel::-webkit-scrollbar {
+  display: none;
 }
 
 .pricing-certification-modal {
@@ -479,16 +493,18 @@
 
 .pricing-modal h2,
 .checkout-panel h1 {
-  margin: 0 0 14px;
-  font-size: clamp(1.45rem, 4vw, 2.05rem);
+  margin: 0 0 10px;
+  padding-right: 34px;
+  font-size: clamp(1.25rem, 3.2vw, 1.78rem);
+  line-height: 1.12;
 }
 
 .pricing-modal-close {
   position: absolute;
   top: 14px;
   right: 14px;
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   border: 0;
   border-radius: 999px;
   background: #f3f4f6;
@@ -517,9 +533,10 @@
 .pricing-modal-message,
 .pricing-modal-status,
 .pricing-modal-error {
-  margin: 18px 0 0;
-  line-height: 1.55;
+  margin: 10px 0 0;
+  line-height: 1.42;
   font-weight: 700;
+  font-size: 0.9rem;
 }
 
 .pricing-modal-message {
@@ -527,8 +544,8 @@
 }
 
 .pricing-modal-message.compact {
-  margin-top: -8px;
-  margin-bottom: 18px;
+  margin-top: -4px;
+  margin-bottom: 10px;
 }
 
 .pricing-modal-status {
@@ -540,18 +557,18 @@
 }
 
 .pricing-modal-button {
-  margin-top: 22px;
+  margin-top: 12px;
 }
 
 .pricing-certification-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  margin: 18px 0;
+  gap: 8px;
+  margin: 10px 0;
 }
 
 .pricing-certification-option {
-  min-height: 76px;
+  min-height: 58px;
   border: 1px solid #fee2e2;
   border-radius: 14px;
   background: #ffffff;
@@ -561,7 +578,7 @@
   grid-template-rows: auto auto;
   align-content: center;
   gap: 3px 10px;
-  padding: 14px;
+  padding: 10px 12px;
   text-align: left;
   cursor: pointer;
   font-family: inherit;
@@ -569,7 +586,7 @@
 }
 
 .pricing-certification-option span {
-  font-size: 1rem;
+  font-size: 0.94rem;
   font-weight: 950;
 }
 
@@ -615,27 +632,27 @@
 }
 
 .pricing-modal-secondary {
-  margin-top: 10px;
+  margin-top: 8px;
   background: #111827;
   color: #ffffff;
 }
 
 .pricing-summary-card {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  margin: 14px 0 18px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+  margin: 8px 0 12px;
   border: 1px solid #fee2e2;
   border-radius: 14px;
   background: linear-gradient(180deg, #fffafa, #ffffff);
-  padding: 14px;
+  padding: 10px;
 }
 
 .pricing-enterprise-access-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  margin: 14px 0;
+  gap: 8px;
+  margin: 10px 0;
 }
 
 .pricing-enterprise-access {
@@ -646,7 +663,7 @@
   border: 1px solid #bbf7d0;
   border-radius: 12px;
   background: #f0fdf4;
-  padding: 10px 12px;
+  padding: 9px 10px;
   color: #166534;
 }
 
@@ -668,7 +685,7 @@
   min-width: 0;
   border-radius: 10px;
   background: #f8fafc;
-  padding: 10px 12px;
+  padding: 8px 9px;
 }
 
 .pricing-summary-card span,
@@ -683,16 +700,16 @@
   display: block;
   margin-top: 3px;
   color: #111827;
-  font-size: 0.92rem;
-  line-height: 1.35;
+  font-size: 0.84rem;
+  line-height: 1.25;
   overflow-wrap: anywhere;
 }
 
 .pricing-payment-methods {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  margin: 16px 0;
+  gap: 8px;
+  margin: 10px 0;
 }
 
 .pricing-payment-methods.compact {
@@ -700,7 +717,7 @@
 }
 
 .pricing-payment-method {
-  min-height: 94px;
+  min-height: 72px;
   border: 1px solid #fee2e2;
   border-radius: 14px;
   background: #ffffff;
@@ -709,7 +726,7 @@
   align-content: center;
   justify-items: start;
   gap: 6px;
-  padding: 14px;
+  padding: 10px 12px;
   text-align: left;
   cursor: pointer;
   font: inherit;
@@ -734,8 +751,8 @@
 
 .pricing-field {
   display: grid;
-  gap: 7px;
-  margin: 12px 0;
+  gap: 5px;
+  margin: 8px 0;
 }
 
 .pricing-field input,
@@ -782,16 +799,16 @@
 .pricing-processing {
   display: grid;
   place-items: center;
-  gap: 10px;
-  margin-top: 18px;
+  gap: 7px;
+  margin-top: 8px;
   border-radius: 14px;
   background: #f8fafc;
-  padding: 22px;
+  padding: 14px;
   text-align: center;
 }
 
 .pricing-verify-hint {
-  margin: 8px 0 0;
+  margin: 6px 0 0;
   text-align: center;
   color: #667085;
   font-size: 0.84rem;
@@ -799,31 +816,32 @@
 }
 
 .pricing-support-box {
-  margin-top: 12px;
+  margin-top: 8px;
   border: 1px solid #fed7aa;
   border-radius: 12px;
   background: #fff7ed;
-  padding: 12px;
+  padding: 10px;
 }
 
 .pricing-support-box p {
-  margin: 0 0 10px;
+  margin: 0 0 8px;
   color: #9a3412;
-  font-size: 0.9rem;
-  line-height: 1.45;
+  font-size: 0.84rem;
+  line-height: 1.35;
   font-weight: 750;
 }
 
 .pricing-processing h3 {
   margin: 0;
-  font-size: 1.25rem;
+  font-size: 1.05rem;
 }
 
 .pricing-processing p {
   margin: 0;
   color: #344054;
   font-weight: 750;
-  line-height: 1.5;
+  line-height: 1.38;
+  font-size: 0.9rem;
 }
 
 .pricing-processing small {
@@ -913,7 +931,7 @@
   .pricing-summary-card,
   .pricing-payment-methods,
   .pricing-card-split {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .pricing-modal-summary strong {
@@ -927,5 +945,127 @@
 
   .pricing-enterprise-access-grid {
     grid-template-columns: 1fr;
+  }
+
+  .pricing-modal,
+  .checkout-panel {
+    width: min(100%, 430px);
+    max-height: calc(100dvh - 20px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    padding: 13px;
+    border-radius: 16px;
+  }
+
+  .pricing-modal h2,
+  .checkout-panel h1 {
+    margin-bottom: 6px;
+    font-size: 1.2rem;
+  }
+
+  .pricing-kicker {
+    margin-bottom: 4px;
+  }
+
+  .pricing-summary-card {
+    margin: 6px 0 8px;
+    padding: 7px;
+  }
+
+  .pricing-step-method .pricing-summary-card,
+  .pricing-step-mobile .pricing-summary-card,
+  .pricing-step-processing .pricing-summary-card {
+    display: none;
+  }
+
+  .pricing-summary-card div {
+    padding: 6px 7px;
+  }
+
+  .pricing-summary-card span,
+  .pricing-field span {
+    font-size: 0.7rem;
+  }
+
+  .pricing-summary-card strong {
+    font-size: 0.76rem;
+  }
+
+  .pricing-modal-message,
+  .pricing-modal-status,
+  .pricing-modal-error {
+    margin-top: 6px;
+    font-size: 0.8rem;
+    line-height: 1.28;
+  }
+
+  .pricing-payment-method {
+    min-height: 60px;
+    gap: 4px;
+    padding: 8px 9px;
+  }
+
+  .pricing-payment-method small {
+    font-size: 0.72rem;
+  }
+
+  .pricing-field {
+    gap: 3px;
+    margin: 6px 0;
+  }
+
+  .pricing-field input,
+  .pricing-field select {
+    min-height: 39px;
+    padding: 8px 10px;
+  }
+
+  .pricing-processing {
+    margin-top: 6px;
+    padding: 10px;
+  }
+
+  .pricing-processing h3 {
+    font-size: 0.98rem;
+  }
+
+  .pricing-processing p,
+  .pricing-support-box p {
+    font-size: 0.78rem;
+    line-height: 1.28;
+  }
+
+  .pricing-support-box {
+    padding: 8px;
+  }
+}
+
+@media (max-width: 420px) {
+  .pricing-modal,
+  .checkout-panel {
+    padding: 11px;
+  }
+
+  .pricing-summary-card {
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+
+  .pricing-summary-card div {
+    padding: 7px 8px;
+  }
+}
+
+@keyframes pricingModalBackdropIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes pricingModalIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
 }

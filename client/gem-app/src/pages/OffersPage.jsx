@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { CheckCircle2, CreditCard, Landmark, Smartphone, X } from "lucide-react";
 import "./PricingPage.css";
 import logo from "../assets/images/logo.png";
 import { createCheckoutSession, getCheckoutQuote, getCheckoutSessionStatus } from "../services/checkout";
-import { getAuthUser } from "../utils/access";
+import { getAuthUser, updateStoredUser } from "../utils/access";
+import { SUPPORT_WHATSAPP_NUMBER } from "../config/support";
 import {
   certificationOptions,
   enrichPricingPlan,
@@ -13,8 +15,6 @@ import {
   pricingSections,
   unlockedSections,
 } from "../data/pricingPlans";
-
-const SUPPORT_WHATSAPP_NUMBER = "237675150237";
 
 const buildEnterprisePlan = (offer) => ({
   id: `enterprise-${offer.offerKey}`,
@@ -205,6 +205,7 @@ const CheckoutModalV2 = ({
   mobilePhone,
   paymentStatus,
   verifying,
+  verifyCooldown,
   loading,
   error,
   supportUrl,
@@ -236,11 +237,34 @@ const CheckoutModalV2 = ({
   const clientPhoneLooksValid =
     Boolean(selectedProviderConfig) &&
     selectedProviderConfig.prefixes.some((pattern) => pattern.test(normalizedPhone.replace(/\s+/g, "")));
+  const verificationChecked = Boolean(paymentStatus?.checked);
+  const paymentSucceeded = paymentStatus?.status === "succeeded";
+  const paymentPending = ["pending", "processing"].includes(paymentStatus?.status);
+  const paymentFailed = paymentStatus?.status === "failed";
+  const verificationButtonLabel = verifying
+    ? "Vérification du paiement..."
+    : verifyCooldown > 0
+      ? `Réessayer dans ${verifyCooldown}s`
+      : "Vérifier le paiement";
+  const processingTitle = verifying
+    ? "Vérification du paiement..."
+    : paymentSucceeded
+      ? "Paiement confirmé"
+      : "Confirmez sur votre téléphone";
+  const processingMessage = verifying
+    ? "Nous vérifions la transaction existante auprès du prestataire. Aucun nouveau paiement n'est créé."
+    : paymentSucceeded
+      ? "Paiement confirmé. Votre accès aux examens a été activé."
+      : verificationChecked && paymentPending
+        ? "Nous n'avons pas encore reçu votre paiement. La confirmation Mobile Money peut prendre un court instant."
+        : verificationChecked && paymentFailed
+          ? "Nous n'avons pas encore reçu votre paiement."
+          : paymentStatus?.message || checkout?.checkoutSession?.message || "Une demande Mobile Money vient d'être envoyée. Validez-la sur votre téléphone.";
 
-  return (
+  return createPortal((
     <div className="pricing-modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section
-        className="pricing-modal pricing-certification-modal"
+        className={`pricing-modal pricing-certification-modal pricing-step-${step}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="checkout-title"
@@ -421,29 +445,29 @@ const CheckoutModalV2 = ({
           <>
             <div className="pricing-processing">
               <Smartphone size={34} />
-              <h3>{paymentStatus?.status === "succeeded" ? "Paiement confirme" : "Confirmez sur votre telephone"}</h3>
-              <p>
-                {paymentStatus?.status === "succeeded"
-                  ? "Paiement confirme. Votre acces aux examens a ete active."
-                  : paymentStatus?.message || checkout?.checkoutSession?.message || "Une demande Mobile Money vient d'etre envoyee. Validez-la sur votre telephone."}
-              </p>
+              <h3>{processingTitle}</h3>
+              <p>{processingMessage}</p>
               {checkout?.checkoutSession?.providerReference ? (
                 <small>Reference : {checkout.checkoutSession.providerReference}</small>
               ) : null}
             </div>
             {error ? <p className="pricing-modal-error">{error}</p> : null}
-            {paymentStatus?.status === "succeeded" ? (
+            {paymentSucceeded ? (
               <Link className="pricing-modal-button" to="/dashboard">Aller au dashboard</Link>
             ) : (
               <>
-                <button className="pricing-modal-button" type="button" disabled={verifying} onClick={onVerifyPayment}>
-                  {verifying ? "Verification du paiement..." : "Verifier le paiement"}
+                <button className="pricing-modal-button" type="button" disabled={verifying || verifyCooldown > 0} onClick={onVerifyPayment}>
+                  {verificationButtonLabel}
                 </button>
-                <p className="pricing-verify-hint">Cliquez ici si le paiement a ete effectue.</p>
-                {paymentStatus?.checked && (paymentStatus?.status === "failed" || paymentStatus?.status === "pending" || paymentStatus?.status === "processing") ? (
+                <p className="pricing-verify-hint">
+                  {verifyCooldown > 0
+                    ? "La confirmation peut prendre un court instant. Vous pourrez vérifier à nouveau après ce délai."
+                    : "Cliquez ici si le paiement a été effectué."}
+                </p>
+                {verificationChecked && (paymentFailed || paymentPending) ? (
                   <div className="pricing-support-box">
                     <p>
-                      Nous n'avons pas encore recu votre paiement. Si vous avez effectue le paiement mais que votre acces n'a pas ete active, contactez le service client.
+                      Si vous avez effectué le paiement mais que votre accès n'a pas été activé, contactez le service client.
                     </p>
                     <a className="pricing-modal-secondary" href={supportUrl} target="_blank" rel="noreferrer">
                       Contacter le service client
@@ -456,7 +480,7 @@ const CheckoutModalV2 = ({
         ) : null}
       </section>
     </div>
-  );
+  ), document.body);
 };
 
 export default function OffersPage() {
@@ -476,8 +500,10 @@ export default function OffersPage() {
   const [mobilePhone, setMobilePhone] = useState("");
   const [checkoutPaymentStatus, setCheckoutPaymentStatus] = useState(null);
   const [verifyingPayment, setVerifyingPayment] = useState(false);
+  const [verifyCooldown, setVerifyCooldown] = useState(0);
   const [idempotencyKey, setIdempotencyKey] = useState("");
   const [loadingPlanId, setLoadingPlanId] = useState("");
+  const checkoutSubmittingRef = useRef(false);
   const user = useMemo(() => getAuthUser(), []);
   const paymentStatus = searchParams.get("payment");
   const paymentNotice = {
@@ -536,6 +562,14 @@ export default function OffersPage() {
   }, [checkoutPaymentStatus?.status, checkoutStep, navigate]);
 
   useEffect(() => {
+    if (verifyCooldown <= 0) return undefined;
+    const timer = window.setInterval(() => {
+      setVerifyCooldown((value) => Math.max(0, value - 1));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [verifyCooldown]);
+
+  useEffect(() => {
     const reference = checkout?.checkoutSession?.providerReference;
     if (checkoutStep !== "processing" || !reference || checkoutPaymentStatus?.status === "succeeded") return undefined;
     let cancelled = false;
@@ -581,6 +615,7 @@ export default function OffersPage() {
     setMobilePhone("");
     setCheckoutPaymentStatus(null);
     setVerifyingPayment(false);
+    setVerifyCooldown(0);
     setIdempotencyKey(plan.id);
   };
 
@@ -610,6 +645,7 @@ export default function OffersPage() {
     setMobilePhone("");
     setCheckoutPaymentStatus(null);
     setVerifyingPayment(false);
+    setVerifyCooldown(0);
     setIdempotencyKey(plan.id);
   };
 
@@ -662,11 +698,13 @@ export default function OffersPage() {
   };
 
   const confirmCheckout = async () => {
-    if (!selectedPlan || selectedCertifications.length < 1) return;
+    if (!selectedPlan || selectedCertifications.length < 1 || checkoutSubmittingRef.current) return;
+    checkoutSubmittingRef.current = true;
+    const activePlanKey = selectedPlan.id || selectedPlan.offerKey || `${selectedPlan.level}-${selectedPlan.planKey}`;
     setCheckout(null);
     setCheckoutPaymentStatus(null);
     setCheckoutError("");
-    setLoadingPlanId(selectedPlan.id);
+    setLoadingPlanId(activePlanKey);
     try {
       const finalPriceEur = Number((selectedPlan.priceEur * selectedCertifications.length).toFixed(2));
       const session = await createCheckoutSession({
@@ -698,26 +736,42 @@ export default function OffersPage() {
       );
     } finally {
       setLoadingPlanId("");
+      checkoutSubmittingRef.current = false;
     }
   };
 
   const verifyPayment = async () => {
     const reference = checkout?.checkoutSession?.providerReference;
-    if (!reference || verifyingPayment) return;
+    if (!reference || verifyingPayment || verifyCooldown > 0) return;
     setVerifyingPayment(true);
     setCheckoutError("");
+    setCheckoutPaymentStatus((current) => ({
+      ...(current || {}),
+      status: current?.status || "processing",
+      checked: false,
+      message: "Vérification du paiement...",
+    }));
     try {
       const result = await getCheckoutSessionStatus(reference);
       setCheckoutPaymentStatus({ ...result, checked: true });
       if (result.status === "succeeded") {
+        if (result.user) updateStoredUser(result.user);
         setCheckoutError("");
       } else if (result.status === "failed") {
-        setCheckoutError("Le paiement n'a pas ete confirme. Vous pouvez contacter le service client si le montant a ete debite.");
+        setCheckoutError("");
+        setVerifyCooldown(10);
       } else {
-        setCheckoutError("Nous n'avons pas encore recu votre paiement. La confirmation Mobile Money peut prendre un court instant.");
+        setCheckoutError("");
+        setVerifyCooldown(8);
       }
     } catch (err) {
       setCheckoutError(err.response?.data?.error || "Verification du paiement temporairement indisponible.");
+      setCheckoutPaymentStatus((current) => ({
+        ...(current || {}),
+        status: current?.status || "processing",
+        checked: true,
+      }));
+      setVerifyCooldown(8);
     } finally {
       setVerifyingPayment(false);
     }
@@ -871,6 +925,7 @@ export default function OffersPage() {
         mobilePhone={mobilePhone}
         paymentStatus={checkoutPaymentStatus}
         verifying={verifyingPayment}
+        verifyCooldown={verifyCooldown}
         loading={Boolean(loadingPlanId)}
         error={checkoutError}
         supportUrl={supportUrl}
@@ -899,6 +954,7 @@ export default function OffersPage() {
           setCheckoutStep("certifications");
           setCheckoutPaymentStatus(null);
           setVerifyingPayment(false);
+          setVerifyCooldown(0);
         }}
       />
     </div>
