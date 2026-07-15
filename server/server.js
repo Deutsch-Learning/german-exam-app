@@ -370,18 +370,20 @@ const verifyNotchPaySignature = (rawBody, signature) => {
 };
 
 const notchPayRequest = async (pathName, { method = "GET", body } = {}) => {
-  if (!NOTCHPAY_SECRET_KEY) {
-    const error = new Error("Notch Pay secret key is not configured.");
+  if (!NOTCHPAY_PUBLIC_KEY) {
+    const error = new Error("Notch Pay public key is not configured.");
     error.status = 503;
     throw error;
   }
+  const headers = {
+    Authorization: NOTCHPAY_PUBLIC_KEY,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
+  if (NOTCHPAY_SECRET_KEY) headers["X-Grant"] = NOTCHPAY_SECRET_KEY;
   const response = await fetch(`${NOTCHPAY_API_BASE_URL}${pathName}`, {
     method,
-    headers: {
-      Authorization: NOTCHPAY_SECRET_KEY,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
+    headers,
     body: body ? JSON.stringify(body) : undefined,
   });
   const text = await response.text();
