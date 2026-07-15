@@ -362,7 +362,7 @@ const isSuccessfulPaymentStatus = (value) =>
   ["complete", "completed", "success", "successful", "succeeded", "paid", "active"].includes(normalizePaymentStatus(value));
 
 const isFailedPaymentStatus = (value) =>
-  ["failed", "cancelled", "canceled", "expired", "declined", "rejected"].includes(normalizePaymentStatus(value));
+  ["failed", "cancelled", "canceled", "expired", "declined", "rejected", "insufficient_funds", "insufficient_balance"].includes(normalizePaymentStatus(value));
 
 const eurToNotchPayAmount = (amountEur, currency = NOTCHPAY_CURRENCY) => {
   const amount = Number(amountEur);
@@ -470,6 +470,48 @@ const getNotchPayStatusFromPayload = (payload = {}) => {
   const body = parseJsonBody(payload);
   const transaction = getNotchPayTransactionObject(body);
   return String(transaction.status || transaction.payment_status || body.status || body.event || body.type || "").trim();
+};
+
+const getNotchPayMessageFromPayload = (payload = {}) => {
+  const body = parseJsonBody(payload);
+  const transaction = getNotchPayTransactionObject(body);
+  const candidates = [
+    body.message,
+    body.error,
+    body.description,
+    body.reason,
+    body.data?.message,
+    body.data?.error,
+    body.data?.reason,
+    transaction.message,
+    transaction.error,
+    transaction.description,
+    transaction.reason,
+    transaction.failure_reason,
+    transaction.gateway_response,
+  ];
+  return candidates.map((item) => String(item || "").trim()).find(Boolean) || "";
+};
+
+const buildPaymentStatusMessage = (status, providerStatus, providerMessage = "") => {
+  const statusText = normalizePaymentStatus(providerStatus || status);
+  const detail = String(providerMessage || "").trim();
+  const detailSuffix = detail ? ` Detail: ${detail}` : "";
+  if (isSuccessfulPaymentStatus(statusText) || status === "succeeded") {
+    return "Paiement confirme. Votre acces aux examens a ete active.";
+  }
+  if (statusText.includes("insufficient") || detail.toLowerCase().includes("insufficient")) {
+    return `Paiement non confirme: solde insuffisant.${detailSuffix}`;
+  }
+  if (["cancelled", "canceled"].includes(statusText) || detail.toLowerCase().includes("cancel")) {
+    return `Paiement annule.${detailSuffix}`;
+  }
+  if (isFailedPaymentStatus(statusText) || status === "failed") {
+    return `Paiement non confirme ou echoue.${detailSuffix}`;
+  }
+  return detail
+    ? `Paiement en attente de confirmation. ${detail}`
+    : "Nous n'avons pas encore recu votre paiement. La confirmation peut prendre un court instant.";
 };
 
 const verifyNotchPaySignature = (rawBody, signature) => {
@@ -584,12 +626,13 @@ const retrieveNotchPayPayment = async (reference) =>
 
 const processNotchPayMobileMoneyPayment = async ({ reference, channel, phone }) =>
   notchPayRequest(`/payments/${encodeURIComponent(reference)}`, {
-    method: "POST",
+    method: "PUT",
     body: {
       channel,
       data: {
-        account_number: phone,
-        phone,
+        phone: Number(String(phone || "").replace(/[^\d]/g, "")),
+        account_number: String(phone || "").replace(/[^\d]/g, ""),
+        country: String(phone || "").replace(/[^\d]/g, "").startsWith("237") ? "CM" : undefined,
       },
     },
   });
@@ -5416,11 +5459,13 @@ app.get("/api/checkout/session/:reference/status", requireAuth, async (req, res)
 
     let status = normalizePaymentStatus(transaction.status);
     let providerStatus = "";
+    let providerMessage = "";
     let activated = null;
     if (transaction.provider === "notchpay" && ["pending", "processing"].includes(status)) {
       try {
         const payment = await retrieveNotchPayPayment(transaction.provider_reference || reference);
         providerStatus = getNotchPayStatusFromPayload(payment);
+        providerMessage = getNotchPayMessageFromPayload(payment);
         if (isSuccessfulPaymentStatus(providerStatus)) {
           activated = await activateSubscriptionFromTransaction({
             providerReference: transaction.provider_reference || reference,
@@ -5436,29 +5481,27 @@ app.get("/api/checkout/session/:reference/status", requireAuth, async (req, res)
                     metadata = metadata || $2::jsonb,
                     updated_at = NOW()
               WHERE id = $1`,
-            [transaction.id, safeJson({ notchpayStatusCheck: payment, notchpayStatus: providerStatus })]
+            [transaction.id, safeJson({ notchpayStatusCheck: payment, notchpayStatus: providerStatus, notchpayMessage: providerMessage })]
           );
         }
       } catch (error) {
         console.warn("Notch Pay status check failed", error?.message || error);
+        providerMessage = error?.data?.message || error?.data?.error || error?.message || "";
       }
     }
 
+    const responseMessage = buildPaymentStatusMessage(status, providerStatus, providerMessage);
     return res.json({
       ok: true,
       status,
       providerStatus,
+      providerMessage,
       activated,
       providerReference: transaction.provider_reference,
       quote: asPlainObject(transaction.metadata).quote || null,
       mobileMoney: asPlainObject(transaction.metadata).mobileMoney || null,
       user: status === "succeeded" ? await sanitizeUserWithSubscriptions(req.user) : null,
-      message:
-        status === "succeeded"
-          ? "Paiement confirmé. Votre accès aux examens a été activé."
-          : status === "failed"
-            ? "Nous n'avons pas encore reçu votre paiement."
-            : "Nous n'avons pas encore reçu votre paiement. La confirmation peut prendre un court instant.",
+      message: responseMessage,
     });
   } catch (err) {
     console.error(err);

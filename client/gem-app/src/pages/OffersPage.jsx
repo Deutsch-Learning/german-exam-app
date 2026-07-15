@@ -287,15 +287,18 @@ const CheckoutModalV2 = ({
     : paymentSucceeded
       ? "Paiement confirmé"
       : "Confirmez sur votre téléphone";
+  const verifiedProviderMessage = verificationChecked ? String(paymentStatus?.message || "").trim() : "";
   const processingMessage = verifying
     ? "Nous vérifions la transaction existante auprès du prestataire. Aucun nouveau paiement n'est créé."
     : paymentSucceeded
       ? "Paiement confirmé. Votre accès aux examens a été activé."
-      : verificationChecked && paymentPending
-        ? "Nous n'avons pas encore reçu votre paiement. La confirmation Mobile Money peut prendre un court instant."
-        : verificationChecked && paymentFailed
-          ? "Nous n'avons pas encore reçu votre paiement."
-          : paymentStatus?.message || checkout?.checkoutSession?.message || "Une demande Mobile Money vient d'être envoyée. Validez-la sur votre téléphone.";
+      : verifiedProviderMessage
+        ? verifiedProviderMessage
+        : verificationChecked && paymentPending
+          ? "Nous n'avons pas encore reçu votre paiement. La confirmation Mobile Money peut prendre un court instant."
+          : verificationChecked && paymentFailed
+            ? "Nous n'avons pas encore reçu votre paiement."
+            : paymentStatus?.message || checkout?.checkoutSession?.message || "Une demande Mobile Money vient d'être envoyée. Validez-la sur votre téléphone.";
 
   return createPortal((
     <div
