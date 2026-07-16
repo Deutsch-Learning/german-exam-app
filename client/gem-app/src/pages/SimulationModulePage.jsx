@@ -1454,6 +1454,12 @@ const plainRichText = (value, fallback = "") => {
   return text.replace(/\s+/g, " ").trim() || fallback;
 };
 
+const cleanPartDisplayTitle = (value, fallback = "Anweisungen") =>
+  plainRichText(value, fallback)
+    .replace(/^Teil\s+\d+\s*(?:[:|.\-–—]\s*)?/i, "")
+    .replace(/^[|.\-–—]\s*/, "")
+    .trim() || fallback;
+
 const getTaskPartKey = (task, index = 0) => {
   if (task?.partKey) return task.partKey;
   if (task?.partNumber) return `part-${task.partNumber}`;
@@ -1512,7 +1518,7 @@ const buildExamParts = (module) => {
     .map((part, index) => ({
       ...part,
       number: part.number || index + 1,
-      displayTitle: `Teil ${part.number || index + 1} - ${plainRichText(part.title, "Anweisungen").replace(/^Teil\s+\d+\s*:?\s*/i, "") || "Anweisungen"}`,
+      displayTitle: `Teil ${part.number || index + 1} - ${cleanPartDisplayTitle(part.title)}`,
       sourceText: stripQuestionMaterial(part.instructions, part.taskIndexes.map((taskIndex) => module.tasks[taskIndex])),
       firstIndex: part.taskIndexes[0],
       lastIndex: part.taskIndexes[part.taskIndexes.length - 1],
@@ -1941,16 +1947,15 @@ const buildResultSummary = (module, answers) => {
     }
 
     if (module.id === "speak") {
-      const taskScore = evaluateSpeaking(task, answers[index]);
       return {
         id: task.id,
         number: index + 1,
         title: toPlainDisplayText(task.title ?? task.question, `Aufgabe ${index + 1}`),
         typeLabel: toPlainDisplayText(task.typeLabel),
-        isCorrect: taskScore >= PASS_SCORE,
+        isCorrect: null,
         userAnswer: answers[index]?.duration ? `${answers[index].duration}s` : "Keine Antwort",
-        correctAnswer: `Ziel: ${task.responseSeconds}s`,
-        explanation: `Geschaetzte Punktzahl: ${taskScore}%`,
+        correctAnswer: "",
+        explanation: "Aufnahme gespeichert. Die Bewertung kommt aus der KI-Sprechkorrektur.",
       };
     }
 
@@ -1968,16 +1973,15 @@ const buildResultSummary = (module, answers) => {
     }
 
     if (module.id === "speak") {
-      const taskScore = evaluateSpeaking(task, answers[index]);
       return {
         id: task.id,
         number: index + 1,
         title: toPlainDisplayText(task.title ?? task.question, `Aufgabe ${index + 1}`),
         typeLabel: toPlainDisplayText(task.typeLabel),
-        isCorrect: taskScore >= PASS_SCORE,
+        isCorrect: null,
         userAnswer: answers[index]?.duration ? `${answers[index].duration}s` : "Aucune réponse",
-        correctAnswer: `Cible: ${task.responseSeconds}s`,
-        explanation: `Score estimé: ${taskScore}%`,
+        correctAnswer: "",
+        explanation: "Enregistrement sauvegardé. La note finale vient de la correction orale IA.",
       };
     }
 
@@ -2140,6 +2144,9 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const [writingCorrection, setWritingCorrection] = useState(null);
   const [writingCorrectionLoading, setWritingCorrectionLoading] = useState(false);
   const [writingCorrectionError, setWritingCorrectionError] = useState("");
+  const [speakingCorrection, setSpeakingCorrection] = useState(null);
+  const [speakingCorrectionLoading, setSpeakingCorrectionLoading] = useState(false);
+  const [speakingCorrectionError, setSpeakingCorrectionError] = useState("");
   const [writingVersions, setWritingVersions] = useState([]);
   const [audioTimestamp, setAudioTimestamp] = useState(0);
   const [audioPlaying, setAudioPlaying] = useState(false);
@@ -2483,6 +2490,9 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setWritingCorrection(null);
     setWritingCorrectionLoading(false);
     setWritingCorrectionError("");
+    setSpeakingCorrection(null);
+    setSpeakingCorrectionLoading(false);
+    setSpeakingCorrectionError("");
     setSaveStatus(stored?.savedAt ? `Dernière sauvegarde ${formatClock(new Date(stored.savedAt))}` : "Sauvegarde locale prête");
     setRestoredKey(progressKey);
   }, [armExamTimer, armPrepTimer, examParts, module, progressKey, shouldPersistProgress, totalExamDuration, totalTasks]);
@@ -2498,6 +2508,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const saveResultToBackend = useCallback(
     async (finalScore) => {
       const isWritingModule = module.id === "write";
+      const isSpeakingModule = module.id === "speak";
       if (!auth?.id) {
         if (isWritingModule) {
           setWritingCorrectionLoading(false);
@@ -2521,6 +2532,26 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           moduleTitle,
           level,
         });
+        const speakingTasksForCorrection = isSpeakingModule
+          ? module.tasks.map((task, index) => {
+              const answer = answers[index] ?? {};
+              const part = examParts.find((item) => item.taskIndexes.includes(index));
+              return {
+                taskId: task.id,
+                taskIndex: index,
+                sourceQuestionId: task.sourceQuestionId || null,
+                sourceExamId: task.sourceExamId || module.sourceExamId || null,
+                title: task.title,
+                typeLabel: task.typeLabel,
+                instructions: part?.sourceText || part?.instructions || task.prompt,
+                duration: Number(answer.duration) || 0,
+                recordingId: answer.recordingId || null,
+                uploadStatus: answer.uploadStatus || "",
+                recordedAt: answer.recordedAt || null,
+                maxScore: task.points || part?.points || null,
+              };
+            })
+          : [];
         const writingMaxScore = writingTasksForCorrection.reduce((sum, task) => sum + (Number(task.maxScore) || 0), 0);
         const resultDetails = {
           examName: examHeading,
@@ -2555,6 +2586,12 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           resultDetails.answers = answers;
           resultDetails.writingTasks = writingTasksForCorrection;
           resultDetails.writingMaxScore = writingMaxScore || 100;
+        }
+
+        if (isSpeakingModule) {
+          resultDetails.speakingTasks = speakingTasksForCorrection;
+          resultDetails.speakingMaxScore = speakingTasksForCorrection.reduce((sum, task) => sum + (Number(task.maxScore) || 0), 0) || 100;
+          resultDetails.aiScoreNotice = "AI practice estimate only; not an official exam certificate.";
         }
 
         const response = await API.post(
@@ -2592,14 +2629,50 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             setWritingCorrectionError(correction.errorMessage || "Correction IA indisponible pour le moment.");
           }
         }
-        setResultStatus("Résultat enregistré dans le dashboard.");
+        if (isSpeakingModule) {
+          setSpeakingCorrectionLoading(true);
+          setSpeakingCorrectionError("");
+          const simulationId = response.data?.simulation?.id;
+          if (simulationId) {
+            setSavedSimulationId(simulationId);
+            try {
+              const correctionResponse = await API.post(`/api/simulations/${simulationId}/speaking-correction`);
+              const correction = correctionResponse.data?.correction ?? null;
+              setSpeakingCorrection(correction);
+              const correctionStatus = correction?.status;
+              if (correctionStatus === "completed") {
+                setResultStatus("Correction orale IA terminee. Score de pratique disponible.");
+              } else if (correctionStatus === "unconfigured") {
+                setResultStatus("Resultat enregistre. Correction orale IA en attente de credits/configuration OpenAI.");
+              } else if (correctionStatus === "audio_required") {
+                setResultStatus("Resultat enregistre. Reprenez les parties sans audio serveur pour lancer la correction IA.");
+              } else if (correctionStatus === "failed") {
+                setSpeakingCorrectionError(correction?.errorMessage || "Correction orale IA indisponible pour le moment.");
+              }
+            } catch {
+              setSpeakingCorrectionError("La correction orale IA pourra etre relancee plus tard.");
+              setResultStatus("Resultat enregistre. La correction orale IA pourra etre relancee plus tard.");
+            } finally {
+              setSpeakingCorrectionLoading(false);
+            }
+          } else {
+            setSpeakingCorrectionLoading(false);
+          }
+        }
+        if (!isSpeakingModule) {
+          setResultStatus("Résultat enregistré dans le dashboard.");
+        }
       } catch {
         if (isWritingModule) {
           setWritingCorrectionError("Correction IA indisponible: le resultat n'a pas pu etre envoye au backend.");
         }
+        if (isSpeakingModule) {
+          setSpeakingCorrectionError("Correction orale IA indisponible: le resultat n'a pas pu etre envoye au backend.");
+        }
         setResultStatus("Résultat gardé en local. Le backend n'est pas joignable pour le moment.");
       } finally {
         if (isWritingModule) setWritingCorrectionLoading(false);
+        if (isSpeakingModule) setSpeakingCorrectionLoading(false);
       }
     },
     [
@@ -3079,6 +3152,57 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setPrepActive(true);
   }, [armPrepTimer, currentTask.prepSeconds]);
 
+  const uploadSpeakingRecording = useCallback(async ({ blob, taskIndex, duration }) => {
+    if (!blob || module.id !== "speak" || !auth?.id) return null;
+    const task = module.tasks[taskIndex];
+    if (!task) return null;
+
+    const formData = new FormData();
+    formData.append("audio", blob, `speaking-${taskIndex + 1}.webm`);
+    formData.append("taskId", task.id || "");
+    formData.append("sourceExamId", task.sourceExamId || module.sourceExamId || "");
+    formData.append("sourceQuestionId", task.sourceQuestionId || "");
+    formData.append("durationSeconds", String(duration || 0));
+    formData.append("provider", selectedSeries?.accessExamId || selectedSeries?.examId || "");
+    formData.append("level", level || "");
+    formData.append("taskTitle", task.title || "");
+    formData.append("taskType", task.typeLabel || "");
+    formData.append("recordedAt", new Date().toISOString());
+
+    setAnswers((previous) => ({
+      ...previous,
+      [taskIndex]: {
+        ...(previous[taskIndex] ?? {}),
+        uploadStatus: "uploading",
+      },
+    }));
+
+    try {
+      const response = await API.post("/api/speaking/recordings", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      const recording = response.data?.recording;
+      setAnswers((previous) => ({
+        ...previous,
+        [taskIndex]: {
+          ...(previous[taskIndex] ?? {}),
+          recordingId: recording?.id || null,
+          uploadStatus: recording?.id ? "uploaded" : "failed",
+        },
+      }));
+      return recording || null;
+    } catch {
+      setAnswers((previous) => ({
+        ...previous,
+        [taskIndex]: {
+          ...(previous[taskIndex] ?? {}),
+          uploadStatus: "failed",
+        },
+      }));
+      return null;
+    }
+  }, [auth?.id, level, module, selectedSeries]);
+
   const finishRecording = useCallback((blob, simulated = false) => {
     const duration = recordingSecondsRef.current;
     const taskIndex = recordingTaskIndexRef.current;
@@ -3111,7 +3235,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     reader.onloadend = () => commitRecording(String(reader.result ?? ""), objectUrl);
     reader.onerror = () => commitRecording("", objectUrl);
     reader.readAsDataURL(blob);
-  }, []);
+    void uploadSpeakingRecording({ blob, taskIndex, duration });
+  }, [uploadSpeakingRecording]);
 
   const startRecording = useCallback(async () => {
     if (module.id !== "speak" || isRecording) return;
@@ -4890,6 +5015,63 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const renderSpeaking = () => {
     const answer = currentAnswer ?? {};
     const playbackSrc = answer.audioDataUrl || answer.audioUrl;
+    const speakingVisual = currentTask.visualUrl || (currentTask.visual ? speakingImage : "");
+    const renderSpeakingVisual = (fallbackAlt) => speakingVisual ? (
+      <figure className={styles.speakingVisualFrame}>
+        <img
+          className={styles.speakingImage}
+          src={speakingVisual}
+          alt={currentTask.visualAlt || fallbackAlt}
+          loading="eager"
+          decoding="async"
+        />
+      </figure>
+    ) : null;
+    const pairedCards = Array.isArray(currentTask.presentation?.cards) ? currentTask.presentation.cards : [];
+    const hasVisualPresentation = currentTask.presentation?.kind === "visual_stimulus" && speakingVisual;
+    const renderSpeakingPrompt = (visualAlt) => hasVisualPresentation ? (
+      <div className={styles.speakingVisualPresentation}>
+        {currentTask.presentation.intro ? (
+          <div className={`${styles.instructionText} ${styles.speakingVisualIntro}`}>
+            {renderStructuredExamText(currentTask.presentation.intro, `speak-visual-intro-${currentTask.id}`)}
+          </div>
+        ) : null}
+        {renderSpeakingVisual(visualAlt)}
+        {currentTask.presentation.outro ? (
+          <div className={`${styles.instructionText} ${styles.readableScrollArea}`} onWheel={handleReadableWheel}>
+            {renderStructuredExamText(currentTask.presentation.outro, `speak-visual-outro-${currentTask.id}`)}
+          </div>
+        ) : null}
+      </div>
+    ) : (
+      <>
+        {speakingVisual ? renderSpeakingVisual(visualAlt) : null}
+        <div className={`${styles.instructionText} ${styles.readableScrollArea}`} onWheel={handleReadableWheel}>
+          {currentTask.presentation?.kind === "paired_roles" && pairedCards.length === 2 ? (
+          <div className={styles.speakingPairedPresentation}>
+            {currentTask.presentation.intro ? (
+              <div className={styles.speakingPairIntro}>
+                {renderStructuredExamText(currentTask.presentation.intro, `speak-intro-${currentTask.id}`)}
+              </div>
+            ) : null}
+            <div className={styles.speakingPairGrid}>
+              {pairedCards.map((card, cardIndex) => (
+                <section className={styles.speakingRolePanel} key={`${currentTask.id}-role-${cardIndex}`}>
+                  <h3>{card.label}</h3>
+                  <div>{renderStructuredExamText(card.text, `speak-role-${currentTask.id}-${cardIndex}`)}</div>
+                </section>
+              ))}
+            </div>
+            {currentTask.presentation.outro ? (
+              <div className={styles.speakingPairOutro}>
+                {renderStructuredExamText(currentTask.presentation.outro, `speak-outro-${currentTask.id}`)}
+              </div>
+            ) : null}
+          </div>
+          ) : renderStructuredExamText(currentTask.prompt, `speak-prompt-${currentTask.id}`)}
+        </div>
+      </>
+    );
 
     if (module.id === "speak") {
       return (
@@ -4901,12 +5083,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             </div>
             <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
             {renderContentTitle(currentTask.title, `speak-title-${currentTask.id}`)}
-            <div className={`${styles.instructionText} ${styles.readableScrollArea}`} onWheel={handleReadableWheel}>
-              {renderStructuredExamText(currentTask.prompt, `speak-prompt-${currentTask.id}`)}
-            </div>
-            {currentTask.visual ? (
-              <img className={styles.speakingImage} src={speakingImage} alt="Aktive Personen in einer Alltagssituation" />
-            ) : null}
+            {renderSpeakingPrompt("Bildimpuls zur mündlichen Aufgabe")}
             <div className={styles.promptMeta}>
               <span><Clock3 size={16} /> Vorbereitung {currentTask.prepSeconds}s</span>
               <span><Mic size={16} /> Zielantwort {currentTask.responseSeconds}s</span>
@@ -4972,6 +5149,13 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             ) : (
               <p className={styles.mutedText}>Ihre Wiedergabe erscheint hier nach der Aufnahme.</p>
             )}
+            {answer.uploadStatus === "uploading" ? (
+              <p className={styles.mutedText}>Aufnahme wird fuer die spaetere KI-Korrektur gespeichert.</p>
+            ) : answer.uploadStatus === "failed" ? (
+              <p className={styles.warningText}><AlertCircle size={16} /> Aufnahme lokal gespeichert, Server-Upload fehlgeschlagen.</p>
+            ) : answer.recordingId ? (
+              <p className={styles.mutedText}>Aufnahme fuer die KI-Korrektur gespeichert.</p>
+            ) : null}
           </section>
 
           {!simulationMode ? (
@@ -5000,12 +5184,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           </div>
           <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
           {renderContentTitle(currentTask.title, `speak-title-${currentTask.id}`)}
-          <div className={`${styles.instructionText} ${styles.readableScrollArea}`} onWheel={handleReadableWheel}>
-            {renderStructuredExamText(currentTask.prompt, `speak-prompt-${currentTask.id}`)}
-          </div>
-          {currentTask.visual ? (
-            <img className={styles.speakingImage} src={speakingImage} alt="Personnes actives dans un contexte quotidien" />
-          ) : null}
+          {renderSpeakingPrompt("Support visuel pour la tâche orale")}
           <div className={styles.promptMeta}>
             <span><Clock3 size={16} /> Préparation {currentTask.prepSeconds}s</span>
             <span><Mic size={16} /> Réponse cible {currentTask.responseSeconds}s</span>
@@ -5071,6 +5250,13 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           ) : (
             <p className={styles.mutedText}>Votre lecture apparaîtra ici après l'enregistrement.</p>
           )}
+          {answer.uploadStatus === "uploading" ? (
+            <p className={styles.mutedText}>Enregistrement sauvegarde pour la future correction IA.</p>
+          ) : answer.uploadStatus === "failed" ? (
+            <p className={styles.warningText}><AlertCircle size={16} /> Enregistrement local conserve, mais l'envoi serveur a echoue.</p>
+          ) : answer.recordingId ? (
+            <p className={styles.mutedText}>Enregistrement pret pour la correction IA.</p>
+          ) : null}
         </section>
 
         {!simulationMode ? (
@@ -5335,6 +5521,191 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     );
   };
 
+  const retrySpeakingCorrection = async () => {
+    if (!savedSimulationId || speakingCorrectionLoading) return;
+    setSpeakingCorrectionError("");
+    setSpeakingCorrection(null);
+    setSpeakingCorrectionLoading(true);
+    try {
+      const correctionResponse = await API.post(`/api/simulations/${savedSimulationId}/speaking-correction`, { force: true });
+      const correction = correctionResponse.data?.correction ?? null;
+      setSpeakingCorrection(correction);
+      if (correction?.status === "completed") {
+        setResultStatus("Correction orale IA terminee. Score de pratique disponible.");
+      } else if (correction?.status === "unconfigured") {
+        setResultStatus("Correction orale IA en attente de credits/configuration OpenAI.");
+      } else if (correction?.status === "audio_required") {
+        setSpeakingCorrectionError(correction.errorMessage || "Aucun audio serveur n'est disponible pour cette tentative.");
+      } else if (correction?.status === "failed") {
+        setSpeakingCorrectionError(correction.errorMessage || "Correction orale IA indisponible pour le moment.");
+      }
+    } catch (err) {
+      setSpeakingCorrectionError(err?.response?.data?.error || "La correction orale IA n'a pas pu se terminer. Vous pouvez reessayer plus tard.");
+    } finally {
+      setSpeakingCorrectionLoading(false);
+    }
+  };
+
+  const renderSpeakingCorrectionPanel = () => {
+    if (module.id !== "speak") return null;
+
+    if (speakingCorrectionLoading) {
+      return (
+        <section className={styles.aiCorrectionPanel} data-status="processing">
+          <div className={styles.aiCorrectionHeader}>
+            <span><WandSparkles size={18} /> Correction IA Expression Orale</span>
+            <strong><ImportedLoadingDots label="Correction orale en cours" /></strong>
+          </div>
+          <p className={styles.aiCorrectionMessage}>
+            Analyse des enregistrements et des consignes. Le score affiche reste une estimation de pratique, pas une note officielle.
+          </p>
+          <div className={styles.aiProgressSteps} aria-hidden="true">
+            <span>Audio</span>
+            <span>Transcription cachee</span>
+            <span>Evaluation</span>
+          </div>
+        </section>
+      );
+    }
+
+    if (!speakingCorrection) {
+      return speakingCorrectionError ? (
+        <section className={styles.aiCorrectionPanel} data-status="failed">
+          <div className={styles.aiCorrectionHeader}>
+            <span><AlertCircle size={18} /> Correction IA Expression Orale</span>
+            <strong>Indisponible</strong>
+          </div>
+          <p className={styles.aiCorrectionMessage}>{speakingCorrectionError}</p>
+          {savedSimulationId ? (
+            <div className={styles.aiCorrectionActions}>
+              <button type="button" className={styles.secondaryButton} onClick={retrySpeakingCorrection}>
+                <RotateCcw size={16} />
+                Relancer la correction
+              </button>
+            </div>
+          ) : null}
+        </section>
+      ) : null;
+    }
+
+    const statusLabel =
+      speakingCorrection.status === "completed"
+        ? "Terminee"
+        : speakingCorrection.status === "unconfigured"
+          ? "En attente"
+          : speakingCorrection.status === "audio_required"
+            ? "Audio requis"
+            : speakingCorrection.status === "failed"
+              ? "Echec"
+              : "En cours";
+    const providerResult = speakingCorrection.providerResult ?? {};
+    const diagnostics = speakingCorrection.diagnostics ?? {};
+    const feedback = speakingCorrection.feedback ?? {};
+    const taskScores = Array.isArray(providerResult.task_scores) ? providerResult.task_scores : [];
+    const diagnosticLabels = {
+      taskCompletion: "Respect de la tache",
+      coherence: "Coherence",
+      grammar: "Grammaire",
+      vocabulary: "Vocabulaire",
+      fluency: "Fluidite",
+      pronunciationEstimate: "Prononciation",
+      interaction: "Interaction",
+    };
+    const diagnosticRows = Object.entries(diagnosticLabels)
+      .map(([key, label]) => [key, label, diagnostics[key]])
+      .filter(([, , value]) => value !== undefined && value !== null);
+    const hasScore = speakingCorrection.status === "completed" && Number.isFinite(Number(speakingCorrection.percentage));
+
+    return (
+      <section className={styles.aiCorrectionPanel} data-status={speakingCorrection.status}>
+        <div className={styles.aiCorrectionHeader}>
+          <span><WandSparkles size={18} /> Correction IA Expression Orale</span>
+          <strong>{statusLabel}</strong>
+        </div>
+
+        {hasScore ? (
+          <div className={styles.aiScoreGrid}>
+            <div>
+              <span>Score de pratique</span>
+              <strong>{formatCorrectionScore(providerResult.raw_score)} / {formatCorrectionScore(providerResult.raw_max)}</strong>
+            </div>
+            <div>
+              <span>Pourcentage</span>
+              <strong>{formatCorrectionScore(speakingCorrection.percentage)}%</strong>
+            </div>
+          </div>
+        ) : null}
+
+        <p className={styles.aiCorrectionMessage}>
+          {feedback.summary || speakingCorrection.errorMessage || "Correction orale sauvegardee. Elle sera terminee des que la configuration serveur le permet."}
+        </p>
+        <p className={styles.aiCorrectionMessage}>
+          Estimation de pratique uniquement. La prononciation est une estimation IA, pas une certification officielle.
+        </p>
+
+        {diagnosticRows.length ? (
+          <div className={styles.aiCriteriaGrid}>
+            {diagnosticRows.map(([key, label, value]) => (
+              <span key={key}>
+                <small>{label}</small>
+                <b>{formatCorrectionScore(value)}/10</b>
+              </span>
+            ))}
+          </div>
+        ) : null}
+
+        <div className={styles.aiSummaryGrid}>
+          <div>
+            <h3><CheckCircle2 size={17} /> Points forts</h3>
+            {feedback.strengths?.length ? (
+              <ul>{feedback.strengths.map((item) => <li key={item}>{item}</li>)}</ul>
+            ) : (
+              <p>Aucun point fort specifique n'a encore ete identifie.</p>
+            )}
+          </div>
+          <div>
+            <h3><AlertCircle size={17} /> A ameliorer</h3>
+            {feedback.weaknesses?.length ? (
+              <ul>{feedback.weaknesses.map((item) => <li key={item}>{item}</li>)}</ul>
+            ) : (
+              <p>Aucune faiblesse specifique n'a encore ete signalee.</p>
+            )}
+          </div>
+        </div>
+
+        {taskScores.length ? (
+          <div className={styles.aiTaskList}>
+            {taskScores.map((task, index) => (
+              <article key={`${task.taskId || index}`} className={styles.aiTaskCard}>
+                <div className={styles.aiTaskHeader}>
+                  <span><ClipboardCheck size={16} /> Partie {index + 1}</span>
+                  <strong>{formatCorrectionScore(task.score)} / {formatCorrectionScore(task.maxScore)}</strong>
+                </div>
+                {task.feedback ? <p className={styles.aiExaminerComment}>{task.feedback}</p> : null}
+              </article>
+            ))}
+          </div>
+        ) : null}
+
+        {feedback.nextSteps?.length ? (
+          <div className={styles.aiNextSteps}>
+            <h4><Flag size={15} /> Prochaines etapes</h4>
+            <ul>{feedback.nextSteps.map((item) => <li key={item}>{item}</li>)}</ul>
+          </div>
+        ) : null}
+
+        {speakingCorrection.status !== "completed" && savedSimulationId ? (
+          <div className={styles.aiCorrectionActions}>
+            <button type="button" className={styles.secondaryButton} onClick={retrySpeakingCorrection}>
+              <RotateCcw size={16} />
+              Relancer la correction
+            </button>
+          </div>
+        ) : null}
+      </section>
+    );
+  };
+
   const renderUnavailableSection = () => (
     <section className={styles.unavailablePanel} aria-labelledby="unavailable-section-title">
       <div className={styles.unavailableIcon}>
@@ -5362,21 +5733,38 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     if (completed) {
       const resultSummary = buildResultSummary(module, answers);
       const isWritingResult = module.id === "write";
+      const isSpeakingResult = module.id === "speak";
       const correctionScoreReady =
         isWritingResult &&
         !writingCorrectionLoading &&
         ["completed", "partial"].includes(writingCorrection?.status) &&
         Number.isFinite(Number(writingCorrection?.percentage));
+      const speakingScoreReady =
+        isSpeakingResult &&
+        !speakingCorrectionLoading &&
+        speakingCorrection?.status === "completed" &&
+        Number.isFinite(Number(speakingCorrection?.percentage));
       const correctionFailed =
         isWritingResult &&
         !writingCorrectionLoading &&
         !correctionScoreReady &&
         (writingCorrection?.status === "failed" || Boolean(writingCorrectionError));
-      const displayedScore = correctionScoreReady ? Number(writingCorrection.percentage) : isWritingResult ? null : score;
+      const speakingCorrectionBlocked =
+        isSpeakingResult &&
+        !speakingCorrectionLoading &&
+        !speakingScoreReady &&
+        (["failed", "unconfigured", "audio_required"].includes(speakingCorrection?.status) || Boolean(speakingCorrectionError));
+      const displayedScore = correctionScoreReady
+        ? Number(writingCorrection.percentage)
+        : speakingScoreReady
+          ? Number(speakingCorrection.percentage)
+          : isWritingResult || isSpeakingResult
+            ? null
+            : score;
       const unlocked = displayedScore !== null && displayedScore >= PASS_SCORE;
       const scoreHeading = displayedScore === null
-        ? correctionFailed
-          ? "Correction IA"
+        ? correctionFailed || speakingCorrectionBlocked
+          ? isSpeakingResult ? "Correction orale IA" : "Correction IA"
           : <ImportedLoadingDots label="Correction IA en cours" />
         : `${displayedScore}%`;
       const germanResultMessage = isWritingResult
@@ -5385,6 +5773,12 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           : correctionFailed
             ? "Die KI-Korrektur konnte nicht abgeschlossen werden. Ihre Antworten sind gespeichert; starten Sie die Korrektur erneut."
             : "Ihre Antworten sind gespeichert. Der finale Score erscheint, sobald die KI-Korrektur abgeschlossen ist."
+        : isSpeakingResult
+          ? speakingScoreReady
+            ? `KI-Sprechkorrektur abgeschlossen. Das ist eine Praxis-Einschaetzung: ${displayedScore}%.`
+            : speakingCorrectionBlocked
+              ? "Ihre Aufnahmen sind gespeichert. Die KI-Sprechkorrektur wartet auf Audio, Credits oder Serverkonfiguration."
+              : "Ihre Aufnahmen sind gespeichert. Der Praxis-Score erscheint, sobald die KI-Sprechkorrektur abgeschlossen ist."
         : unlocked
           ? `Gut gemacht. Das naechste empfohlene Niveau ist ${getNextLevel(level)}.`
           : `Arbeiten Sie weiter auf ${level}, bevor Sie die Schwierigkeit erhoehen.`;
@@ -5404,6 +5798,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               <span><CheckCircle2 size={16} /> {answeredCount}/{totalTasks} Aufgaben bearbeitet</span>
               {isWritingResult ? (
                 <span><WandSparkles size={16} /> {germanCorrectionState}</span>
+              ) : isSpeakingResult ? (
+                <span><WandSparkles size={16} /> {speakingScoreReady ? "KI-Sprechkorrektur abgeschlossen" : speakingCorrectionBlocked ? "KI-Sprechkorrektur ausstehend" : "KI-Sprechkorrektur laeuft"}</span>
               ) : (
                 <>
                   <span><CheckCircle2 size={16} /> {resultSummary.correctCount} richtig</span>
@@ -5414,10 +5810,11 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               <span><Clock3 size={16} /> {formatTime(elapsedSeconds)} Arbeitszeit</span>
             </div>
             {renderWritingCorrectionPanel()}
+            {renderSpeakingCorrectionPanel()}
             <div className={styles.finalReviewList}>
               {resultSummary.rows.map((row) => {
-                const reviewState = isWritingResult ? "neutral" : row.isCorrect ? "true" : "false";
-                const reviewLabel = isWritingResult ? "Antwort gespeichert" : row.isCorrect ? "Richtig" : "Noch einmal pruefen";
+                const reviewState = isWritingResult || isSpeakingResult ? "neutral" : row.isCorrect ? "true" : "false";
+                const reviewLabel = isWritingResult || isSpeakingResult ? "Antwort gespeichert" : row.isCorrect ? "Richtig" : "Noch einmal pruefen";
                 return (
                   <article key={row.id} className={styles.finalReviewItem} data-correct={reviewState}>
                     <div className={styles.finalReviewHeader}>

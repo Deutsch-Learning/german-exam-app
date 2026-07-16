@@ -34,6 +34,13 @@ const {
   isWritingSimulation,
 } = require("./services/writingCorrection");
 const {
+  correctSpeakingSimulation,
+  ensureSpeakingCorrectionSchema,
+  getSpeakingCorrectionForSimulation,
+  isSpeakingSimulation,
+  saveSpeakingRecording,
+} = require("./services/speakingCorrection");
+const {
   ensureContentStyleSchema,
   registerContentStyleRoutes,
 } = require("./services/contentStyleTemplates");
@@ -202,6 +209,14 @@ const documentUpload = multer({
   storage: multer.memoryStorage(),
   limits: {
     fileSize: 30 * 1024 * 1024,
+    files: 1,
+  },
+});
+
+const speakingAudioUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: Number(process.env.SPEAKING_RECORDING_MAX_BYTES || 8 * 1024 * 1024),
     files: 1,
   },
 });
@@ -2132,6 +2147,7 @@ async function ensureSchema() {
       ON exam_questions (exam_id, section_id, position, id);
   `);
   await ensureWritingCorrectionSchema(pool);
+  await ensureSpeakingCorrectionSchema(pool);
   await ensureContentStyleSchema(pool);
   await ensureAudioAssetSchema(pool);
 }
@@ -2714,6 +2730,36 @@ const queryImportedExamRows = async (provider, seriesNumber = null, level = null
   );
 };
 
+const stripStudentHiddenMetadata = (value) => {
+  if (Array.isArray(value)) {
+    return value.map(stripStudentHiddenMetadata);
+  }
+  if (!value || typeof value !== "object") return value;
+
+  const hiddenKeys = new Set([
+    "generation_prompt",
+    "prompt_path",
+    "path",
+    "privateCorrectionAvailable",
+    "fullSourceTextVerbatim",
+    "sourceTextVerbatim",
+    "correctionTextVerbatim",
+    "privateCorrectionText",
+    "adminNotes",
+    "moderatorNotes",
+    "answerKey",
+    "solution",
+    "solutions",
+  ]);
+
+  const next = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (hiddenKeys.has(key)) continue;
+    next[key] = stripStudentHiddenMetadata(child);
+  }
+  return next;
+};
+
 const buildTaskPartMeta = (question, index = 0) => {
   const metadata = asJsonObject(question.source_metadata);
   const sectionMetadata = asJsonObject(question.section_metadata);
@@ -2727,8 +2773,8 @@ const buildTaskPartMeta = (question, index = 0) => {
     partDurationMinutes: Number(question.section_duration_minutes) || null,
     partPoints: Number(question.section_points) || null,
     sourceQuestionNumber: metadata.sourceQuestionNumber ?? question.position ?? index + 1,
-    sourceMetadata: metadata,
-    partSourceMetadata: sectionMetadata,
+    sourceMetadata: stripStudentHiddenMetadata(metadata),
+    partSourceMetadata: stripStudentHiddenMetadata(sectionMetadata),
   };
 };
 
@@ -2961,15 +3007,21 @@ const buildSpeakingTask = (question, index) => {
   const scoring = asJsonObject(question.scoring);
   const durationMinutes = Number(scoring.durationMinutes) || Number(question.section_duration_minutes) || 2;
   const points = Number(scoring.points) || Number(question.section_points) || 0;
+  const visualAssets = Array.isArray(metadata.visualAssets)
+    ? stripStudentHiddenMetadata(metadata.visualAssets)
+    : [];
+  const primaryVisual = visualAssets.find((asset) => asset?.publicUrl) || null;
+  const prepSeconds = Number(scoring.prepSeconds ?? metadata.prepSeconds);
+  const responseSeconds = Number(scoring.responseSeconds ?? metadata.responseSeconds);
 
   return {
     id: `db-question-${question.id}`,
     level: question.level || "B1",
     typeLabel: question.section_title || `Sprechen Teil ${question.part_number || index + 1}`,
     title: question.section_title || `Aufgabe ${index + 1}`,
-    prepSeconds: question.part_number === 1 ? 60 : 45,
-    responseSeconds: Math.max(60, Math.round(durationMinutes * 60)),
-    prompt: clipText(question.prompt || question.section_instructions, 2200),
+    prepSeconds: Number.isFinite(prepSeconds) ? Math.max(0, Math.round(prepSeconds)) : question.part_number === 1 ? 60 : 45,
+    responseSeconds: Number.isFinite(responseSeconds) ? Math.max(30, Math.round(responseSeconds)) : Math.max(60, Math.round(durationMinutes * 60)),
+    prompt: clipText(question.prompt || question.section_instructions, 12000),
     checklist: [
       "Aufgabe vollständig bearbeiten",
       "Natürlich reagieren",
@@ -2977,7 +3029,16 @@ const buildSpeakingTask = (question, index) => {
       points ? `${points} Punkte` : null,
     ].filter(Boolean),
     sourceQuestionId: question.id,
+    sourceExamId: question.exam_id,
+    points: points || null,
+    visual: Boolean(primaryVisual),
+    visualUrl: primaryVisual?.publicUrl || "",
+    visualAlt: primaryVisual ? "Bildimpuls fuer die muendliche Aufgabe" : "",
+    visualAssets,
+    presentation: asJsonObject(metadata.presentation),
+    variant: metadata.variant || "",
     contentStyle: asJsonObject(metadata.contentStyle),
+    sourceMetadata: stripStudentHiddenMetadata(metadata),
     ...buildTaskPartMeta(question, index),
   };
 };
@@ -3161,13 +3222,13 @@ const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {},
     heading: applyExamAlias(section.title, routeMeta),
     text: moduleId === "listen"
       ? LISTENING_STUDENT_INSTRUCTION
-      : clipText(applyExamAlias(section.instructions || section.title, routeMeta), 2600),
+      : clipText(applyExamAlias(section.instructions || section.title, routeMeta), moduleId === "speak" ? 12000 : 2600),
     instructions: moduleId === "listen"
       ? LISTENING_STUDENT_INSTRUCTION
-      : clipText(applyExamAlias(section.instructions || section.title, routeMeta), 5200),
+      : clipText(applyExamAlias(section.instructions || section.title, routeMeta), moduleId === "speak" ? 12000 : 5200),
     durationMinutes: Number(section.duration_minutes) || null,
     points: Number(section.points) || null,
-    sourceMetadata: asJsonObject(section.metadata),
+    sourceMetadata: stripStudentHiddenMetadata(asJsonObject(section.metadata)),
   }));
 
   let tasks;
@@ -4398,6 +4459,61 @@ app.post("/api/simulations/:simulationId/writing-correction", requireAuth, async
   } catch (err) {
     console.error("Writing correction request failed", err);
     return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.post("/api/speaking/recordings", requireAuth, speakingAudioUpload.single("audio"), async (req, res) => {
+  try {
+    const recording = await saveSpeakingRecording(pool, {
+      userId: req.user.id,
+      file: req.file,
+      body: req.body,
+    });
+    return res.status(201).json({
+      ok: true,
+      recording: {
+        id: recording.id,
+        taskId: recording.task_id,
+        mimeType: recording.mime_type,
+        byteSize: recording.byte_size,
+        durationSeconds: recording.duration_seconds,
+        status: recording.status,
+        createdAt: recording.created_at,
+      },
+    });
+  } catch (err) {
+    const status = err.status || 500;
+    if (status >= 500) console.error("Speaking recording upload failed", err);
+    return res.status(status).json({ ok: false, error: status >= 500 ? "Server error" : err.message });
+  }
+});
+
+app.get("/api/simulations/:simulationId/speaking-correction", requireAuth, async (req, res) => {
+  try {
+    const simulation = await getOwnedSimulation(req, res);
+    if (!simulation) return;
+    const correction = await getSpeakingCorrectionForSimulation(pool, simulation.id);
+    return res.json({ ok: true, correction });
+  } catch (err) {
+    console.error("Speaking correction lookup failed", err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.post("/api/simulations/:simulationId/speaking-correction", requireAuth, async (req, res) => {
+  try {
+    const simulation = await getOwnedSimulation(req, res);
+    if (!simulation) return;
+    if (!isSpeakingSimulation(simulation)) {
+      return res.status(400).json({ ok: false, error: "Simulation is not a speaking module" });
+    }
+    const correction = await correctSpeakingSimulation(pool, simulation, {
+      force: req.query.force === "true" || req.body?.force === true,
+    });
+    return res.json({ ok: true, correction });
+  } catch (err) {
+    console.error("Speaking correction request failed", err);
+    return res.status(err.status || 500).json({ ok: false, error: err.status ? err.message : "Server error" });
   }
 });
 
