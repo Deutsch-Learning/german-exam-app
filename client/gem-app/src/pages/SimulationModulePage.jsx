@@ -5015,6 +5015,63 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const renderSpeaking = () => {
     const answer = currentAnswer ?? {};
     const playbackSrc = answer.audioDataUrl || answer.audioUrl;
+    const speakingVisual = currentTask.visualUrl || (currentTask.visual ? speakingImage : "");
+    const renderSpeakingVisual = (fallbackAlt) => speakingVisual ? (
+      <figure className={styles.speakingVisualFrame}>
+        <img
+          className={styles.speakingImage}
+          src={speakingVisual}
+          alt={currentTask.visualAlt || fallbackAlt}
+          loading="eager"
+          decoding="async"
+        />
+      </figure>
+    ) : null;
+    const pairedCards = Array.isArray(currentTask.presentation?.cards) ? currentTask.presentation.cards : [];
+    const hasVisualPresentation = currentTask.presentation?.kind === "visual_stimulus" && speakingVisual;
+    const renderSpeakingPrompt = (visualAlt) => hasVisualPresentation ? (
+      <div className={styles.speakingVisualPresentation}>
+        {currentTask.presentation.intro ? (
+          <div className={`${styles.instructionText} ${styles.speakingVisualIntro}`}>
+            {renderStructuredExamText(currentTask.presentation.intro, `speak-visual-intro-${currentTask.id}`)}
+          </div>
+        ) : null}
+        {renderSpeakingVisual(visualAlt)}
+        {currentTask.presentation.outro ? (
+          <div className={`${styles.instructionText} ${styles.readableScrollArea}`} onWheel={handleReadableWheel}>
+            {renderStructuredExamText(currentTask.presentation.outro, `speak-visual-outro-${currentTask.id}`)}
+          </div>
+        ) : null}
+      </div>
+    ) : (
+      <>
+        {speakingVisual ? renderSpeakingVisual(visualAlt) : null}
+        <div className={`${styles.instructionText} ${styles.readableScrollArea}`} onWheel={handleReadableWheel}>
+          {currentTask.presentation?.kind === "paired_roles" && pairedCards.length === 2 ? (
+          <div className={styles.speakingPairedPresentation}>
+            {currentTask.presentation.intro ? (
+              <div className={styles.speakingPairIntro}>
+                {renderStructuredExamText(currentTask.presentation.intro, `speak-intro-${currentTask.id}`)}
+              </div>
+            ) : null}
+            <div className={styles.speakingPairGrid}>
+              {pairedCards.map((card, cardIndex) => (
+                <section className={styles.speakingRolePanel} key={`${currentTask.id}-role-${cardIndex}`}>
+                  <h3>{card.label}</h3>
+                  <div>{renderStructuredExamText(card.text, `speak-role-${currentTask.id}-${cardIndex}`)}</div>
+                </section>
+              ))}
+            </div>
+            {currentTask.presentation.outro ? (
+              <div className={styles.speakingPairOutro}>
+                {renderStructuredExamText(currentTask.presentation.outro, `speak-outro-${currentTask.id}`)}
+              </div>
+            ) : null}
+          </div>
+          ) : renderStructuredExamText(currentTask.prompt, `speak-prompt-${currentTask.id}`)}
+        </div>
+      </>
+    );
 
     if (module.id === "speak") {
       return (
@@ -5026,16 +5083,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             </div>
             <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
             {renderContentTitle(currentTask.title, `speak-title-${currentTask.id}`)}
-            <div className={`${styles.instructionText} ${styles.readableScrollArea}`} onWheel={handleReadableWheel}>
-              {renderStructuredExamText(currentTask.prompt, `speak-prompt-${currentTask.id}`)}
-            </div>
-            {currentTask.visualUrl || currentTask.visual ? (
-              <img
-                className={styles.speakingImage}
-                src={currentTask.visualUrl || speakingImage}
-                alt={currentTask.visualAlt || "Bildimpuls zur muendlichen Aufgabe"}
-              />
-            ) : null}
+            {renderSpeakingPrompt("Bildimpuls zur mündlichen Aufgabe")}
             <div className={styles.promptMeta}>
               <span><Clock3 size={16} /> Vorbereitung {currentTask.prepSeconds}s</span>
               <span><Mic size={16} /> Zielantwort {currentTask.responseSeconds}s</span>
@@ -5136,16 +5184,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           </div>
           <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
           {renderContentTitle(currentTask.title, `speak-title-${currentTask.id}`)}
-          <div className={`${styles.instructionText} ${styles.readableScrollArea}`} onWheel={handleReadableWheel}>
-            {renderStructuredExamText(currentTask.prompt, `speak-prompt-${currentTask.id}`)}
-          </div>
-          {currentTask.visualUrl || currentTask.visual ? (
-            <img
-              className={styles.speakingImage}
-              src={currentTask.visualUrl || speakingImage}
-              alt={currentTask.visualAlt || "Support visuel pour la tache orale"}
-            />
-          ) : null}
+          {renderSpeakingPrompt("Support visuel pour la tâche orale")}
           <div className={styles.promptMeta}>
             <span><Clock3 size={16} /> Préparation {currentTask.prepSeconds}s</span>
             <span><Mic size={16} /> Réponse cible {currentTask.responseSeconds}s</span>

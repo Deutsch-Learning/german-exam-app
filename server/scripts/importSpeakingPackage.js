@@ -8,7 +8,7 @@ const { ensureSpeakingCorrectionSchema } = require("../services/speakingCorrecti
 const PACKAGE_DIR = path.resolve(__dirname, "..", "..", "Sprechen_B1_B2_Project_Package");
 const PUBLIC_ASSET_PREFIX = "/speaking-assets";
 const PACKAGE_VERSION = "2.0.0";
-const PROFILE_VERSION = "2026-07-source-faithful-v1";
+const PROFILE_VERSION = "2026-07-source-faithful-v2";
 
 const CONTENT_FILES = [
   "goethe_b1.json",
@@ -135,6 +135,143 @@ const cleanDbText = (value) =>
     .replace(/\r\n/g, "\n")
     .trim();
 
+const PAGE_FURNITURE_PATTERNS = [
+  /^\s*(?:Seite|Page)\s+\d+(?:\s*\/\s*\d+)?(?:\s*\|.*)?\s*$/i,
+  /^\s*.*(?:Seite|Page)\s+\d+(?:\s*\/\s*\d+)?\s*$/i,
+  /^\s*©\s*Matériau\b.*$/i,
+  /^\s*(?:ECL|telc|ÖSD|OSD)\b.*(?:Original|Simulationsaufgaben|Sprechen|Mündliche Kommunikation).*$/i,
+  /^\s*Inoffizielle\s+Modellprüfung\b.*$/i,
+];
+
+const isPageFurniture = (line) => {
+  const trimmed = String(line || "").trim();
+  if (!trimmed) return false;
+  return PAGE_FURNITURE_PATTERNS.some((pattern) => pattern.test(trimmed));
+};
+
+const isRuleLine = (line) => {
+  const trimmed = String(line || "").trim();
+  return /^(?:\+[-+]{5,}\+?|[-_─—]{8,})$/.test(trimmed);
+};
+
+const normalizeBullet = (line) => String(line || "")
+  .replace(/^\s*(?:■+|◆+|→|✓|✅)\s*/, "• ")
+  .replace(/[ \t]{2,}/g, " ")
+  .trim();
+
+const isStructuralLine = (line) => {
+  const text = String(line || "").trim();
+  return /^(?:TEIL|Teil|Aufgabe)\s+\d+\b/.test(text) ||
+    /^(?:Kandidat(?:in)?\s+[AB]|Position\s+[AB]|Situation|Thema|Kontext|Aufgabe|Optionen|Hilfen|Hilfestellungen|Leitfragen|Redemittel|Diskussionsfrage|Fragen|Questions|Anschlussfragen|Bildmontage-Thema|Dauer|Ziel|Punkte)\b\s*:?/i.test(text) ||
+    /^(?:•|\d+[.)])\s+/.test(text);
+};
+
+const reflowLines = (lines) => {
+  const paragraphs = [];
+  for (const originalLine of lines) {
+    const line = normalizeBullet(originalLine);
+    if (!line) continue;
+    const previous = paragraphs.at(-1);
+    const previousIsListItem = /^(?:•|\d+[.)])\s+/.test(previous || "");
+    const previousHasInlineLabel = /^[^:]{1,60}:\s+\S/.test(previous || "");
+    const shouldAppend = previous &&
+      !isStructuralLine(line) &&
+      (previousIsListItem || previousHasInlineLabel || (
+        !isStructuralLine(previous) &&
+        !/:$/.test(previous) &&
+        !/[.!?…]$/.test(previous)
+      ));
+    if (shouldAppend) paragraphs[paragraphs.length - 1] = `${previous} ${line}`;
+    else paragraphs.push(line);
+  }
+  return paragraphs.join("\n");
+};
+
+const convertAsciiTables = (text) => {
+  const lines = String(text || "").split("\n");
+  const output = [];
+  for (let index = 0; index < lines.length;) {
+    if (!/^\s*[+|]/.test(lines[index])) {
+      output.push(lines[index]);
+      index += 1;
+      continue;
+    }
+
+    const block = [];
+    while (index < lines.length && /^\s*[+|]/.test(lines[index])) {
+      if (/^\s*\|/.test(lines[index])) block.push(lines[index]);
+      index += 1;
+    }
+    if (!block.length) continue;
+
+    const rows = block.map((line) => line.trim().replace(/^\||\|$/g, "").split("|").map((cell) => cell.trim()));
+    const columnCount = Math.max(...rows.map((row) => row.length));
+    const columns = Array.from({ length: columnCount }, () => []);
+    for (const row of rows) {
+      row.forEach((cell, columnIndex) => {
+        if (cell) columns[columnIndex].push(cell);
+      });
+    }
+    output.push(columns.map((column) => reflowLines(column)).filter(Boolean).join("\n\n"));
+  }
+  return output.join("\n");
+};
+
+const sequentializeGoetheB2Columns = (text) => {
+  const lines = String(text || "").split("\n");
+  const headingIndex = lines.findIndex((line) => /TEIL\s*1\b/i.test(line) && /TEIL\s*2\b/i.test(line));
+  if (headingIndex < 0) return text;
+  const boundaryCounts = new Map();
+  for (const line of lines.slice(headingIndex)) {
+    for (const match of line.matchAll(/ {5,}/g)) {
+      const boundary = match.index + match[0].length;
+      if (boundary >= 45 && boundary <= 65) boundaryCounts.set(boundary, (boundaryCounts.get(boundary) || 0) + 1);
+    }
+  }
+  const inferredBoundary = [...boundaryCounts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0] - right[0])[0]?.[0];
+  const splitAt = inferredBoundary || lines[headingIndex].search(/TEIL\s*2\b/i);
+  if (splitAt < 1) return text;
+
+  const prefix = lines.slice(0, headingIndex).filter((line) => !/\bPunkte\s*$/i.test(line));
+  const body = lines.slice(headingIndex).filter((line) => !/^\s*\d+\s*Min\.\s*[·|]\s*\d+\s*$/i.test(line.trim()));
+  const left = body.map((line) => line.slice(0, splitAt).trimEnd());
+  const right = body.map((line) => line.slice(splitAt).trim());
+  return [...prefix, reflowLines(left), "", reflowLines(right)].filter((line, index, values) => line || values[index - 1]).join("\n");
+};
+
+const sequentializeOsdPositions = (text) => {
+  const lines = String(text || "").split("\n");
+  const headingIndex = lines.findIndex((line) => /Position\s+A\s*:/i.test(line) && /Position\s+B\s*:/i.test(line));
+  if (headingIndex < 0) return text;
+  const headerSplit = lines[headingIndex].search(/Position\s+B\s*:/i);
+  const bulletSplits = lines.slice(headingIndex + 1)
+    .map((line) => [...line.matchAll(/•/g)].map((match) => match.index).filter((index) => index > 20)[0])
+    .filter(Number.isFinite);
+  const splitAt = Math.min(headerSplit, ...bulletSplits);
+  if (splitAt < 1) return text;
+  let endIndex = headingIndex + 1;
+  while (endIndex < lines.length && !/^\s*Redemittel\b/i.test(lines[endIndex])) endIndex += 1;
+  const columnRows = lines.slice(headingIndex, endIndex);
+  const left = columnRows.map((line) => line.slice(0, splitAt).trimEnd());
+  const right = columnRows.map((line) => line.slice(splitAt).trim());
+  return [
+    ...lines.slice(0, headingIndex),
+    reflowLines(left),
+    "",
+    reflowLines(right),
+    ...lines.slice(endIndex),
+  ].join("\n");
+};
+
+const stripPageFurniture = (text) => String(text || "")
+  .replace(/\f/g, "\n")
+  .split("\n")
+  .filter((line) => !isPageFurniture(line) && !isRuleLine(line))
+  .join("\n")
+  .replace(/\n{3,}/g, "\n\n")
+  .trim();
+
 const splitAtFirstMarker = (text, markers) => {
   const indexes = markers
     .map((marker) => {
@@ -249,6 +386,102 @@ const splitParts = (candidateText, profile) => {
   }).filter((part) => part.text);
 };
 
+const removeDelimitedBlock = (text, startPattern, endPattern) => {
+  const source = String(text || "");
+  const start = source.match(startPattern);
+  if (!start) return source;
+  const tailStart = start.index + start[0].length;
+  const end = source.slice(tailStart).match(endPattern);
+  if (!end) return source;
+  const endIndex = tailStart + end.index;
+  return `${source.slice(0, start.index).trimEnd()}\n\n${source.slice(endIndex).trimStart()}`.trim();
+};
+
+const getRequiredVisualPart = (provider, level) => {
+  if (provider === "ecl") return 3;
+  if (provider === "osd" && level === "B2") return 2;
+  return null;
+};
+
+const removeVisualDescription = (text, provider, level, partNumber, hasVisual) => {
+  if (!hasVisual || partNumber !== getRequiredVisualPart(provider, level)) return text;
+  if (provider === "ecl" && level === "B1") {
+    return removeDelimitedBlock(text, /(?:^|\n)\s*Bildmontage\s*\([^)]*\)\s*:\s*/i, /(?:^|\n)\s*Aufgabe\s*:/i);
+  }
+  if (provider === "ecl" && level === "B2") {
+    return removeDelimitedBlock(text, /(?:^|\n)\s*Bildmaterial\s*\([^)]*\)\s*:\s*/i, /(?:^|\n)\s*Zusatzfrage\b/i);
+  }
+  if (provider === "osd" && level === "B2") {
+    return removeDelimitedBlock(text, /(?:^|\n)\s*Bildbeschreibung\s*\([^)]*\)\s*:\s*/i, /(?:^|\n)\s*Redemittel\s*:/i);
+  }
+  return text;
+};
+
+const formatCandidateText = (text) => stripPageFurniture(convertAsciiTables(text))
+  .split(/\n{2,}/)
+  .map((block) => reflowLines(block.split("\n")))
+  .filter(Boolean)
+  .join("\n\n")
+  .replace(/\n{3,}/g, "\n\n")
+  .trim();
+
+const prepareCandidateText = (candidateText, provider, level) => {
+  let prepared = String(candidateText || "");
+  if (provider === "goethe" && level === "B2") prepared = sequentializeGoetheB2Columns(prepared);
+  if (provider === "osd" && level === "B2") prepared = sequentializeOsdPositions(prepared);
+  return stripPageFurniture(convertAsciiTables(prepared));
+};
+
+const preparePartPresentation = ({ text, provider, level, partNumber, hasVisual }) => {
+  const withoutDescription = removeVisualDescription(text, provider, level, partNumber, hasVisual);
+  return formatCandidateText(withoutDescription);
+};
+
+const separatePartHeading = (text, fallbackTitle) => {
+  const lines = String(text || "").split("\n");
+  const firstLine = lines[0]?.trim() || "";
+  if (!/^(?:TEIL|Teil|Aufgabe)\s+\d+\b/.test(firstLine)) {
+    return { title: fallbackTitle, text: String(text || "").trim() };
+  }
+  return { title: firstLine, text: lines.slice(1).join("\n").trim() };
+};
+
+const buildVisualPresentation = (text) => {
+  const lines = String(text || "").trim().split("\n");
+  const taskIndex = lines.findIndex((line) => /^(?:Aufgabe|Zusatzfrage|Redemittel)\b\s*:?/i.test(line.trim()));
+  const splitAt = taskIndex >= 0 ? taskIndex : lines.length;
+  return {
+    kind: "visual_stimulus",
+    intro: lines.slice(0, splitAt).join("\n").trim(),
+    outro: lines.slice(splitAt).join("\n").trim(),
+  };
+};
+
+const buildPairedPresentation = (text) => {
+  const source = String(text || "").trim();
+  const lines = source.split("\n");
+  const roleIndexes = lines
+    .map((line, index) => (/^(?:Kandidat(?:in)?\s+[AB]|Position\s+[AB])\s*:/i.test(line.trim()) ? index : -1))
+    .filter((index) => index >= 0);
+  if (roleIndexes.length !== 2) return null;
+
+  const firstIndex = roleIndexes[0];
+  const secondIndex = roleIndexes[1];
+  let outroIndex = lines.findIndex((line, index) => index > secondIndex && /^Redemittel\s+für\s+die\s+Diskussion\s*:/i.test(line.trim()));
+  if (outroIndex < 0) outroIndex = lines.length;
+  const splitCard = (from, to) => {
+    const label = lines[from].trim().replace(/\s*:\s*$/, "");
+    return { label, text: lines.slice(from + 1, to).join("\n").trim() };
+  };
+
+  return {
+    kind: "paired_roles",
+    intro: lines.slice(0, firstIndex).join("\n").trim(),
+    cards: [splitCard(firstIndex, secondIndex), splitCard(secondIndex, outroIndex)],
+    outro: lines.slice(outroIndex).join("\n").trim(),
+  };
+};
+
 const assetLookup = () => {
   const manifest = readJson("assets/assets_manifest.json");
   const map = new Map();
@@ -261,11 +494,8 @@ const assetLookup = () => {
   return { manifest, map };
 };
 
-const shouldAttachAssetToPart = (partText, partNumber, visualAssets) => {
-  if (!visualAssets.length) return false;
-  if (/bild|photo|foto|montage|bildimpuls|bildmaterial/i.test(partText)) return true;
-  return partNumber === 2 || partNumber === 3;
-};
+const shouldAttachAssetToPart = (provider, level, partNumber, visualAssets) =>
+  visualAssets.length > 0 && partNumber === getRequiredVisualPart(provider, level);
 
 async function upsertProfile(client, profile) {
   const profileKey = `${profile.provider}_${profile.level}`.toLowerCase();
@@ -333,8 +563,37 @@ async function importPack(client, relativeFile, assets) {
   const prepared = [];
   for (const series of pack.series || []) {
     const text = splitCandidateAndPrivateText(pack, series);
-    const visualAssets = (series.visual_asset_ids || []).map((id) => assets.map.get(id)).filter(Boolean);
-    const parts = splitParts(text.candidateText, profile);
+    const requestedVisualIds = series.visual_asset_ids || [];
+    const visualAssets = requestedVisualIds.map((id) => assets.map.get(id)).filter(Boolean);
+    if (visualAssets.length !== requestedVisualIds.length) {
+      const foundIds = new Set(visualAssets.map((asset) => asset.id));
+      const missingIds = requestedVisualIds.filter((id) => !foundIds.has(id));
+      throw new Error(`${series.id}: missing required visual assets: ${missingIds.join(", ")}`);
+    }
+    for (const asset of visualAssets) {
+      const assetPath = path.join(PACKAGE_DIR, asset.path);
+      if (!fs.existsSync(assetPath)) throw new Error(`${series.id}: required visual file is missing: ${asset.path}`);
+    }
+    const candidateText = prepareCandidateText(text.candidateText, pack.provider, pack.level);
+    const parts = splitParts(candidateText, profile).map((part) => {
+      const sourceTextVerbatim = part.text;
+      const formattedText = preparePartPresentation({
+        text: part.text,
+        provider: pack.provider,
+        level: pack.level,
+        partNumber: part.partNumber,
+        hasVisual: visualAssets.length > 0,
+      });
+      const separated = separatePartHeading(formattedText, part.title);
+      const hasPartVisual = shouldAttachAssetToPart(pack.provider, pack.level, part.partNumber, visualAssets);
+      return {
+        ...part,
+        title: separated.title,
+        sourceTextVerbatim,
+        text: separated.text,
+        presentation: hasPartVisual ? buildVisualPresentation(separated.text) : buildPairedPresentation(separated.text),
+      };
+    });
     prepared.push({ series, text, visualAssets, parts });
   }
 
@@ -410,7 +669,7 @@ async function importPack(client, relativeFile, assets) {
     await client.query(`DELETE FROM exam_sections WHERE exam_id = $1`, [examId]);
 
     for (const [index, part] of parts.entries()) {
-      const attachedAssets = shouldAttachAssetToPart(part.text, part.partNumber, visualAssets) ? visualAssets : [];
+      const attachedAssets = shouldAttachAssetToPart(pack.provider, pack.level, part.partNumber, visualAssets) ? visualAssets : [];
       const sectionMetadata = {
         package: "Sprechen_B1_B2_Project_Package",
         sourceLocked: true,
@@ -420,6 +679,8 @@ async function importPack(client, relativeFile, assets) {
         prepSeconds: part.prepSeconds,
         responseSeconds: part.responseSeconds,
         visualAssets: attachedAssets,
+        presentation: part.presentation,
+        presentationVersion: PROFILE_VERSION,
         privateCorrectionAvailable: Boolean(text.privateText),
       };
       const section = await client.query(
@@ -454,6 +715,7 @@ async function importPack(client, relativeFile, assets) {
           JSON.stringify({
             privateCorrectionText: text.privateText,
             fullSourceTextVerbatim: text.sourceText,
+            partSourceTextVerbatim: part.sourceTextVerbatim,
             visibility: "after_final_submission_only",
           }),
           index + 1,
@@ -472,6 +734,8 @@ async function importPack(client, relativeFile, assets) {
             sourceQuestionNumber: part.partNumber,
             visualAssets: attachedAssets,
             visualAssetIds: attachedAssets.map((asset) => asset.id),
+            presentation: part.presentation,
+            presentationVersion: PROFILE_VERSION,
             prepSeconds: part.prepSeconds,
             responseSeconds: part.responseSeconds,
             variant: profile.variant,
@@ -531,9 +795,27 @@ async function main() {
   console.log(JSON.stringify({ ok: true, packageVersion: PACKAGE_VERSION, reports }, null, 2));
 }
 
-main()
-  .catch((err) => {
-    console.error(err);
-    process.exitCode = 1;
-  })
-  .finally(() => pool.end());
+if (require.main === module) {
+  main()
+    .catch((err) => {
+      console.error(err);
+      process.exitCode = 1;
+    })
+    .finally(() => pool.end());
+}
+
+module.exports = {
+  CONTENT_FILES,
+  PROFILE_DEFINITIONS,
+  assetLookup,
+  buildPairedPresentation,
+  buildVisualPresentation,
+  formatCandidateText,
+  getRequiredVisualPart,
+  prepareCandidateText,
+  preparePartPresentation,
+  separatePartHeading,
+  shouldAttachAssetToPart,
+  splitCandidateAndPrivateText,
+  splitParts,
+};

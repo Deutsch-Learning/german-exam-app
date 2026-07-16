@@ -424,9 +424,6 @@
 }
 
 .actionPanel {
-  position: sticky;
-  bottom: 18px;
-  z-index: 20;
   margin-top: 22px;
   border: 1px solid #e5e7eb;
   border-radius: 10px;
@@ -612,6 +609,10 @@
 .promptPanel .readableScrollArea,
 .questionPane .readableScrollArea {
   max-height: min(42vh, 440px);
+}
+
+.speakingLayout .readableScrollArea {
+  max-height: none;
 }
 
 .examMaterial p,
@@ -1473,13 +1474,103 @@
   color: #6b7280;
 }
 
-.speakingImage {
+.speakingVisualFrame {
   width: 100%;
-  max-height: 240px;
-  object-fit: cover;
-  border-radius: 8px;
-  margin: 14px 0 4px;
+  margin: 16px 0 18px;
   border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #f8fafc;
+}
+
+.speakingImage {
+  display: block;
+  width: 100%;
+  max-height: min(58vh, 620px);
+  object-fit: contain;
+  object-position: center;
+}
+
+.speakingPairedPresentation {
+  display: grid;
+  gap: 16px;
+}
+
+.speakingVisualPresentation {
+  display: grid;
+  gap: 14px;
+}
+
+.speakingVisualPresentation .speakingVisualFrame {
+  margin: 0;
+}
+
+.speakingVisualIntro {
+  border: 1px solid color-mix(in srgb, var(--module-accent) 34%, #ffffff);
+  border-radius: 8px;
+  background: var(--module-soft);
+  padding: 12px 14px;
+}
+
+.speakingVisualIntro p {
+  margin: 0;
+}
+
+.speakingPairIntro,
+.speakingPairOutro {
+  display: grid;
+  gap: 8px;
+}
+
+.speakingPairGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 1px solid #dbe1e8;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.speakingRolePanel {
+  min-width: 0;
+  padding: 16px;
+  background: #f8fafc;
+}
+
+.speakingRolePanel + .speakingRolePanel {
+  border-left: 1px solid #dbe1e8;
+}
+
+.speakingRolePanel h3 {
+  margin: -16px -16px 14px;
+  padding: 11px 16px;
+  background: var(--module-soft);
+  color: var(--module-accent);
+  font-size: 0.96rem;
+  line-height: 1.35;
+}
+
+.speakingRolePanel p {
+  margin: 0 0 9px;
+}
+
+.speakingRolePanel p:last-child {
+  margin-bottom: 0;
+}
+
+@media (max-width: 620px) {
+  .speakingImage {
+    max-height: 48dvh;
+  }
+
+  .speakingPairGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .speakingRolePanel + .speakingRolePanel {
+    border-top: 1px solid #dbe1e8;
+    border-left: 0;
+  }
 }
 
 .prepBox {

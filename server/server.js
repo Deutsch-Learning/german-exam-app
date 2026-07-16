@@ -3035,6 +3035,7 @@ const buildSpeakingTask = (question, index) => {
     visualUrl: primaryVisual?.publicUrl || "",
     visualAlt: primaryVisual ? "Bildimpuls fuer die muendliche Aufgabe" : "",
     visualAssets,
+    presentation: asJsonObject(metadata.presentation),
     variant: metadata.variant || "",
     contentStyle: asJsonObject(metadata.contentStyle),
     sourceMetadata: stripStudentHiddenMetadata(metadata),
