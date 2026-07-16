@@ -2498,6 +2498,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const saveResultToBackend = useCallback(
     async (finalScore) => {
       const isWritingModule = module.id === "write";
+      const isSpeakingModule = module.id === "speak";
       if (!auth?.id) {
         if (isWritingModule) {
           setWritingCorrectionLoading(false);
@@ -2521,6 +2522,26 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           moduleTitle,
           level,
         });
+        const speakingTasksForCorrection = isSpeakingModule
+          ? module.tasks.map((task, index) => {
+              const answer = answers[index] ?? {};
+              const part = examParts.find((item) => item.taskIndexes.includes(index));
+              return {
+                taskId: task.id,
+                taskIndex: index,
+                sourceQuestionId: task.sourceQuestionId || null,
+                sourceExamId: task.sourceExamId || module.sourceExamId || null,
+                title: task.title,
+                typeLabel: task.typeLabel,
+                instructions: part?.sourceText || part?.instructions || task.prompt,
+                duration: Number(answer.duration) || 0,
+                recordingId: answer.recordingId || null,
+                uploadStatus: answer.uploadStatus || "",
+                recordedAt: answer.recordedAt || null,
+                maxScore: task.points || part?.points || null,
+              };
+            })
+          : [];
         const writingMaxScore = writingTasksForCorrection.reduce((sum, task) => sum + (Number(task.maxScore) || 0), 0);
         const resultDetails = {
           examName: examHeading,
@@ -2555,6 +2576,12 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           resultDetails.answers = answers;
           resultDetails.writingTasks = writingTasksForCorrection;
           resultDetails.writingMaxScore = writingMaxScore || 100;
+        }
+
+        if (isSpeakingModule) {
+          resultDetails.speakingTasks = speakingTasksForCorrection;
+          resultDetails.speakingMaxScore = speakingTasksForCorrection.reduce((sum, task) => sum + (Number(task.maxScore) || 0), 0) || 100;
+          resultDetails.aiScoreNotice = "AI practice estimate only; not an official exam certificate.";
         }
 
         const response = await API.post(
@@ -2592,7 +2619,28 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             setWritingCorrectionError(correction.errorMessage || "Correction IA indisponible pour le moment.");
           }
         }
-        setResultStatus("Résultat enregistré dans le dashboard.");
+        if (isSpeakingModule) {
+          const simulationId = response.data?.simulation?.id;
+          if (simulationId) {
+            setSavedSimulationId(simulationId);
+            try {
+              const correctionResponse = await API.post(`/api/simulations/${simulationId}/speaking-correction`);
+              const correctionStatus = correctionResponse.data?.correction?.status;
+              if (correctionStatus === "completed") {
+                setResultStatus("Correction orale IA terminee.");
+              } else if (correctionStatus === "unconfigured") {
+                setResultStatus("Resultat enregistre. Correction orale IA en attente de credits/configuration OpenAI.");
+              } else if (correctionStatus === "audio_required") {
+                setResultStatus("Resultat enregistre. Reprenez les parties sans audio serveur pour lancer la correction IA.");
+              }
+            } catch {
+              setResultStatus("Resultat enregistre. La correction orale IA pourra etre relancee plus tard.");
+            }
+          }
+        }
+        if (!isSpeakingModule) {
+          setResultStatus("Résultat enregistré dans le dashboard.");
+        }
       } catch {
         if (isWritingModule) {
           setWritingCorrectionError("Correction IA indisponible: le resultat n'a pas pu etre envoye au backend.");
@@ -3079,6 +3127,57 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setPrepActive(true);
   }, [armPrepTimer, currentTask.prepSeconds]);
 
+  const uploadSpeakingRecording = useCallback(async ({ blob, taskIndex, duration }) => {
+    if (!blob || module.id !== "speak" || !auth?.id) return null;
+    const task = module.tasks[taskIndex];
+    if (!task) return null;
+
+    const formData = new FormData();
+    formData.append("audio", blob, `speaking-${taskIndex + 1}.webm`);
+    formData.append("taskId", task.id || "");
+    formData.append("sourceExamId", task.sourceExamId || module.sourceExamId || "");
+    formData.append("sourceQuestionId", task.sourceQuestionId || "");
+    formData.append("durationSeconds", String(duration || 0));
+    formData.append("provider", selectedSeries?.accessExamId || selectedSeries?.examId || "");
+    formData.append("level", level || "");
+    formData.append("taskTitle", task.title || "");
+    formData.append("taskType", task.typeLabel || "");
+    formData.append("recordedAt", new Date().toISOString());
+
+    setAnswers((previous) => ({
+      ...previous,
+      [taskIndex]: {
+        ...(previous[taskIndex] ?? {}),
+        uploadStatus: "uploading",
+      },
+    }));
+
+    try {
+      const response = await API.post("/api/speaking/recordings", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      const recording = response.data?.recording;
+      setAnswers((previous) => ({
+        ...previous,
+        [taskIndex]: {
+          ...(previous[taskIndex] ?? {}),
+          recordingId: recording?.id || null,
+          uploadStatus: recording?.id ? "uploaded" : "failed",
+        },
+      }));
+      return recording || null;
+    } catch {
+      setAnswers((previous) => ({
+        ...previous,
+        [taskIndex]: {
+          ...(previous[taskIndex] ?? {}),
+          uploadStatus: "failed",
+        },
+      }));
+      return null;
+    }
+  }, [auth?.id, level, module, selectedSeries]);
+
   const finishRecording = useCallback((blob, simulated = false) => {
     const duration = recordingSecondsRef.current;
     const taskIndex = recordingTaskIndexRef.current;
@@ -3111,7 +3210,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     reader.onloadend = () => commitRecording(String(reader.result ?? ""), objectUrl);
     reader.onerror = () => commitRecording("", objectUrl);
     reader.readAsDataURL(blob);
-  }, []);
+    void uploadSpeakingRecording({ blob, taskIndex, duration });
+  }, [uploadSpeakingRecording]);
 
   const startRecording = useCallback(async () => {
     if (module.id !== "speak" || isRecording) return;
@@ -4904,8 +5004,12 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             <div className={`${styles.instructionText} ${styles.readableScrollArea}`} onWheel={handleReadableWheel}>
               {renderStructuredExamText(currentTask.prompt, `speak-prompt-${currentTask.id}`)}
             </div>
-            {currentTask.visual ? (
-              <img className={styles.speakingImage} src={speakingImage} alt="Aktive Personen in einer Alltagssituation" />
+            {currentTask.visualUrl || currentTask.visual ? (
+              <img
+                className={styles.speakingImage}
+                src={currentTask.visualUrl || speakingImage}
+                alt={currentTask.visualAlt || "Bildimpuls zur muendlichen Aufgabe"}
+              />
             ) : null}
             <div className={styles.promptMeta}>
               <span><Clock3 size={16} /> Vorbereitung {currentTask.prepSeconds}s</span>
@@ -4972,6 +5076,13 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             ) : (
               <p className={styles.mutedText}>Ihre Wiedergabe erscheint hier nach der Aufnahme.</p>
             )}
+            {answer.uploadStatus === "uploading" ? (
+              <p className={styles.mutedText}>Aufnahme wird fuer die spaetere KI-Korrektur gespeichert.</p>
+            ) : answer.uploadStatus === "failed" ? (
+              <p className={styles.warningText}><AlertCircle size={16} /> Aufnahme lokal gespeichert, Server-Upload fehlgeschlagen.</p>
+            ) : answer.recordingId ? (
+              <p className={styles.mutedText}>Aufnahme fuer die KI-Korrektur gespeichert.</p>
+            ) : null}
           </section>
 
           {!simulationMode ? (
@@ -5003,8 +5114,12 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           <div className={`${styles.instructionText} ${styles.readableScrollArea}`} onWheel={handleReadableWheel}>
             {renderStructuredExamText(currentTask.prompt, `speak-prompt-${currentTask.id}`)}
           </div>
-          {currentTask.visual ? (
-            <img className={styles.speakingImage} src={speakingImage} alt="Personnes actives dans un contexte quotidien" />
+          {currentTask.visualUrl || currentTask.visual ? (
+            <img
+              className={styles.speakingImage}
+              src={currentTask.visualUrl || speakingImage}
+              alt={currentTask.visualAlt || "Support visuel pour la tache orale"}
+            />
           ) : null}
           <div className={styles.promptMeta}>
             <span><Clock3 size={16} /> Préparation {currentTask.prepSeconds}s</span>
@@ -5071,6 +5186,13 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           ) : (
             <p className={styles.mutedText}>Votre lecture apparaîtra ici après l'enregistrement.</p>
           )}
+          {answer.uploadStatus === "uploading" ? (
+            <p className={styles.mutedText}>Enregistrement sauvegarde pour la future correction IA.</p>
+          ) : answer.uploadStatus === "failed" ? (
+            <p className={styles.warningText}><AlertCircle size={16} /> Enregistrement local conserve, mais l'envoi serveur a echoue.</p>
+          ) : answer.recordingId ? (
+            <p className={styles.mutedText}>Enregistrement pret pour la correction IA.</p>
+          ) : null}
         </section>
 
         {!simulationMode ? (
