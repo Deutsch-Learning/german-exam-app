@@ -408,6 +408,36 @@
   line-height: 1.45;
 }
 
+.legalIntro {
+  margin: 0 0 14px;
+  color: #64748b;
+  line-height: 1.6;
+}
+
+.legalLinks {
+  display: grid;
+  gap: 10px;
+}
+
+.legalLinks a {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
+  color: #111827;
+  padding: 9px 12px;
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.legalLinks a:hover {
+  border-color: #facc15;
+  background: #fffbeb;
+}
+
 .error,
 .success {
   margin: 16px 0 0;

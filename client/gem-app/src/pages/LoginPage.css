@@ -430,6 +430,20 @@
   user-select: none;
 }
 
+.legal-consent-text {
+  line-height: 1.45;
+}
+
+.legal-consent-text a {
+  color: var(--theme-red);
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.legal-consent-text a:hover {
+  text-decoration: underline;
+}
+
 .checkbox-label input {
   position: absolute;
   opacity: 0;

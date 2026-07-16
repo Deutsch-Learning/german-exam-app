@@ -54,7 +54,13 @@ export const pageLinks = [
     id: "privacy-policy",
     label: "Privacy policy",
     description: "Find out how we handle your personal information",
-    path: "/privacy-policy",
+    path: "/privacy",
+  },
+  {
+    id: "terms",
+    label: "Terms of service",
+    description: "Read the rules for using the preparation platform",
+    path: "/terms",
   },
   {
     id: "refund-condition",

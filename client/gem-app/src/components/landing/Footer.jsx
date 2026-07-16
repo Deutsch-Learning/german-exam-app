@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { SUPPORT_WHATSAPP_URL } from "../../config/support";
 
 const socialLinks = [
@@ -41,6 +42,11 @@ export default function Footer() {
         </div>
         <div className="footer-bottom">
           <p>Copyright &copy; 2026- Deutsch Prüfungen. All rights reserved.</p>
+          <nav className="footer-legal-links" aria-label="Legal links">
+            <Link to="/privacy">Privacy</Link>
+            <Link to="/terms">Terms</Link>
+            <Link to="/refund-condition">Refunds</Link>
+          </nav>
           <div className="footer-socials" aria-label="Social media">
             {socialLinks.map((item) => (
               <a key={item.id} href={item.href} aria-label={item.label} target="_blank" rel="noreferrer">

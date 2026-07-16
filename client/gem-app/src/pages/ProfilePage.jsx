@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Award, BarChart3, BookOpenCheck, CalendarClock, Clock3, Flame, History, MailCheck, ShieldCheck, Sparkles, Target, Trophy } from "lucide-react";
+import { Award, BarChart3, BookOpenCheck, CalendarClock, Clock3, FileText, Flame, History, MailCheck, ShieldCheck, Sparkles, Target, Trophy } from "lucide-react";
 import API from "../services/api";
 import { fetchDashboardData } from "../services/dashboard";
 import styles from "./ProfilePage.module.css";
@@ -411,6 +411,25 @@ export default function ProfilePage() {
             <div className={styles.learningMeta}>
               <CalendarClock size={18} />
               <span>{profileStats.inProgress} in-progress module{profileStats.inProgress > 1 ? "s" : ""} · {profileStats.savedSeries} saved series</span>
+            </div>
+          </section>
+
+          <section className={styles.card}>
+            <div className={styles.cardHeader}>
+              <div>
+                <p className={styles.eyebrow}>Privacy and terms</p>
+                <h2>Legal resources</h2>
+              </div>
+              <FileText size={22} />
+            </div>
+            <p className={styles.legalIntro}>
+              Review how account data, Google sign-in, exam progress, payments,
+              recordings, and AI corrections are handled.
+            </p>
+            <div className={styles.legalLinks}>
+              <Link to="/privacy">Privacy Policy</Link>
+              <Link to="/terms">Terms of Service</Link>
+              <Link to="/refund-condition">Refund conditions</Link>
             </div>
           </section>
         </div>

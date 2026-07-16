@@ -160,7 +160,9 @@ function AppRoutes() {
         <Route path="/simulation/:moduleId" element={<ProtectedRoute><SimulationModulePage /></ProtectedRoute>} />
         <Route path="/topics/:topicId" element={<TopicPage />} />
         <Route path="/faq" element={<InfoPage type="faq" />} />
+        <Route path="/privacy" element={<InfoPage type="privacy" />} />
         <Route path="/privacy-policy" element={<InfoPage type="privacy" />} />
+        <Route path="/terms" element={<InfoPage type="terms" />} />
         <Route path="/refund-condition" element={<InfoPage type="refund" />} />
         <Route path="/offers" element={<OffersPage />} />
         <Route path="/checkout/:offerId" element={<ProtectedRoute><CheckoutPage /></ProtectedRoute>} />
