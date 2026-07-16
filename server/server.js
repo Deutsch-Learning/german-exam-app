@@ -3961,10 +3961,16 @@ app.post("/verify-email", verifyEmailPostHandler);
 
 const loginHandler = async (req, res) => {
   try {
-    const { email, password, rememberMe } = req.body ?? {};
+    const { email, identifier, password, rememberMe } = req.body ?? {};
+    const rawIdentifier = String(identifier ?? email ?? "").trim();
+    const isEmailIdentifier = isEmail(rawIdentifier);
+    const safeUsername = rawIdentifier.toLowerCase();
 
-    if (!isEmail(email) || typeof password !== "string") {
-      return res.status(400).json({ ok: false, error: "Email and password are required" });
+    if (!rawIdentifier || typeof password !== "string") {
+      return res.status(400).json({ ok: false, error: "Email/username and password are required" });
+    }
+    if (!isEmailIdentifier && !/^[a-z0-9._-]{3,30}$/.test(safeUsername)) {
+      return res.status(400).json({ ok: false, error: "Enter a valid email or username" });
     }
 
     const userRes = await pool.query(
@@ -3973,12 +3979,16 @@ const loginHandler = async (req, res) => {
               email_verified, has_full_access, partial_access, current_level, target_level,
               marketing_emails_enabled, created_at, last_login_at
        FROM users
-       WHERE email = $1`,
-      [normalizeEmail(email)]
+       WHERE email = $1 OR username = $2
+       LIMIT 1`,
+      [isEmailIdentifier ? normalizeEmail(rawIdentifier) : "", safeUsername]
     );
     const user = userRes.rows[0];
     if (!user) {
       return res.status(401).json({ ok: false, error: "Invalid credentials" });
+    }
+    if (!user.password_hash) {
+      return res.status(401).json({ ok: false, error: "Use Google sign-in for this account or reset your password." });
     }
 
     const match = await bcrypt.compare(password, user.password_hash);

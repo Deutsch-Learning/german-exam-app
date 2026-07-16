@@ -1507,6 +1507,26 @@ h4 {
   color: #cbd5e1;
 }
 
+.footer-legal-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+}
+
+.footer-legal-links a {
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.88rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.footer-legal-links a:hover {
+  color: #ffffff;
+  text-decoration: underline;
+}
+
 .footer-socials {
   display: flex;
   justify-content: flex-start;
@@ -1547,7 +1567,11 @@ h4 {
   }
 
   .footer-bottom {
-    grid-template-columns: 1fr auto;
+    grid-template-columns: 1fr auto auto;
+  }
+
+  .footer-legal-links {
+    justify-content: center;
   }
 
   .footer-socials {

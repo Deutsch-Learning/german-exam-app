@@ -13,7 +13,7 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const [formData, setFormData] = useState({
-    email: "",
+    identifier: "",
     password: "",
     rememberMe: false,
   });
@@ -51,10 +51,15 @@ export default function LoginPage() {
 
   const validateForm = () => {
     const newErrors = {};
-    if (!formData.email) {
-      newErrors.email = "L'email est requis.";
-    } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
-      newErrors.email = "Entrez une adresse email valide.";
+    const identifier = formData.identifier.trim();
+    const isEmailIdentifier = identifier.includes("@");
+    const validUsername = /^[a-zA-Z0-9._-]{3,30}$/.test(identifier);
+    if (!identifier) {
+      newErrors.identifier = "L'email ou le nom d'utilisateur est requis.";
+    } else if (isEmailIdentifier && !/\S+@\S+\.\S+/.test(identifier)) {
+      newErrors.identifier = "Entrez une adresse email valide.";
+    } else if (!isEmailIdentifier && !validUsername) {
+      newErrors.identifier = "Entrez un nom d'utilisateur valide.";
     }
     if (!formData.password) {
       newErrors.password = "Le mot de passe est requis.";
@@ -71,7 +76,8 @@ export default function LoginPage() {
     setIsLoading(true);
     try {
       const res = await API.post("/api/auth/login", {
-        email: formData.email,
+        identifier: formData.identifier.trim(),
+        email: formData.identifier.trim(),
         password: formData.password,
         rememberMe: formData.rememberMe,
       });
@@ -139,20 +145,20 @@ export default function LoginPage() {
             )}
 
             <div className="form-group">
-              <label htmlFor="email">{t.auth.email}</label>
+              <label htmlFor="identifier">{t.auth.loginIdentifier || "Email or username"}</label>
               <input
-                id="email"
-                name="email"
-                type="email"
-                value={formData.email}
+                id="identifier"
+                name="identifier"
+                type="text"
+                value={formData.identifier}
                 onChange={handleChange}
-                placeholder="vous@exemple.com"
-                autoComplete="email"
-                aria-invalid={!!errors.email}
-                className={errors.email ? "input-error" : ""}
+                placeholder="vous@exemple.com ou abdoul.mohamed"
+                autoComplete="username"
+                aria-invalid={!!errors.identifier}
+                className={errors.identifier ? "input-error" : ""}
               />
-              {errors.email && (
-                <span className="error-text">{errors.email}</span>
+              {errors.identifier && (
+                <span className="error-text">{errors.identifier}</span>
               )}
             </div>
 

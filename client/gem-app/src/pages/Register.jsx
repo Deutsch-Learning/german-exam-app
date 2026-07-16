@@ -376,7 +376,10 @@ export default function RegisterPage() {
                   onChange={handleChange}
                 />
                 <span className="checkbox-custom" />
-                {t.auth.terms}
+                <span className="legal-consent-text">
+                  {t.auth.termsIntro} <Link to="/terms">{t.auth.termsLink}</Link>{" "}
+                  {t.auth.privacyIntro} <Link to="/privacy">{t.auth.privacyLink}</Link>.
+                </span>
               </label>
               {errors.acceptTerms && (
                 <span className="error-text">{errors.acceptTerms}</span>
