@@ -194,7 +194,7 @@ app.use(
       }
       return callback(null, false);
     },
-    allowedHeaders: ["Content-Type", "Authorization", "Accept-Language"],
+    allowedHeaders: ["Content-Type", "Authorization", "Accept-Language", "X-Requested-With"],
     credentials: true,
   })
 );
@@ -239,6 +239,16 @@ const TOKEN_BYTES = 32;
 const VERIFICATION_HOURS = 24;
 const VERIFICATION_CODE_MINUTES = 15;
 const RESET_MINUTES = 60;
+const GOOGLE_CLIENT_IDS = String(
+  process.env.GOOGLE_CLIENT_IDS ||
+    process.env.GOOGLE_CLIENT_ID ||
+    process.env.VITE_GOOGLE_CLIENT_ID ||
+    ""
+)
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
 
 const isEmail = (value) =>
   typeof value === "string" && /^\S+@\S+\.\S+$/.test(value.trim());
@@ -265,6 +275,8 @@ const sanitizeUser = (user) => ({
   date_of_birth: user.date_of_birth,
   country: user.country || null,
   phone: user.phone || null,
+  avatar_url: user.avatar_url || null,
+  auth_provider: user.auth_provider || "email",
   role: user.role,
   status: user.status,
   email_verified: Boolean(user.email_verified),
@@ -1598,6 +1610,9 @@ async function ensureSchema() {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS date_of_birth DATE;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS country TEXT;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT;`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_provider TEXT NOT NULL DEFAULT 'email';`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS google_sub TEXT;`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user';`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT FALSE;`);
@@ -1631,6 +1646,11 @@ async function ensureSchema() {
     CREATE UNIQUE INDEX IF NOT EXISTS users_username_unique_idx
       ON users(username)
       WHERE username IS NOT NULL;
+  `);
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS users_google_sub_unique_idx
+      ON users(google_sub)
+      WHERE google_sub IS NOT NULL;
   `);
   await pool.query(`
     CREATE INDEX IF NOT EXISTS users_role_status_idx
@@ -2218,7 +2238,8 @@ const optionalPaymentAuth = async (req, _res, next) => {
       if (revoked.rows[0]) return next();
     }
     const result = await pool.query(
-      `SELECT id, email, username, first_name, last_name, date_of_birth, role, status,
+      `SELECT id, email, username, first_name, last_name, date_of_birth, country, phone,
+              auth_provider, avatar_url, role, status,
               email_verified, has_full_access, partial_access, current_level, target_level,
               marketing_emails_enabled,
               created_at, last_login_at
@@ -3411,6 +3432,290 @@ app.get("/api/exams/:provider/series/:seriesId/:moduleId", async (req, res) => {
   }
 });
 
+const buildGoogleUsernameBase = (profile) => {
+  const preferred = [
+    profile.given_name,
+    profile.name,
+    String(profile.email || "").split("@")[0],
+    "google-user",
+  ].find(Boolean);
+  return String(preferred || "google-user")
+    .normalize("NFKD")
+    .replace(/[^\w.\-]+/g, ".")
+    .replace(/_+/g, "_")
+    .replace(/\.+/g, ".")
+    .replace(/^[-_.]+|[-_.]+$/g, "")
+    .toLowerCase()
+    .slice(0, 24) || "google-user";
+};
+
+const buildUniqueGoogleUsername = async (profile) => {
+  const base = buildGoogleUsernameBase(profile);
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const suffix = attempt === 0 ? "" : `.${crypto.randomInt(1000, 9999)}`;
+    const candidate = `${base}${suffix}`.slice(0, 30);
+    const existing = await pool.query(`SELECT 1 FROM users WHERE username = $1 LIMIT 1`, [candidate]);
+    if (!existing.rows[0]) return candidate;
+  }
+  return `google.${crypto.randomUUID().slice(0, 8)}`;
+};
+
+const assertGoogleAudience = (audience) => {
+  if (!GOOGLE_CLIENT_IDS.length) {
+    const err = new Error("Google authentication is not configured.");
+    err.statusCode = 503;
+    throw err;
+  }
+  if (!GOOGLE_CLIENT_IDS.includes(String(audience || ""))) {
+    const err = new Error("Google authentication could not be verified.");
+    err.statusCode = 401;
+    throw err;
+  }
+};
+
+const getAllowedGoogleRedirectOrigins = () => {
+  const origins = new Set();
+  [
+    FRONTEND_URL,
+    process.env.PUBLIC_APP_URL,
+    process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : "",
+    process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+  ].forEach((value) => {
+    try {
+      if (value) origins.add(new URL(value).origin);
+    } catch {
+      // Ignore malformed optional deployment URLs.
+    }
+  });
+  return origins;
+};
+
+const assertGooglePopupRequest = (req, redirectUri) => {
+  if (req.get("x-requested-with") !== "XmlHttpRequest") {
+    const err = new Error("Invalid Google authentication request.");
+    err.statusCode = 403;
+    throw err;
+  }
+  let redirectOrigin;
+  try {
+    redirectOrigin = new URL(redirectUri).origin;
+  } catch {
+    const err = new Error("Invalid Google redirect origin.");
+    err.statusCode = 400;
+    throw err;
+  }
+  const requestOrigin = req.get("origin") || "";
+  const allowedOrigins = getAllowedGoogleRedirectOrigins();
+  if (requestOrigin && requestOrigin !== redirectOrigin) {
+    const err = new Error("Google authentication origin mismatch.");
+    err.statusCode = 403;
+    throw err;
+  }
+  if (!allowedOrigins.has(redirectOrigin) && !/\.vercel\.app$/i.test(new URL(redirectOrigin).hostname)) {
+    const err = new Error("Google authentication origin is not allowed.");
+    err.statusCode = 403;
+    throw err;
+  }
+};
+
+const exchangeGoogleCode = async ({ code, redirectUri }) => {
+  if (!code || typeof code !== "string") {
+    const err = new Error("Missing Google authorization code.");
+    err.statusCode = 400;
+    throw err;
+  }
+  if (!GOOGLE_CLIENT_IDS.length || !GOOGLE_CLIENT_SECRET) {
+    const err = new Error("Google authentication is not configured.");
+    err.statusCode = 503;
+    throw err;
+  }
+
+  const body = new URLSearchParams({
+    code,
+    client_id: GOOGLE_CLIENT_IDS[0],
+    client_secret: GOOGLE_CLIENT_SECRET,
+    redirect_uri: new URL(redirectUri).origin,
+    grant_type: "authorization_code",
+  });
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+  });
+  const tokens = await response.json().catch(() => ({}));
+  if (!response.ok || !tokens.id_token || !tokens.access_token) {
+    const err = new Error("Google authentication could not be verified.");
+    err.statusCode = 401;
+    throw err;
+  }
+  return tokens;
+};
+
+const verifyGoogleCode = async (req) => {
+  const redirectUri = req.body?.redirectUri;
+  assertGooglePopupRequest(req, redirectUri);
+  const tokens = await exchangeGoogleCode({ code: req.body?.code, redirectUri });
+
+  const tokenInfoResponse = await fetch(
+    `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(tokens.id_token)}`
+  );
+  if (!tokenInfoResponse.ok) {
+    const err = new Error("Google identity could not be verified.");
+    err.statusCode = 401;
+    throw err;
+  }
+  const tokenInfo = await tokenInfoResponse.json();
+  assertGoogleAudience(tokenInfo.aud);
+
+  const userInfoResponse = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+    headers: { Authorization: `Bearer ${tokens.access_token}` },
+  });
+  if (!userInfoResponse.ok) {
+    const err = new Error("Google profile could not be loaded.");
+    err.statusCode = 401;
+    throw err;
+  }
+  const profile = await userInfoResponse.json();
+  if (!profile.sub || !isEmail(profile.email) || profile.email_verified !== true) {
+    const err = new Error("Google account email must be verified.");
+    err.statusCode = 401;
+    throw err;
+  }
+
+  return {
+    sub: String(profile.sub),
+    email: normalizeEmail(profile.email),
+    name: String(profile.name || "").trim(),
+    given_name: String(profile.given_name || "").trim(),
+    family_name: String(profile.family_name || "").trim(),
+    picture: String(profile.picture || "").trim(),
+  };
+};
+
+const googleAuthHandler = async (req, res) => {
+  try {
+    const googleProfile = await verifyGoogleCode(req);
+    const existingBySub = await pool.query(
+      `SELECT id, email, username, first_name, last_name, date_of_birth, country, phone, password_hash,
+              role, status, email_verified, has_full_access, partial_access, current_level, target_level,
+              marketing_emails_enabled, auth_provider, google_sub, avatar_url, created_at, last_login_at
+       FROM users
+       WHERE google_sub = $1
+       LIMIT 1`,
+      [googleProfile.sub]
+    );
+    let user = existingBySub.rows[0] ?? null;
+
+    if (!user) {
+      const existingByEmail = await pool.query(
+        `SELECT id, email, username, first_name, last_name, date_of_birth, country, phone, password_hash,
+                role, status, email_verified, has_full_access, partial_access, current_level, target_level,
+                marketing_emails_enabled, auth_provider, google_sub, avatar_url, created_at, last_login_at
+         FROM users
+         WHERE email = $1
+         LIMIT 1`,
+        [googleProfile.email]
+      );
+      user = existingByEmail.rows[0] ?? null;
+    }
+
+    if (user?.google_sub && user.google_sub !== googleProfile.sub) {
+      return res.status(409).json({
+        ok: false,
+        error: "This email is already linked to a different Google account.",
+      });
+    }
+
+    if (user) {
+      const updated = await pool.query(
+        `UPDATE users
+         SET google_sub = COALESCE(google_sub, $1),
+             auth_provider = CASE
+               WHEN auth_provider IS NULL OR auth_provider = 'email' THEN 'email_google'
+               ELSE auth_provider
+             END,
+             email_verified = TRUE,
+             email_verified_at = COALESCE(email_verified_at, NOW()),
+             first_name = COALESCE(NULLIF(first_name, ''), $2),
+             last_name = COALESCE(NULLIF(last_name, ''), $3),
+             avatar_url = COALESCE(NULLIF(avatar_url, ''), $4),
+             last_login_at = NOW()
+         WHERE id = $5
+         RETURNING id, email, username, first_name, last_name, date_of_birth, country, phone,
+                   role, status, email_verified, has_full_access, partial_access, current_level, target_level,
+                   marketing_emails_enabled, auth_provider, google_sub, avatar_url, created_at, last_login_at`,
+        [
+          googleProfile.sub,
+          googleProfile.given_name || null,
+          googleProfile.family_name || null,
+          googleProfile.picture || null,
+          user.id,
+        ]
+      );
+      user = updated.rows[0];
+    } else {
+      const username = await buildUniqueGoogleUsername(googleProfile);
+      const passwordHash = await bcrypt.hash(makeToken(), 12);
+      const inserted = await pool.query(
+        `INSERT INTO users (
+           email, username, first_name, last_name, password_hash, role, status,
+           email_verified, email_verified_at, auth_provider, google_sub, avatar_url, last_login_at
+         )
+         VALUES ($1, $2, $3, $4, $5, 'user', 'active', TRUE, NOW(), 'google', $6, $7, NOW())
+         RETURNING id, email, username, first_name, last_name, date_of_birth, country, phone,
+                   role, status, email_verified, has_full_access, partial_access, current_level, target_level,
+                   marketing_emails_enabled, auth_provider, google_sub, avatar_url, created_at, last_login_at`,
+        [
+          googleProfile.email,
+          username,
+          googleProfile.given_name || null,
+          googleProfile.family_name || null,
+          passwordHash,
+          googleProfile.sub,
+          googleProfile.picture || null,
+        ]
+      );
+      user = inserted.rows[0];
+      await sendWelcomeEmailOnce(user).catch((emailErr) => {
+        console.error("Google welcome email failed", emailErr);
+      });
+    }
+
+    if (user.status !== "active") {
+      return res.status(403).json({ ok: false, error: "Account is suspended" });
+    }
+
+    await pool.query(
+      `UPDATE refresh_tokens SET revoked_at = NOW()
+       WHERE user_id = $1 AND expires_at <= NOW() AND revoked_at IS NULL`,
+      [user.id]
+    );
+    const auth = await issueAuthTokens(user, req, res);
+    await logUserAction(user.id, "auth.google", req);
+    return res.json({
+      ok: true,
+      token: auth.token,
+      accessToken: auth.token,
+      expiresIn: auth.expiresIn,
+      redirectTo: user.role === "admin" ? "/admin/dashboard" : "/dashboard",
+      user: await sanitizeUserWithSubscriptions(user),
+    });
+  } catch (err) {
+    const statusCode = err.statusCode || 500;
+    if (statusCode >= 500) console.error("Google auth failed", err);
+    return res.status(statusCode).json({
+      ok: false,
+      error: statusCode === 503
+        ? "Google authentication is not configured yet."
+        : "Google authentication failed. Please try again.",
+    });
+  }
+};
+
+app.post("/api/auth/google", googleAuthHandler);
+
 const registerHandler = async (req, res) => {
   try {
     const { email, password, username, firstName, lastName, country, phone, marketingEmailsEnabled } = req.body ?? {};
@@ -3588,7 +3893,8 @@ const verifyEmailToken = async (token) => {
          verification_code_expires_at = NULL
      WHERE verification_token_hash = $1
        AND verification_expires_at > NOW()
-     RETURNING id, email, username, first_name, last_name, date_of_birth, role, status,
+     RETURNING id, email, username, first_name, last_name, date_of_birth, country, phone,
+               auth_provider, avatar_url, role, status,
                email_verified, has_full_access, partial_access, current_level, target_level,
                marketing_emails_enabled, welcome_email_sent_at, created_at, last_login_at`,
     [tokenHash(token)]
@@ -3612,7 +3918,8 @@ const verifyEmailCode = async (email, code) => {
      WHERE email = $1
        AND verification_code_hash = $2
        AND verification_code_expires_at > NOW()
-     RETURNING id, email, username, first_name, last_name, date_of_birth, role, status,
+     RETURNING id, email, username, first_name, last_name, date_of_birth, country, phone,
+               auth_provider, avatar_url, role, status,
                email_verified, has_full_access, partial_access, current_level, target_level,
                marketing_emails_enabled, welcome_email_sent_at, created_at, last_login_at`,
     [normalizedEmail, verificationCodeHash(normalizedEmail, normalizedCode)]
@@ -3661,7 +3968,8 @@ const loginHandler = async (req, res) => {
     }
 
     const userRes = await pool.query(
-      `SELECT id, email, username, first_name, last_name, date_of_birth, country, phone, password_hash, role, status,
+      `SELECT id, email, username, first_name, last_name, date_of_birth, country, phone,
+              auth_provider, avatar_url, password_hash, role, status,
               email_verified, has_full_access, partial_access, current_level, target_level,
               marketing_emails_enabled, created_at, last_login_at
        FROM users
@@ -3717,6 +4025,7 @@ const refreshHandler = async (req, res) => {
     const tokenRes = await pool.query(
       `SELECT rt.id AS refresh_token_id, rt.user_id, rt.expires_at, rt.revoked_at,
               u.email, u.username, u.first_name, u.last_name, u.date_of_birth, u.country, u.phone,
+              u.auth_provider, u.avatar_url,
               u.role, u.status, u.email_verified, u.has_full_access, u.partial_access,
               u.current_level, u.target_level, u.marketing_emails_enabled, u.created_at, u.last_login_at
        FROM refresh_tokens rt
@@ -3771,6 +4080,10 @@ const refreshHandler = async (req, res) => {
       first_name: row.first_name,
       last_name: row.last_name,
       date_of_birth: row.date_of_birth,
+      country: row.country,
+      phone: row.phone,
+      auth_provider: row.auth_provider,
+      avatar_url: row.avatar_url,
       role: row.role,
       status: row.status,
       email_verified: row.email_verified,
@@ -4288,7 +4601,8 @@ const updateProfileHandler = async (req, res) => {
            marketing_emails_enabled = $12,
            marketing_unsubscribed_at = CASE WHEN $12 THEN NULL ELSE COALESCE(marketing_unsubscribed_at, NOW()) END
        WHERE id = $13
-       RETURNING id, email, username, first_name, last_name, date_of_birth, role, status,
+       RETURNING id, email, username, first_name, last_name, date_of_birth, country, phone,
+                 auth_provider, avatar_url, role, status,
                  email_verified, has_full_access, partial_access, current_level, target_level,
                  marketing_emails_enabled, welcome_email_sent_at, created_at, last_login_at`,
       [
@@ -4339,7 +4653,8 @@ const updateEmailPreferencesHandler = async (req, res) => {
        SET marketing_emails_enabled = $2,
            marketing_unsubscribed_at = CASE WHEN $2 THEN NULL ELSE COALESCE(marketing_unsubscribed_at, NOW()) END
        WHERE id = $1
-       RETURNING id, email, username, first_name, last_name, date_of_birth, role, status,
+       RETURNING id, email, username, first_name, last_name, date_of_birth, country, phone,
+                 auth_provider, avatar_url, role, status,
                  email_verified, has_full_access, partial_access, current_level, target_level,
                  marketing_emails_enabled, created_at, last_login_at`,
       [req.user.id, marketingEnabled]

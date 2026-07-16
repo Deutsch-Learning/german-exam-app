@@ -117,8 +117,7 @@
 
 .social-login {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  grid-template-columns: 1fr;
   margin-bottom: 20px;
 }
 
@@ -126,22 +125,44 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 10px 14px;
-  border-radius: 50px;
-  border: 1px solid #e5e5e5;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  padding: 12px 16px;
+  border-radius: var(--border-radius-md);
+  border: 1px solid #d9dde5;
   background: var(--white);
   font-weight: 600;
-  font-size: 0.9rem;
+  font-size: 0.95rem;
   cursor: pointer;
   font-family: inherit;
   color: var(--text-dark);
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s, transform 0.2s;
 }
 
-.btn-social:hover {
+.btn-social:hover:not(:disabled) {
   border-color: var(--primary-color);
   box-shadow: var(--shadow-sm);
+  background: #fffdf5;
+  transform: translateY(-1px);
+}
+
+.btn-social:focus-visible {
+  outline: 3px solid rgba(249, 196, 21, 0.28);
+  outline-offset: 2px;
+}
+
+.btn-social:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.btn-social:disabled {
+  opacity: 0.75;
+  cursor: wait;
+}
+
+.btn-google svg {
+  flex: 0 0 auto;
 }
 
 .divider {
@@ -561,6 +582,12 @@
   border-top-color: var(--theme-black);
   border-radius: 50%;
   animation: auth-spin 0.7s linear infinite;
+}
+
+.spinner-small {
+  width: 18px;
+  height: 18px;
+  border-width: 2px;
 }
 
 @keyframes auth-spin {

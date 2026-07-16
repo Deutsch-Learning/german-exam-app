@@ -1,5 +1,7 @@
 const AUTH_KEY = "auth";
 const AUTH_HINT_KEY = "auth_session_hint";
+const AUTH_LAST_ACTIVITY_KEY = "auth_last_activity_at";
+const AUTH_INACTIVITY_LIMIT_MS = 24 * 60 * 60 * 1000;
 
 const safeJsonParse = (value, fallback = null) => {
   try {
@@ -9,19 +11,34 @@ const safeJsonParse = (value, fallback = null) => {
   }
 };
 
-const getStorage = (remember) => (remember ? localStorage : sessionStorage);
-
-export const clearAuthSession = () => {
+export const clearAuthSession = ({ keepActivity = false } = {}) => {
   if (typeof localStorage !== "undefined") localStorage.removeItem(AUTH_KEY);
   if (typeof localStorage !== "undefined") localStorage.removeItem(AUTH_HINT_KEY);
+  if (!keepActivity && typeof localStorage !== "undefined") localStorage.removeItem(AUTH_LAST_ACTIVITY_KEY);
   if (typeof sessionStorage !== "undefined") sessionStorage.removeItem(AUTH_KEY);
 };
 
-export const storeAuthSession = ({ user, token, expiresIn }, remember = false) => {
+export const touchAuthActivity = (timestamp = Date.now()) => {
+  if (typeof localStorage === "undefined") return;
+  localStorage.setItem(AUTH_LAST_ACTIVITY_KEY, String(timestamp));
+};
+
+export const getLastAuthActivityAt = () => {
+  if (typeof localStorage === "undefined") return 0;
+  const value = Number(localStorage.getItem(AUTH_LAST_ACTIVITY_KEY));
+  return Number.isFinite(value) && value > 0 ? value : 0;
+};
+
+export const hasExceededAuthInactivityLimit = (now = Date.now()) => {
+  const lastActivityAt = getLastAuthActivityAt();
+  return Boolean(lastActivityAt && now - lastActivityAt >= AUTH_INACTIVITY_LIMIT_MS);
+};
+
+export const storeAuthSession = ({ user, token, expiresIn }, remember = true) => {
   if (!user || !token) return;
-  clearAuthSession();
+  clearAuthSession({ keepActivity: true });
   if (typeof localStorage !== "undefined") localStorage.setItem(AUTH_HINT_KEY, "1");
-  getStorage(remember).setItem(
+  localStorage.setItem(
     AUTH_KEY,
     JSON.stringify({
       user,
@@ -31,6 +48,7 @@ export const storeAuthSession = ({ user, token, expiresIn }, remember = false) =
       savedAt: new Date().toISOString(),
     })
   );
+  touchAuthActivity();
 };
 
 export const updateStoredUser = (user) => {

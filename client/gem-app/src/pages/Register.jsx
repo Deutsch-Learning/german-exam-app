@@ -6,6 +6,8 @@ import API from "../services/api";
 import { useLanguage } from "../context/LanguageContext";
 import CountryPhoneField from "../components/CountryPhoneField";
 import BackButton from "../components/BackButton";
+import GoogleAuthButton from "../components/GoogleAuthButton";
+import { storeAuthSession } from "../utils/access";
 
 export default function RegisterPage() {
   const { t } = useLanguage();
@@ -26,6 +28,7 @@ export default function RegisterPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const googleLabel = t.auth.googleContinue || "Continue with Google";
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -34,6 +37,22 @@ export default function RegisterPage() {
       [name]: type === "checkbox" ? checked : value,
     }));
     if (errors[name]) setErrors((prev) => ({ ...prev, [name]: "" }));
+  };
+
+  const handleGoogleSuccess = (data) => {
+    if (!data?.ok || !data.user || !(data.accessToken || data.token)) {
+      setErrors({ submit: "Google authentication failed. Please try again." });
+      return;
+    }
+    storeAuthSession(
+      {
+        user: data.user,
+        token: data.accessToken ?? data.token,
+        expiresIn: data.expiresIn,
+      },
+      true
+    );
+    navigate(data.redirectTo || (data.user?.role === "admin" ? "/admin/dashboard" : "/dashboard"), { replace: true });
   };
 
   const validateForm = () => {
@@ -131,6 +150,18 @@ export default function RegisterPage() {
           <div className="form-header">
             <h1>{t.auth.registerTitle}</h1>
             <p>{t.auth.registerIntro}</p>
+          </div>
+
+          <div className="social-login">
+            <GoogleAuthButton
+              label={googleLabel}
+              onSuccess={handleGoogleSuccess}
+              onError={(message) => setErrors((previous) => ({ ...previous, submit: message }))}
+            />
+          </div>
+
+          <div className="divider">
+            <span>{t.auth.emailLogin}</span>
           </div>
 
           <form onSubmit={handleSubmit} className="auth-form" noValidate>
