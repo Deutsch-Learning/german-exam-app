@@ -26,14 +26,15 @@ Goethe B2 and ECL B2 are two-part imports because the package source exposes two
 
 ## AI Correction Readiness
 
-The backend now stores speaking recordings and creates speaking correction records. The correction workflow is intentionally budget-safe until OpenAI credits are available:
+The backend stores speaking recordings and creates speaking correction records. Once server-side OpenAI credits are available, it transcribes each recorded part and produces a strict structured JSON practice evaluation:
 
 - `OPENAI_API_KEY` must remain server-side only.
 - Optional models:
   - `OPENAI_TRANSCRIBE_MODEL=gpt-4o-mini-transcribe`
   - `OPENAI_DIARIZE_MODEL=gpt-4o-transcribe-diarize`
   - `OPENAI_EVAL_MODEL=gpt-4.1-mini`
-- Without credits/configuration, speaking correction records stay deferred instead of making paid calls.
+- Without credits/configuration, speaking correction records stay deferred with a clear pending/error status instead of showing a fake oral score.
+- Transcripts are hidden evidence. The student UI shows only score, diagnostics, strengths, weaknesses, and next steps after submission.
 
 ## Reimport Command
 
