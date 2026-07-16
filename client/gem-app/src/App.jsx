@@ -7,7 +7,14 @@ import { LanguageProvider } from "./context/LanguageContext";
 import { AdminRoute, ProtectedRoute, PublicOnlyRoute } from "./components/RouteGuards";
 import MotionShell from "./components/motion/MotionShell";
 import API from "./services/api";
-import { clearAuthSession, hasAuthSessionHint, isLoggedIn, storeAuthSession } from "./utils/access";
+import {
+  clearAuthSession,
+  hasAuthSessionHint,
+  hasExceededAuthInactivityLimit,
+  isLoggedIn,
+  storeAuthSession,
+  touchAuthActivity,
+} from "./utils/access";
 
 const DashboardMainPage = lazy(() => import("./pages/DashboardMainPage"));
 const SimulationSelectionPage = lazy(() => import("./pages/SimulationSelectionPage"));
@@ -61,6 +68,13 @@ function AppRoutes() {
   const [authReady, setAuthReady] = useState(() => isLoggedIn() || !hasAuthSessionHint());
 
   useEffect(() => {
+    if (hasExceededAuthInactivityLimit()) {
+      API.post("/api/auth/logout").catch(() => {});
+      clearAuthSession();
+      const readyTimer = window.setTimeout(() => setAuthReady(true), 0);
+      return () => window.clearTimeout(readyTimer);
+    }
+
     if (isLoggedIn() || !hasAuthSessionHint()) return undefined;
 
     let cancelled = false;
@@ -77,8 +91,8 @@ function AppRoutes() {
           clearAuthSession();
         }
       })
-      .catch(() => {
-        clearAuthSession();
+      .catch((err) => {
+        if (hasExceededAuthInactivityLimit() || [401, 403].includes(err?.response?.status)) clearAuthSession();
       })
       .finally(() => {
         if (!cancelled) setAuthReady(true);
@@ -86,6 +100,36 @@ function AppRoutes() {
 
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const activityEvents = ["click", "keydown", "pointerdown", "touchstart", "scroll"];
+    let lastWrite = 0;
+    const recordActivity = () => {
+      if (!hasAuthSessionHint()) return;
+      const now = Date.now();
+      if (now - lastWrite < 10_000) return;
+      lastWrite = now;
+      touchAuthActivity(now);
+    };
+    const checkInactivity = () => {
+      if (!hasAuthSessionHint()) return;
+      if (!hasExceededAuthInactivityLimit()) return;
+      API.post("/api/auth/logout").catch(() => {});
+      clearAuthSession();
+      window.location.assign("/login");
+    };
+
+    if (hasAuthSessionHint() && !hasExceededAuthInactivityLimit()) touchAuthActivity();
+    activityEvents.forEach((eventName) => {
+      window.addEventListener(eventName, recordActivity, { passive: true });
+    });
+    const interval = window.setInterval(checkInactivity, 60_000);
+
+    return () => {
+      activityEvents.forEach((eventName) => window.removeEventListener(eventName, recordActivity));
+      window.clearInterval(interval);
     };
   }, []);
 

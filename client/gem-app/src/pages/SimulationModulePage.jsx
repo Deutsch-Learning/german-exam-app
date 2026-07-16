@@ -83,33 +83,44 @@ const TeilTransitionScreen = ({
   onComplete,
 }) => {
   const [remaining, setRemaining] = useState(durationSeconds);
+  const [skipping, setSkipping] = useState(false);
   const onCompleteRef = useRef(onComplete);
   const completedRef = useRef(false);
+  const intervalRef = useRef(null);
 
   useEffect(() => {
     onCompleteRef.current = onComplete;
   }, [onComplete]);
 
+  const finishTransition = useCallback((delayMs = 0) => {
+    if (completedRef.current) return;
+    completedRef.current = true;
+    if (intervalRef.current) window.clearInterval(intervalRef.current);
+    window.setTimeout(() => onCompleteRef.current?.(), delayMs);
+  }, []);
+
   useEffect(() => {
     completedRef.current = false;
+    setSkipping(false);
     setRemaining(durationSeconds);
     const startTime = Date.now();
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
 
     const tick = () => {
       const elapsed = Math.floor((Date.now() - startTime) / 1000);
       const nextRemaining = Math.max(0, durationSeconds - elapsed);
       setRemaining((value) => (value === nextRemaining ? value : nextRemaining));
-      if (nextRemaining <= 0 && !completedRef.current) {
-        completedRef.current = true;
-        window.clearInterval(interval);
-        window.setTimeout(() => onCompleteRef.current?.(), 180);
-      }
+      if (nextRemaining <= 0) finishTransition(180);
     };
 
-    const interval = window.setInterval(tick, 200);
+    intervalRef.current = window.setInterval(tick, 200);
     tick();
-    return () => window.clearInterval(interval);
-  }, [durationSeconds]);
+    return () => {
+      if (intervalRef.current) window.clearInterval(intervalRef.current);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [durationSeconds, finishTransition]);
 
   const progress = durationSeconds > 0 ? ((durationSeconds - remaining) / durationSeconds) * 360 : 360;
   const title = cleanTeilTitle(nextTeilTitle);
@@ -136,6 +147,17 @@ const TeilTransitionScreen = ({
         </div>
         <p className={styles.teilTransitionSeconds}>Sekunden</p>
         <p className={styles.teilTransitionHint}>Bereite dich auf die nächste Aufgabe vor.</p>
+        <button
+          type="button"
+          className={styles.teilTransitionSkip}
+          onClick={() => {
+            setSkipping(true);
+            finishTransition(0);
+          }}
+          disabled={skipping}
+        >
+          {skipping ? "Oeffnen..." : "Ueberspringen"}
+        </button>
       </div>
     </section>
   );
@@ -2186,6 +2208,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const listeningPlayerAnchorRef = useRef(null);
   const previousScrollTargetRef = useRef({ partId: "", taskId: "" });
   const visitedScrollTargetsRef = useRef(new Set());
+  const partTransitionActiveRef = useRef(false);
   const exitGuardBypassRef = useRef(false);
   const exitHistoryIndexRef = useRef(0);
 
@@ -2692,6 +2715,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   );
 
   const finishModule = useCallback(() => {
+    partTransitionActiveRef.current = false;
+    setPartTransition(null);
     setCompleted(true);
     setPartIntroVisible(false);
     setAudioPlaying(false);
@@ -2891,6 +2916,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setCompleted(false);
     setPartIntroVisible(true);
     setPartTransition(null);
+    partTransitionActiveRef.current = false;
     setWritingVersions([]);
     setSavedSimulationId(null);
     setWritingCorrection(null);
@@ -2918,6 +2944,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   }, [armExamTimer, armPrepTimer, module, stopListeningAmbience, totalExamDuration]);
 
   const beginPart = useCallback((part, startIndex, { logStart = true } = {}) => {
+    partTransitionActiveRef.current = false;
     const safeIndex = part?.firstIndex ?? startIndex ?? currentIndex;
     setCurrentIndex(safeIndex);
     setPartIntroVisible(false);
@@ -2937,7 +2964,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   }, [armPrepTimer, currentIndex, currentPartIndex, module, persistProgress, simulationMode, totalExamDuration]);
 
   const startPartTransition = useCallback((nextPart, nextIndex, message = "") => {
-    if (!nextPart) return false;
+    if (!nextPart || partTransitionActiveRef.current) return false;
+    partTransitionActiveRef.current = true;
     timerDeadlineRef.current = null;
     prepDeadlineRef.current = null;
     setPrepActive(false);
@@ -2955,16 +2983,17 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const completePartTransition = useCallback(() => {
     if (!partTransition?.nextPart) return;
     const { nextPart, nextIndex } = partTransition;
+    partTransitionActiveRef.current = false;
     setPartTransition(null);
     setResultStatus("");
     beginPart(nextPart, nextIndex);
   }, [beginPart, partTransition]);
 
   const goToNext = useCallback(() => {
+    if (partTransitionActiveRef.current || partTransition) return;
     if (usesFullPartNavigation) {
       const nextPart = examParts[currentPartIndex + 1] || null;
       if (!nextPart) {
-        finishModule();
         return;
       }
       if (startPartTransition(nextPart, nextPart.firstIndex)) return;
@@ -2973,7 +3002,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       return;
     }
     if (currentIndex >= totalTasks - 1) {
-      finishModule();
       return;
     }
     const nextPart = currentPart && currentIndex >= currentPart.lastIndex ? examParts[currentPartIndex + 1] : null;
@@ -2988,9 +3016,11 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setPrepActive(module.id === "speak" && simulationMode);
     setRecordingSeconds(0);
     recordingSecondsRef.current = 0;
-  }, [armPrepTimer, currentIndex, currentPart, currentPartIndex, examParts, finishModule, module, simulationMode, startPartTransition, totalTasks, usesFullPartNavigation]);
+  }, [armPrepTimer, currentIndex, currentPart, currentPartIndex, examParts, module, partTransition, simulationMode, startPartTransition, totalTasks, usesFullPartNavigation]);
 
   const goToPrevious = useCallback(() => {
+    partTransitionActiveRef.current = false;
+    setPartTransition(null);
     if (usesFullPartNavigation) {
       const previousPart = examParts[currentPartIndex - 1] || null;
       if (!previousPart) return;
@@ -3005,6 +3035,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
   const jumpToQuestion = useCallback((targetIndex) => {
     if (isRecording) return;
+    partTransitionActiveRef.current = false;
+    setPartTransition(null);
     const safeIndex = Math.min(Math.max(0, targetIndex), totalTasks - 1);
     setCurrentIndex(safeIndex);
     setPartIntroVisible(false);
@@ -3333,10 +3365,10 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
     persistProgress(`Auto-sauvegarde a ${formatClock()}`);
 
-    setResultStatus("Zeit abgelaufen. Die Antworten werden angezeigt.");
-    finishModule();
+    setPrepActive(false);
+    setSimulationMode(false);
+    setResultStatus("Zeit abgelaufen. Bitte pruefen Sie Ihre Antworten und klicken Sie auf Abgeben.");
   }, [
-    finishModule,
     isRecording,
     persistProgress,
     stopRecording,
@@ -3351,11 +3383,11 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     }
     persistProgress(`Temps termine a ${formatClock()}`);
 
-    setResultStatus("Zeit abgelaufen. Die Antworten werden angezeigt.");
-    finishModule();
+    setPrepActive(false);
+    setSimulationMode(false);
+    setResultStatus("Zeit abgelaufen. Bitte pruefen Sie Ihre Antworten und klicken Sie auf Abgeben.");
   }, [
     audioPlaying,
-    finishModule,
     isRecording,
     pauseListeningAudio,
     persistProgress,
@@ -5905,7 +5937,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
   return (
     <div className={styles.page} style={{ "--module-accent": module.accent, "--module-soft": module.soft }}>
-      {partTransition ? (
+      {partTransition ? createPortal((
         <TeilTransitionScreen
           key={partTransition.id}
           nextTeilTitle={partTransition.nextPart?.displayTitle}
@@ -5913,7 +5945,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           durationSeconds={PART_TRANSITION_SECONDS}
           onComplete={completePartTransition}
         />
-      ) : null}
+      ), document.body) : null}
       {exitConfirmationOpen ? createPortal((
         <div className={styles.exitDialogOverlay} role="presentation">
           <section className={styles.exitDialog} role="dialog" aria-modal="true" aria-labelledby="exit-simulation-title">
@@ -6023,7 +6055,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             <button
               type="button"
               className={`${styles.primaryButton} ${styles.mobileNavButton}`}
-              onClick={goToNext}
+              onClick={isLastNavigationStep ? finishModule : goToNext}
               disabled={isRecording}
             >
               {isLastNavigationStep ? t.common.submit : t.common.next}

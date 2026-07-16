@@ -32,7 +32,8 @@ const createAuthMiddleware = ({ pool, jwt, jwtSecret, issuer, audience, emailVer
       }
 
       const r = await pool.query(
-        `SELECT id, email, username, first_name, last_name, date_of_birth, role, status,
+        `SELECT id, email, username, first_name, last_name, date_of_birth, country, phone,
+                auth_provider, avatar_url, role, status,
                 email_verified, has_full_access, partial_access, current_level, target_level,
                 marketing_emails_enabled,
                 created_at, last_login_at

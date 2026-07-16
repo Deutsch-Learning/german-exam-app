@@ -1,5 +1,11 @@
 import axios from "axios";
-import { clearAuthSession, getAuthSession, getAuthToken, storeAuthSession } from "../utils/access";
+import {
+  clearAuthSession,
+  getAuthSession,
+  getAuthToken,
+  hasExceededAuthInactivityLimit,
+  storeAuthSession,
+} from "../utils/access";
 
 const API = axios.create({
   baseURL: import.meta.env.VITE_API_URL || (import.meta.env.DEV ? "http://localhost:3000" : ""),
@@ -41,10 +47,12 @@ API.interceptors.response.use(
           };
           return API(original);
         }
-      } catch {
-        clearAuthSession();
+      } catch (refreshError) {
+        if (hasExceededAuthInactivityLimit() || [401, 403].includes(refreshError?.response?.status)) {
+          clearAuthSession();
+        }
       }
-    } else if (error.response?.status === 401) {
+    } else if (error.response?.status === 401 && hasExceededAuthInactivityLimit()) {
       clearAuthSession();
     }
     return Promise.reject(error);
