@@ -2,14 +2,26 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Activity,
-  BookOpenCheck,
+  ArrowRight,
   ClipboardCheck,
   FilePenLine,
+  FileText,
+  GraduationCap,
   Mic2,
+  Shield,
   ShieldCheck,
+  Star,
+  Target,
+  Trophy,
 } from "lucide-react";
 import "./LandingPage.css";
 import logo from "../assets/images/logo.png";
+import landingBerlinBackground from "../assets/images/landing-berlin-professionals.jpeg";
+import landingPeopleFocus from "../assets/images/landing-people-focus.png";
+import bookGoethe from "../assets/images/book-goethe.png";
+import bookOsd from "../assets/images/book-osd.png";
+import bookTelc from "../assets/images/book-telc.png";
+import bookEcl from "../assets/images/book-ecl.png";
 import iconProfile from "../assets/images/icon-profile.png";
 import iconAudio from "../assets/images/icon-audio.png";
 import iconWrite from "../assets/images/icon-write.png";
@@ -75,73 +87,27 @@ const trustedCountries = [
   { code: "IT", name: "Italy", flag: italyFlag },
 ];
 
-const TYPE_SPEED_MS = 58;
-const DELETE_SPEED_MS = 34;
-const HOLD_MS = 1500;
-const BETWEEN_TEXT_MS = 260;
-
-const useHeroTypingText = (phrases) => {
-  const [phraseIndex, setPhraseIndex] = useState(0);
-  const [letterCount, setLetterCount] = useState(0);
-  const [phase, setPhase] = useState("typing");
-
-  useEffect(() => {
-    if (!phrases.length) return undefined;
-
-    const phrase = phrases[phraseIndex] ?? "";
-    let delay = TYPE_SPEED_MS;
-
-    if (phase === "typing") {
-      if (letterCount < phrase.length) {
-        delay = TYPE_SPEED_MS + (letterCount % 4 === 0 ? 18 : 0);
-      } else {
-        delay = HOLD_MS;
-      }
-    } else if (phase === "deleting") {
-      delay = letterCount > 0 ? DELETE_SPEED_MS : BETWEEN_TEXT_MS;
-    }
-
-    const timer = window.setTimeout(() => {
-      if (phase === "typing") {
-        if (letterCount < phrase.length) {
-          setLetterCount((value) => value + 1);
-        } else {
-          setPhase("deleting");
-        }
-        return;
-      }
-
-      if (letterCount > 0) {
-        setLetterCount((value) => Math.max(0, value - 1));
-        return;
-      }
-
-      setPhraseIndex((value) => (value + 1) % phrases.length);
-      setPhase("typing");
-    }, delay);
-
-    return () => window.clearTimeout(timer);
-  }, [letterCount, phase, phraseIndex, phrases]);
-
-  const phrase = phrases[phraseIndex] ?? "";
-
-  return {
-    text: phrase.slice(0, letterCount),
-    phase,
-    fullText: phrase,
-  };
+const examBookImages = {
+  goethe: bookGoethe,
+  osd: bookOsd,
+  telc: bookTelc,
+  ecl: bookEcl,
 };
 
 export default function LandingPage() {
   const { language, setLanguage, t } = useLanguage();
   const startSimulationLanguage = useStartSimulationLanguage();
   const copy = t.landing;
-  const heroPhrases = useMemo(
-    () => [copy.heroTitleA, copy.heroTitleB].filter(Boolean),
-    [copy.heroTitleA, copy.heroTitleB]
+  const examCards = useMemo(
+    () => examSimulations.map((exam, index) => ({
+      ...exam,
+      ...(copy.examCards?.[index] ?? {}),
+      theme: exam.provider === "goethe" ? "goethe" : exam.provider === "telc" ? "telc" : exam.provider === "ecl" ? "ecl" : "osd",
+      bookLabel: exam.provider === "goethe" ? "GOETHE" : exam.provider === "telc" ? "TELC" : exam.provider === "ecl" ? "ECL" : "OSD",
+      bookImage: examBookImages[exam.provider] ?? examBookImages.osd,
+    })),
+    [copy.examCards]
   );
-  const typedHeadline = useHeroTypingText(heroPhrases);
-  const longestHeroPhrase = heroPhrases.reduce((longest, phrase) => Math.max(longest, phrase.length), 0);
   const [approvedTestimonials, setApprovedTestimonials] = useState([]);
   const [testimonialFormOpen, setTestimonialFormOpen] = useState(false);
   const [testimonialComment, setTestimonialComment] = useState("");
@@ -262,34 +228,74 @@ export default function LandingPage() {
         labels={{ ...copy.nav, lessons: t.common.lessons, dashboard: t.common.dashboard }}
       />
 
-      <section className="hero-section">
-        <div className="container hero-container">
-          <div className="hero-content">
-            <h1 className="hero-title" aria-label={`${copy.heroTitleA} ${copy.heroTitleB}`}>
-              <span
-                className={`hero-title-typing is-${typedHeadline.phase}`}
-                style={{ "--hero-title-chars": longestHeroPhrase }}
-              >
-                <span className="hero-title-text">{typedHeadline.text || "\u00a0"}</span>
-                <span className="hero-title-cursor" aria-hidden="true" />
-                <span className="sr-only">{typedHeadline.fullText}</span>
-              </span>
-            </h1>
-            <p className="hero-subtitle">{copy.heroSubtitle}</p>
-            <div className="hero-sim-actions" aria-label="Choose a simulation">
-              {examSimulations.map((exam) => (
-                <Link
-                  key={exam.id}
-                  className="sim-start-button"
-                  style={{ "--sim-accent": exam.accent }}
-                  to={exam.path}
-                  onClick={startSimulationLanguage}
-                >
-                  <BookOpenCheck size={18} />
-                  {exam.buttonLabel}
-                </Link>
-              ))}
+      <section className="hero-section hero-redesign">
+        <div
+          className="hero-redesign-bg"
+          aria-hidden="true"
+          style={{
+            "--hero-reference-image": `url(${landingBerlinBackground})`,
+            "--hero-people-image": `url(${landingPeopleFocus})`,
+          }}
+        >
+          <div className="hero-foreground-people" />
+          <div className="berlin-skyline">
+            <span className="skyline-block block-a" />
+            <span className="skyline-block block-b" />
+            <span className="skyline-tower" />
+            <span className="skyline-gate" />
+            <span className="skyline-block block-c" />
+            <span className="skyline-block block-d" />
+          </div>
+          <div className="hero-flag-ribbon" />
+        </div>
+        <div className="container hero-container hero-redesign-container">
+          <div className="hero-copy-panel">
+            <div className="hero-indicators" aria-label={copy.heroIndicatorsLabel}>
+              <span><Shield size={18} aria-hidden="true" />{copy.heroIndicators?.[0]}</span>
+              <span><Target size={18} aria-hidden="true" />{copy.heroIndicators?.[1]}</span>
+              <span><Star size={18} aria-hidden="true" />{copy.heroIndicators?.[2]}</span>
             </div>
+            <h1 className="hero-title">
+              <span>{copy.heroHeadlineMain ?? copy.heroHeadline}</span>
+              {copy.heroHeadlineAccent ? <> <mark>{copy.heroHeadlineAccent}</mark></> : null}
+            </h1>
+            <p className="hero-subtitle">{copy.heroDescription}</p>
+            <div className="hero-benefits" aria-label={copy.heroBenefitsLabel}>
+              <span><FileText size={22} aria-hidden="true" />{copy.heroBenefits?.[0]}</span>
+              <span><GraduationCap size={22} aria-hidden="true" />{copy.heroBenefits?.[1]}</span>
+              <span><Trophy size={22} aria-hidden="true" />{copy.heroBenefits?.[2]}</span>
+            </div>
+          </div>
+          <div className="hero-people-scene reference-image-spacer" aria-hidden="true">
+            <div className="professional worker"><span /></div>
+            <div className="professional student"><span /></div>
+            <div className="professional medic"><span /></div>
+          </div>
+          <div className="exam-card-grid" aria-label={copy.examCardsLabel}>
+            {examCards.map((exam) => (
+              <Link
+                key={exam.id}
+                className={`exam-card exam-card-${exam.theme}`}
+                to={exam.path}
+                onClick={startSimulationLanguage}
+                aria-label={exam.ariaLabel ?? `${exam.title}. ${exam.description}`}
+              >
+                <span className="exam-book" aria-hidden="true">
+                  <img src={exam.bookImage} alt="" loading="eager" />
+                </span>
+                <span className="exam-card-copy">
+                  <strong>{exam.title}</strong>
+                  <small>{exam.description}</small>
+                </span>
+                <span className="exam-level-badge">{exam.level}</span>
+                <ArrowRight className="exam-card-arrow" size={24} aria-hidden="true" />
+              </Link>
+            ))}
+          </div>
+          <div className="hero-success-strip" aria-hidden="true">
+            <Star size={30} />
+            <span>{copy.heroClosing}</span>
+            <span className="success-flight" />
           </div>
         </div>
       </section>

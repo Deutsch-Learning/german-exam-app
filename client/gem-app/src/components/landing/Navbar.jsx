@@ -1,35 +1,57 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
-import { ChevronDown, Menu, X } from "lucide-react";
-import { aboutTestSections, pageLinks } from "../../data/siteContent";
-import { languageOptions } from "../../utils/language";
+import { Link, useLocation } from "react-router-dom";
+import {
+  BookOpenText,
+  ChevronDown,
+  Home,
+  Info,
+  LayoutList,
+  LogIn,
+  Menu,
+  Newspaper,
+  Settings,
+  X,
+} from "lucide-react";
 import { getAuthUser, isLoggedIn } from "../../utils/access";
+import { languageOptions } from "../../utils/language";
 
-export default function Navbar({ logo, language = "fr", onChangeLanguage, labels }) {
-  const [openLang, setOpenLang] = useState(false);
-  const [openDropdown, setOpenDropdown] = useState("");
+const navItems = [
+  { key: "home", path: "/", icon: Home },
+  { key: "exams", path: "/start-preparation", icon: BookOpenText },
+  { key: "simulations", path: "/simulations", icon: Settings },
+  { key: "aboutTests", path: "/about", icon: Info },
+  { key: "blog", path: "/actualites", icon: Newspaper },
+  { key: "contact", path: "/contact", icon: LayoutList },
+];
+
+export default function Navbar({ logo, language = "fr", onChangeLanguage, labels = {} }) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [openLang, setOpenLang] = useState(false);
+  const location = useLocation();
   const loggedIn = isLoggedIn();
   const authUser = getAuthUser();
   const userName = [
     authUser?.first_name,
     authUser?.last_name,
-  ].filter(Boolean).join(" ").trim() || authUser?.username || authUser?.email || "User";
+  ].filter(Boolean).join(" ").trim() || authUser?.username || authUser?.email || "";
 
-  const selected = useMemo(
+  const activePath = useMemo(() => {
+    const path = location.pathname;
+    if (path === "/") return "/";
+    const match = navItems
+      .filter((item) => item.path !== "/" && path.startsWith(item.path))
+      .sort((a, b) => b.path.length - a.path.length)[0];
+    return match?.path ?? "";
+  }, [location.pathname]);
+
+  const selectedLanguage = useMemo(
     () => languageOptions.find((item) => item.id === language) ?? languageOptions[0],
     [language]
   );
 
-  const dropdowns = [
-    { id: "about", label: labels.aboutTests ?? "About", items: aboutTestSections },
-    { id: "pages", label: labels.pages ?? "Pages", items: pageLinks },
-  ];
-
-  const closeMenus = () => {
-    setOpenDropdown("");
-    setOpenLang(false);
+  const closeMenu = () => {
     setMobileOpen(false);
+    setOpenLang(false);
   };
 
   useEffect(() => {
@@ -37,135 +59,116 @@ export default function Navbar({ logo, language = "fr", onChangeLanguage, labels
 
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-
     const handleEscape = (event) => {
       if (event.key === "Escape") {
-        setOpenDropdown("");
-        setOpenLang(false);
         setMobileOpen(false);
+        setOpenLang(false);
       }
     };
-
     window.addEventListener("keydown", handleEscape);
-
     return () => {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", handleEscape);
     };
   }, [mobileOpen]);
 
-  const renderLinkDropdown = ({ id, label, items }) => (
-    <div
-      className={`nav-dropdown ${openDropdown === id ? "is-open" : ""}`}
-      onMouseEnter={() => setOpenDropdown(id)}
-      onMouseLeave={() => setOpenDropdown("")}
-    >
+  const renderLanguageSelector = (className = "") => (
+    <div className={`language-selector reference-language-selector ${className}`}>
       <button
         type="button"
-        className="nav-link nav-dropdown-trigger"
-        aria-expanded={openDropdown === id}
-        onClick={() => setOpenDropdown((value) => (value === id ? "" : id))}
+        className="language-button reference-language-button"
+        aria-label={labels.languageSelector ?? "Changer de langue"}
+        aria-expanded={openLang}
+        onClick={() => setOpenLang((value) => !value)}
       >
-        {label}
-        <ChevronDown className="nav-chevron" size={16} aria-hidden="true" />
+        {selectedLanguage.flag ? (
+          <img src={selectedLanguage.flag} alt={selectedLanguage.label} />
+        ) : (
+          <span className="flag-fallback" aria-hidden="true">GL</span>
+        )}
+        <span>{language.toUpperCase()}</span>
+        <ChevronDown className="lang-chevron" size={15} aria-hidden="true" />
       </button>
-      <div className="nav-dropdown-menu">
-        {items.map((item) => (
-          <Link
-            key={item.id}
-            className="nav-dropdown-item"
-            to={item.path}
-            onClick={closeMenus}
-          >
-            <img src={logo} alt="" className="nav-dropdown-logo" />
-            <span>
-              <strong>{item.label}</strong>
-              {item.description ? <small>{item.description}</small> : null}
-            </span>
-          </Link>
-        ))}
-      </div>
+      {openLang ? (
+        <div className="language-menu reference-language-menu">
+          {languageOptions.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => {
+                onChangeLanguage?.(item.id);
+                setOpenLang(false);
+                setMobileOpen(false);
+              }}
+            >
+              <img src={item.flag} alt="" />
+              {item.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 
-  const renderDropdown = (dropdown) =>
-    !dropdown.items.length ? (
-      <Link key={dropdown.id} className="nav-link" to={dropdown.id === "about" ? "/about" : "/"} onClick={closeMenus}>
-        {dropdown.label}
-      </Link>
-    ) : renderLinkDropdown(dropdown);
-
   return (
     <>
-      <header className={`top-nav ${mobileOpen ? "menu-open" : ""}`}>
-        <div className="container nav-container">
-          <Link className="logo" to="/" aria-label="Deutsch Prüfungen home" onClick={closeMenus}>
-            <img src={logo} alt="Logo" />
+      <header className={`top-nav landing-reference-nav ${mobileOpen ? "menu-open" : ""}`}>
+        <div className="container nav-container reference-nav-container">
+          <Link className="reference-brand" to="/" aria-label={labels.homeLabel ?? "Deutsch Pruefungen home"} onClick={closeMenu}>
+            <img src={logo} alt="" />
+            <span>
+              <strong>{labels.brandTitle ?? "Préparation"}</strong>
+              <small>{labels.brandSubtitle ?? "Examens d'Allemand"}</small>
+            </span>
           </Link>
+          <div className="reference-mobile-actions">
+            {renderLanguageSelector("reference-mobile-language")}
+          </div>
           <button
             type="button"
-            className="mobile-menu-button"
-            aria-label={mobileOpen ? "Close navigation menu" : "Open navigation menu"}
+            className="reference-menu-button"
+            aria-label={mobileOpen ? labels.closeMenu ?? "Fermer le menu" : labels.openMenu ?? "Ouvrir le menu"}
             aria-expanded={mobileOpen}
             onClick={() => setMobileOpen((value) => !value)}
           >
             {mobileOpen ? <X size={22} /> : <Menu size={22} />}
           </button>
-          <nav className={`desktop-nav ${mobileOpen ? "mobile-open" : ""}`}>
-            <Link className="nav-link" to="/" onClick={closeMenus}>{labels.home ?? "Home"}</Link>
-            {dropdowns.map(renderDropdown)}
-            {labels.lessons ? <Link className="nav-link" to="/lessons" onClick={closeMenus}>{labels.lessons}</Link> : null}
-            <Link className="nav-link" to="/contact" onClick={closeMenus}>{labels.contact}</Link>
-            <div className="language-selector">
-              <button
-                type="button"
-                className="language-button"
-                onClick={() => setOpenLang((value) => !value)}
-              >
-                {selected.flag ? (
-                  <img src={selected.flag} alt={selected.label} />
-                ) : (
-                  <span className="flag-fallback" aria-hidden="true">GL</span>
-                )}
-                <span>{language.toUpperCase()}</span>
-                <ChevronDown className="lang-chevron" size={15} aria-hidden="true" />
-              </button>
-              {openLang ? (
-                <div className="language-menu">
-                  {languageOptions.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => {
-                        onChangeLanguage?.(item.id);
-                        setOpenLang(false);
-                        setMobileOpen(false);
-                      }}
-                    >
-                      <img src={item.flag} alt="" />
-                      {item.label}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
+          <nav className={`reference-tabs ${mobileOpen ? "mobile-open" : ""}`} aria-label={labels.primaryNavLabel ?? "Navigation principale"}>
+            <div className="reference-nav-links">
+              {navItems.map((item) => {
+                const Icon = item.icon;
+                const active = activePath === item.path;
+                return (
+                  <Link
+                    key={item.key}
+                    className={`reference-tab ${active ? "is-active" : ""}`}
+                    to={item.path}
+                    onClick={closeMenu}
+                    aria-current={active ? "page" : undefined}
+                  >
+                    <Icon size={20} aria-hidden="true" />
+                    <span>{labels[item.key] ?? item.key}</span>
+                  </Link>
+                );
+              })}
             </div>
-            <div className="auth-nav-actions">
+            <div className="reference-auth-actions">
+              {renderLanguageSelector("reference-desktop-language")}
               {loggedIn ? (
                 <>
-                  <span className="nav-user-name" title={userName}>
-                    {userName}
-                  </span>
-                  <Link className="btn-register-nav" to="/dashboard" onClick={closeMenus}>
-                    {labels.returnToDashboard ?? "Return to Dashboard"}
+                  <span className="reference-user-name" title={userName}>{userName}</span>
+                  <Link className="reference-login" to="/dashboard" onClick={closeMenu}>
+                    {labels.returnToDashboard ?? "Dashboard"}
                   </Link>
                 </>
               ) : (
                 <>
-                  <Link className="btn-login" to="/login" onClick={closeMenus}>
-                    {labels.login}
+                  <Link className="reference-login" to="/login" onClick={closeMenu}>
+                    <LogIn size={19} aria-hidden="true" />
+                    <span>{labels.login ?? "Se connecter"}</span>
                   </Link>
-                  <Link className="btn-register-nav" to="/register" onClick={closeMenus}>
-                    {labels.createAccount ?? "Create an account"}
+                  <Link className="reference-register" to="/register" onClick={closeMenu}>
+                    {labels.createAccount ?? "S'inscrire"}
                   </Link>
                 </>
               )}
@@ -173,7 +176,14 @@ export default function Navbar({ logo, language = "fr", onChangeLanguage, labels
           </nav>
         </div>
       </header>
-      {mobileOpen ? <button type="button" className="mobile-nav-scrim" aria-label="Close navigation menu" onClick={closeMenus} /> : null}
+      {mobileOpen ? (
+        <button
+          type="button"
+          className="mobile-nav-scrim reference-nav-scrim"
+          aria-label={labels.closeMenu ?? "Fermer le menu"}
+          onClick={closeMenu}
+        />
+      ) : null}
     </>
   );
 }
