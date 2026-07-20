@@ -59,6 +59,7 @@ const {
   stripProductionMarkers,
   TtsConfigurationError,
 } = require("./services/ttsService");
+const goetheB1HoerenQuestionFixes = require("./data/goetheB1HoerenQuestionFixes.json");
 const {
   getAppBaseUrl,
   normalizePublicUrl,
@@ -2809,20 +2810,23 @@ const resolveListeningAudioForQuestion = (question, listeningAudioMap = new Map(
   return listeningAudioMap.get(`${partNumber}:${itemNumber}`) || listeningAudioMap.get(`${partNumber}:1`) || null;
 };
 
-const buildListeningTask = (question, index = 0, listeningAudioMap = new Map()) => {
-  const questionType = String(question.question_type || "").toLowerCase();
-  const correctValue = extractCorrectValue(question.correct_answer);
-  const options = normalizeChoiceOptions(question.options)
+const buildListeningTask = (question, index = 0, listeningAudioMap = new Map(), sourceFixes = null) => {
+  const metadata = asJsonObject(question.source_metadata);
+  const partNumber = Number(question.part_number) || Number(question.section_position) || Number(metadata.partNumber) || index + 1;
+  const sourceQuestionNumber = Number(metadata.sourceQuestionNumber ?? question.position ?? index + 1);
+  const sourceFix = sourceFixes?.[`${partNumber}:${sourceQuestionNumber}`] || null;
+  const questionType = String(sourceFix?.questionType || question.question_type || "").toLowerCase();
+  const correctValue = sourceFix?.correctAnswer?.value || extractCorrectValue(question.correct_answer);
+  const options = normalizeChoiceOptions(sourceFix?.options || question.options)
     .map((option) => ({ ...option, label: cleanListeningOptionLabel(option.label) }))
     .filter((option) => option.label);
-  const metadata = asJsonObject(question.source_metadata);
   const base = {
     id: `db-question-${question.id}`,
     level: question.level || "B1",
     typeLabel: question.section_title || `Hören Teil ${question.part_number || index + 1}`,
-    question: extractListeningStudentPrompt(question.prompt || question.section_instructions, question.section_title),
+    question: sourceFix?.prompt || extractListeningStudentPrompt(question.prompt || question.section_instructions, question.section_title),
     hint: "Hören Sie den Audiotext aufmerksam und beantworten Sie die Aufgaben.",
-    explanation: question.explanation || "Antwort aus dem importierten Hörverstehen-Modul.",
+    explanation: sourceFix?.explanation || question.explanation || "Antwort aus dem importierten Hörverstehen-Modul.",
     sourceQuestionId: question.id,
     audio: resolveListeningAudioForQuestion(question, listeningAudioMap),
     contentStyle: asJsonObject(metadata.contentStyle),
@@ -3229,6 +3233,15 @@ const buildPublicListeningAudioSummary = (listeningAudioItems = []) => {
   };
 };
 
+const getGoetheB1HoerenQuestionFixesForExam = (exam) => {
+  const provider = normalizeProviderId(exam?.provider || exam?.exam_type || "");
+  const level = String(exam?.level || "").toUpperCase();
+  const sectionType = String(exam?.section_type || "").toLowerCase();
+  const seriesNumber = String(Number(exam?.series_number) || "");
+  if (provider !== "goethe" || level !== "B1" || sectionType !== "listen" || !seriesNumber) return null;
+  return goetheB1HoerenQuestionFixes[seriesNumber] || null;
+};
+
 const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {}, listeningAudioItems = [] }) => {
   const moduleId = exam.section_type;
   const moduleMeta = PUBLIC_MODULE_META[moduleId] ?? PUBLIC_MODULE_META.read;
@@ -3292,7 +3305,8 @@ const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {},
   } else if (moduleId === "speak") {
     tasks = questions.map((question, index) => buildSpeakingTask(question, index));
   } else if (moduleId === "listen") {
-    tasks = questions.map((question, index) => buildListeningTask(question, index, listeningAudioMap));
+    const sourceFixes = getGoetheB1HoerenQuestionFixesForExam(exam);
+    tasks = questions.map((question, index) => buildListeningTask(question, index, listeningAudioMap, sourceFixes));
   } else {
     tasks = questions.map((question, index) => buildReadingTask(question, index));
   }

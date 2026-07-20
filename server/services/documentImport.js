@@ -2308,6 +2308,53 @@ const parseGoetheCorrections = (solutionText) => {
   const isTableHeading = (line) =>
     /^(?:correction_visible_after_submit.*|teil\s+\d+|nr\.?|loesung|lösung|begr[uü]ndung(?:\s+b1)?|mc)$/i.test(foldForSearch(line));
   const isNumberLine = (line) => /^\d{1,2}$/.test(compactText(line));
+  const parsePart1CorrectionLines = (lines, number) => {
+    let index = 0;
+    const answerLine = lines[index] || "";
+    index += 1;
+    const trueFalseAnswer = answerLine.match(/\b(Richtig|Falsch)\b/i)?.[1] || "";
+    let multipleChoiceAnswer = answerLine.match(/\bMC\s*:\s*([ABC])\b/i)?.[1] || "";
+    if (!multipleChoiceAnswer && /^MC\s*:\s*([ABC])$/i.test(lines[index] || "")) {
+      multipleChoiceAnswer = lines[index].match(/^MC\s*:\s*([ABC])$/i)?.[1] || "";
+      index += 1;
+    }
+
+    const trueFalseExplanation = [];
+    const multipleChoiceExplanation = [];
+    let readingMultipleChoiceExplanation = false;
+    while (index < lines.length) {
+      const line = lines[index];
+      const mcExplanation = line.match(/^MC\s*:\s*([ABC])\)?\s*(.*)$/i);
+      if (mcExplanation) {
+        readingMultipleChoiceExplanation = true;
+        if (!multipleChoiceAnswer) multipleChoiceAnswer = mcExplanation[1];
+        if (mcExplanation[2]) multipleChoiceExplanation.push(mcExplanation[2]);
+      } else if (readingMultipleChoiceExplanation) {
+        multipleChoiceExplanation.push(line);
+      } else {
+        trueFalseExplanation.push(line);
+      }
+      index += 1;
+    }
+
+    return [
+      trueFalseAnswer ? [number, makeEntry(trueFalseAnswer, trueFalseExplanation.join(" "))] : null,
+      multipleChoiceAnswer ? [number + 5, makeEntry(multipleChoiceAnswer, multipleChoiceExplanation.join(" "))] : null,
+    ].filter(Boolean);
+  };
+  const part1InlineAnswers = new Map();
+  [...String(solutionText || "").matchAll(
+    /CORRECTION_VISIBLE_AFTER_SUBMIT[^\n]*(?:\n\s*)+Text\s+([1-5])\s*([\s\S]*?)(?=(?:\n\s*Teil\s+1\s*\/\s*Text\s+[1-5]\b|\n\s*Teil\s+2\b|\n\s*FULL\s+ORIGINAL\s+CORRECTION\s+BLOCK|\n\s*CORRECTION_VISIBLE_AFTER_SUBMIT))/gi
+  )].forEach((match) => {
+    const number = Number(match[1]);
+    const lines = compactText(match[2])
+      .split("\n")
+      .map((line) => compactText(line))
+      .filter(Boolean)
+      .filter((line) => !isTableHeading(line));
+    parsePart1CorrectionLines(lines, number).forEach(([key, value]) => part1InlineAnswers.set(key, value));
+  });
+  if (part1InlineAnswers.size) answers.set(1, part1InlineAnswers);
 
   partBlocks.forEach((block) => {
     const part = Number(block.match[1]);
@@ -2326,40 +2373,12 @@ const parseGoetheCorrections = (solutionText) => {
         }
         const number = Number(lines[index]);
         index += 1;
-        const answerLine = lines[index] || "";
-        index += 1;
-
-        const trueFalseAnswer = answerLine.match(/\b(Richtig|Falsch)\b/i)?.[1] || "";
-        let multipleChoiceAnswer = answerLine.match(/\bMC\s*:\s*([ABC])\b/i)?.[1] || "";
-        if (!multipleChoiceAnswer && /^MC\s*:\s*([ABC])$/i.test(lines[index] || "")) {
-          multipleChoiceAnswer = lines[index].match(/^MC\s*:\s*([ABC])$/i)?.[1] || "";
-          index += 1;
-        }
-
-        const trueFalseExplanation = [];
-        const multipleChoiceExplanation = [];
-        let readingMultipleChoiceExplanation = false;
+        const itemLines = [];
         while (index < lines.length && !isNumberLine(lines[index])) {
-          const line = lines[index];
-          const mcExplanation = line.match(/^MC\s*:\s*([ABC])\)?\s*(.*)$/i);
-          if (mcExplanation) {
-            readingMultipleChoiceExplanation = true;
-            if (!multipleChoiceAnswer) multipleChoiceAnswer = mcExplanation[1];
-            if (mcExplanation[2]) multipleChoiceExplanation.push(mcExplanation[2]);
-          } else if (readingMultipleChoiceExplanation) {
-            multipleChoiceExplanation.push(line);
-          } else {
-            trueFalseExplanation.push(line);
-          }
+          itemLines.push(lines[index]);
           index += 1;
         }
-
-        if (trueFalseAnswer) {
-          partAnswers.set(number, makeEntry(trueFalseAnswer, trueFalseExplanation.join(" ")));
-        }
-        if (multipleChoiceAnswer) {
-          partAnswers.set(number + 5, makeEntry(multipleChoiceAnswer, multipleChoiceExplanation.join(" ")));
-        }
+        parsePart1CorrectionLines(itemLines, number).forEach(([key, value]) => partAnswers.set(key, value));
       }
     } else {
       for (let index = 0; index < lines.length;) {
@@ -2399,7 +2418,7 @@ const extractGoetheMatchingOptions = (taskBody, transcript = "") => {
   const taskText = compactText(taskBody);
   const optionBlock = taskText.match(/Ordnen\s+Sie[\s\S]{0,500}?\(([^)]+)\)\s*:/i)?.[1] || "";
   const labels = optionBlock
-    ? optionBlock.split("/").map((item) => compactText(item)).filter(Boolean)
+    ? optionBlock.split("/").map((item) => compactText(item).replace(/\s+/g, " ").trim()).filter(Boolean)
     : [];
   const fallbackLabels = labels.length
     ? labels
@@ -2412,13 +2431,21 @@ const extractGoetheMatchingOptions = (taskBody, transcript = "") => {
     .filter((option) => option.value && option.label);
 };
 
+const trimGoetheQuestionRaw = (value) => {
+  const raw = String(value || "");
+  const end = raw.search(
+    /(?:^|\n)\s*(?:CORRECTION_VISIBLE_AFTER_SUBMIT|Global\s+ElevenLabs|GLOBAL_AUDIO_PARAMETERS|SUJET\s+\d+|Teil\s+[1-4]\b)/i
+  );
+  return end >= 0 ? raw.slice(0, end) : raw;
+};
+
 const parseGoetheTaskQuestions = ({ taskBody, partNumber, answers, transcript, audio, seriesNumber }) => {
   if (partNumber === 1) {
     const blocks = splitByMatches(taskBody, /(?:^|\n)Text\s+(\d+)\s*(?=\n)/gi);
     const questions = [];
     blocks.forEach((block) => {
       const textNumber = Number(block.match[1]);
-      const raw = getBlockBodyAfterMatch(block);
+      const raw = trimGoetheQuestionRaw(getBlockBodyAfterMatch(block));
       const rf = raw.match(/Richtig\/Falsch\s*:\s*([^\n]+)/i);
       const mc = raw.match(/Multiple Choice\s*:\s*([^\n]+)([\s\S]*)/i);
       if (rf) {
@@ -2457,7 +2484,7 @@ const parseGoetheTaskQuestions = ({ taskBody, partNumber, answers, transcript, a
   const blocks = splitByMatches(taskBody, /(?:^|\n)\s*(\d{1,2})\.\s+/g);
   return blocks.map((block) => {
     const number = Number(block.match[1]);
-    const raw = getBlockBodyAfterMatch(block);
+    const raw = trimGoetheQuestionRaw(getBlockBodyAfterMatch(block));
     const correction = answers.get(number);
     if (partNumber === 2) {
       const optionStart = raw.search(/(?:^|\n)\s*A\)/i);
