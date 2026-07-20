@@ -26,7 +26,7 @@ create table if not exists public.affiliate_partners (
   id uuid primary key default gen_random_uuid(),
   user_id integer not null unique references public.users(id) on delete cascade,
   public_name text not null,
-  status text not null default 'active' check (status in ('active', 'suspended', 'pending_review')),
+  status text not null default 'pending_review' check (status in ('active', 'suspended', 'pending_review')),
   commission_rate numeric(5,2) not null default 10 check (commission_rate between 0 and 100),
   payout_method text check (payout_method in ('mtn', 'orange')),
   payout_destination text,

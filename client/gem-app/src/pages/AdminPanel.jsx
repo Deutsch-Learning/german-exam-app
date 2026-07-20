@@ -1088,7 +1088,7 @@ function AdminAffiliates() {
                       <td>{partner.converted}/{partner.referrals}</td>
                       <td>{money(partner.available)}</td>
                       <td className={styles.actions}>
-                        <button className={styles.secondaryButton} type="button" onClick={() => updatePartner(partner, { status: partner.status === "active" ? "suspended" : "active" })}>{partner.status === "active" ? "Suspend" : "Activate"}</button>
+                        <button className={styles.secondaryButton} type="button" onClick={() => updatePartner(partner, { status: partner.status === "active" ? "suspended" : "active" })}>{partner.status === "pending_review" ? "Approve" : partner.status === "active" ? "Suspend" : "Reactivate"}</button>
                         <button className={styles.secondaryButton} type="button" onClick={() => createCode(partner)}>Custom code</button>
                       </td>
                     </tr>

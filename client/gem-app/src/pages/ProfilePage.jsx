@@ -238,6 +238,10 @@ export default function ProfilePage() {
   const partnerLink = partnerData?.primaryCode?.code
     ? `${window.location.origin}/register?ref=${encodeURIComponent(partnerData.primaryCode.code)}`
     : "";
+  const partnerStatus = partnerData?.partner?.status || "";
+  const partnerIsActive = partnerStatus === "active";
+  const partnerIsPending = partnerStatus === "pending_review";
+  const partnerIsSuspended = partnerStatus === "suspended";
   const currency = partnerData?.settings?.defaultCurrency || "XAF";
   const formatMoney = (value) =>
     new Intl.NumberFormat("fr-FR", { style: "currency", currency, maximumFractionDigits: 0 }).format(Number(value) || 0);
@@ -259,9 +263,9 @@ export default function ProfilePage() {
         acceptedTerms: partnerForm.acceptedTerms,
       });
       setPartnerData(res.data);
-      setPartnerNotice("Votre compte partenaire est actif.");
+      setPartnerNotice(res.data?.message || "Votre demande a ete envoyee. Vous recevrez un retour par mail.");
     } catch (err) {
-      setError(err.response?.data?.error || "Impossible d'activer le programme partenaire.");
+      setError(err.response?.data?.error || "Impossible d'envoyer la demande partenaire.");
     } finally {
       setPartnerBusy(false);
     }
@@ -484,11 +488,11 @@ export default function ProfilePage() {
             </div>
           </section>
 
-          <section className={`${styles.card} ${styles.partnerCard}`}>
+          <section className={`${styles.card} ${styles.partnerCard}`} id="partner-programme">
             <div className={styles.cardHeader}>
               <div>
                 <p className={styles.eyebrow}>Programme partenaire</p>
-                <h2>{partnerData?.partner ? "Mon code partenaire" : "Devenir partenaire"}</h2>
+                <h2>{partnerIsActive ? "Mon espace partenaire" : partnerData?.partner ? "Demande en cours" : "Devenir partenaire"}</h2>
               </div>
               <Wallet size={22} />
             </div>
@@ -517,9 +521,24 @@ export default function ProfilePage() {
                   <input type="checkbox" checked={partnerForm.acceptedTerms} onChange={(event) => setPartnerForm((previous) => ({ ...previous, acceptedTerms: event.target.checked }))} />
                   <span>J'accepte les conditions du programme partenaire.<small>Le numero de paiement ne pourra etre modifie qu'en contactant le service client.</small></span>
                 </label>
-                <button className={styles.submitBtn} type="submit" disabled={partnerBusy}>{partnerBusy ? "Activation..." : "Activer mon compte partenaire"}</button>
+                <button className={styles.submitBtn} type="submit" disabled={partnerBusy}>{partnerBusy ? "Envoi..." : "Envoyer ma demande partenaire"}</button>
               </form>
-            ) : (
+            ) : partnerIsPending || partnerIsSuspended ? (
+              <div className={styles.partnerDashboard}>
+                <div className={partnerIsSuspended ? styles.partnerStatusDanger : styles.partnerStatusBox}>
+                  <strong>{partnerIsSuspended ? "Compte partenaire suspendu" : "Demande envoyee"}</strong>
+                  <p>
+                    {partnerIsSuspended
+                      ? "Votre espace partenaire est temporairement suspendu. Contactez le service client pour plus d'informations."
+                      : "Votre demande a ete envoyee. Vous recevrez un retour par mail apres validation par l'administration."}
+                  </p>
+                </div>
+                <div className={styles.partnerPayout}>
+                  <p>Retrait: {partnerData.partner.payoutMethod?.toUpperCase()} {partnerData.partner.payoutDestination}</p>
+                  <p className={styles.emptyState}>Le code et le lien de recommandation seront generes automatiquement apres approbation.</p>
+                </div>
+              </div>
+            ) : partnerIsActive ? (
               <div className={styles.partnerDashboard}>
                 <div className={styles.partnerCodeBox}>
                   <span>Code</span>
@@ -565,7 +584,7 @@ export default function ProfilePage() {
                   </div>
                 </div>
               </div>
-            )}
+            ) : null}
           </section>
 
           <section className={styles.card}>

@@ -70,6 +70,7 @@ const {
   renderWelcomeEmail,
   renderPasswordChangedEmail,
   renderPromotionalEmail,
+  renderPartnerApprovedEmail,
 } = require("./services/emailService");
 
 const app = express();
@@ -1122,6 +1123,29 @@ const generateAffiliateCodeForUser = async (user, client = pool) => {
     if (!exists.rows[0]) return code;
   }
   return `REF${crypto.randomBytes(6).toString("hex").toUpperCase()}`.slice(0, 16);
+};
+
+const ensurePrimaryAffiliateCode = async (partner, user, client = pool, settings = null) => {
+  if (!partner?.id) return null;
+  const existing = await client.query(
+    `SELECT *
+       FROM affiliate_codes
+      WHERE partner_id = $1
+      ORDER BY created_at ASC
+      LIMIT 1`,
+    [partner.id]
+  );
+  if (existing.rows[0]) return existing.rows[0];
+
+  const resolvedSettings = settings || await getAffiliateSettings(client);
+  const code = await generateAffiliateCodeForUser({ ...user, first_name: partner.public_name }, client);
+  const inserted = await client.query(
+    `INSERT INTO affiliate_codes (partner_id, code, discount_percent, commission_percent, is_active)
+     VALUES ($1, $2, $3, NULL, TRUE)
+     RETURNING *`,
+    [partner.id, code, resolvedSettings.firstPurchaseDiscountPercent]
+  );
+  return inserted.rows[0] || null;
 };
 
 const mapAffiliatePartner = (row) => row ? ({
@@ -2254,7 +2278,7 @@ async function ensureSchema() {
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
       public_name TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'pending_review')),
+      status TEXT NOT NULL DEFAULT 'pending_review' CHECK (status IN ('active', 'suspended', 'pending_review')),
       commission_rate NUMERIC(5,2) NOT NULL DEFAULT 10 CHECK (commission_rate >= 0 AND commission_rate <= 100),
       payout_method TEXT CHECK (payout_method IN ('mtn', 'orange')),
       payout_destination TEXT,
@@ -2263,6 +2287,7 @@ async function ensureSchema() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
+  await pool.query(`ALTER TABLE affiliate_partners ALTER COLUMN status SET DEFAULT 'pending_review';`);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS affiliate_codes (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -6474,40 +6499,42 @@ app.post("/api/affiliate/activate", requireAuth, async (req, res) => {
     if (!partner) {
       const inserted = await client.query(
         `INSERT INTO affiliate_partners (user_id, public_name, status, commission_rate, payout_method, payout_destination, terms_accepted_at)
-         VALUES ($1, $2, 'active', $3, $4, $5, NOW())
+         VALUES ($1, $2, 'pending_review', $3, $4, $5, NOW())
          RETURNING *`,
         [req.user.id, publicName, settings.defaultCommissionPercent, payoutMethod, payoutDestination]
       );
       partner = inserted.rows[0];
-      const code = await generateAffiliateCodeForUser({ ...req.user, first_name: publicName }, client);
-      await client.query(
-        `INSERT INTO affiliate_codes (partner_id, code, discount_percent, commission_percent, is_active)
-         VALUES ($1, $2, $3, NULL, TRUE)`,
-        [partner.id, code, settings.firstPurchaseDiscountPercent]
-      );
     } else {
       const updated = await client.query(
         `UPDATE affiliate_partners
             SET public_name = $2,
+                payout_method = COALESCE(payout_method, $3),
+                payout_destination = COALESCE(NULLIF(payout_destination, ''), $4),
                 terms_accepted_at = COALESCE(terms_accepted_at, NOW()),
                 updated_at = NOW()
           WHERE id = $1
           RETURNING *`,
-        [partner.id, publicName]
+        [partner.id, publicName, payoutMethod, payoutDestination]
       );
       partner = updated.rows[0];
     }
     await client.query(
       `INSERT INTO affiliate_events (partner_id, user_id, event_type, metadata)
-       VALUES ($1, $2, 'partner_activated', $3::jsonb)`,
-      [partner.id, req.user.id, safeJson({ payoutMethod })]
+       VALUES ($1, $2, 'partner_request_submitted', $3::jsonb)`,
+      [partner.id, req.user.id, safeJson({ payoutMethod, status: partner.status })]
     );
     await client.query("COMMIT");
-    return res.status(201).json({ ok: true, ...(await getPartnerDashboard(req.user.id)) });
+    return res.status(partner.status === "active" ? 200 : 202).json({
+      ok: true,
+      message: partner.status === "active"
+        ? "Votre compte partenaire est actif."
+        : "Votre demande a ete envoyee. Vous recevrez un retour par mail.",
+      ...(await getPartnerDashboard(req.user.id)),
+    });
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});
-    console.error("Affiliate activation failed", err);
-    return res.status(500).json({ ok: false, error: "Partner account could not be activated" });
+    console.error("Affiliate partner request failed", err);
+    return res.status(500).json({ ok: false, error: "Partner request could not be submitted" });
   } finally {
     client.release();
   }
@@ -6749,13 +6776,29 @@ app.patch("/api/admin/affiliates/settings", requireAdmin, async (req, res) => {
 });
 
 app.patch("/api/admin/affiliates/partners/:partnerId", requireAdmin, async (req, res) => {
+  const client = await pool.connect();
   try {
     const status = String(req.body?.status || "").trim();
     const commissionRate = normalizeMoney(req.body?.commissionRate);
     if (!["active", "suspended", "pending_review"].includes(status)) {
       return res.status(400).json({ ok: false, error: "Invalid partner status" });
     }
-    const updated = await pool.query(
+    await client.query("BEGIN");
+    const currentResult = await client.query(
+      `SELECT ap.*, u.email, u.username, u.first_name, u.last_name
+         FROM affiliate_partners ap
+         JOIN users u ON u.id = ap.user_id
+        WHERE ap.id = $1
+        LIMIT 1
+        FOR UPDATE OF ap`,
+      [req.params.partnerId]
+    );
+    const current = currentResult.rows[0];
+    if (!current) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ ok: false, error: "Partner not found" });
+    }
+    const updated = await client.query(
       `UPDATE affiliate_partners
           SET status = $2,
               commission_rate = $3,
@@ -6764,16 +6807,53 @@ app.patch("/api/admin/affiliates/partners/:partnerId", requireAdmin, async (req,
         RETURNING *`,
       [req.params.partnerId, status, commissionRate]
     );
-    if (!updated.rows[0]) return res.status(404).json({ ok: false, error: "Partner not found" });
-    await pool.query(
+    const partner = updated.rows[0];
+    let primaryCode = null;
+    if (status === "active") {
+      primaryCode = await ensurePrimaryAffiliateCode(partner, current, client);
+    }
+    await client.query(
       `INSERT INTO affiliate_admin_events (admin_id, partner_id, action, details)
        VALUES ($1, $2, 'partner_updated', $3::jsonb)`,
-      [req.user.id, req.params.partnerId, safeJson({ status, commissionRate })]
+      [req.user.id, req.params.partnerId, safeJson({
+        previousStatus: current.status,
+        status,
+        commissionRate,
+        codeCreatedOrExisting: primaryCode?.code || null,
+      })]
     );
-    return res.json({ ok: true, partner: mapAffiliatePartner(updated.rows[0]) });
+    await client.query("COMMIT");
+
+    if (status === "active" && current.status !== "active" && current.email) {
+      try {
+        const email = renderPartnerApprovedEmail({
+          user: current,
+          code: primaryCode?.code || "",
+          partnerUrl: `${FRONTEND_URL}/partner`,
+        });
+        await sendEmail({
+          pool,
+          userId: current.user_id,
+          to: current.email,
+          subject: email.subject,
+          text: email.text,
+          html: email.html,
+          type: "affiliate_partner_approved",
+          metadata: { partnerId: partner.id, code: primaryCode?.code || null },
+          idempotencyKey: `affiliate-partner-approved-${partner.id}-${primaryCode?.id || "no-code"}`,
+        });
+      } catch (emailErr) {
+        console.error("Affiliate approval email failed", emailErr);
+      }
+    }
+
+    return res.json({ ok: true, partner: mapAffiliatePartner(partner), code: mapAffiliateCode(primaryCode) });
   } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
     console.error("Affiliate partner update failed", err);
     return res.status(500).json({ ok: false, error: "Partner could not be updated" });
+  } finally {
+    client.release();
   }
 });
 

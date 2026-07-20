@@ -25,6 +25,7 @@ const ListeningPage = lazy(() => import("./pages/Listening"));
 const WritingPage = lazy(() => import("./pages/Writing"));
 const SpeakingPage = lazy(() => import("./pages/Speaking"));
 const ProfilePage = lazy(() => import("./pages/ProfilePage"));
+const PartnerPage = lazy(() => import("./pages/PartnerPage"));
 const AboutPage = lazy(() => import("./pages/AboutPage"));
 const ActualitesPage = lazy(() => import("./pages/ActualitesPage"));
 const ContactPage = lazy(() => import("./pages/ContactPage"));
@@ -181,6 +182,7 @@ function AppRoutes() {
         <Route path="/writing" element={<ProtectedRoute><WritingPage /></ProtectedRoute>} />
         <Route path="/speaking" element={<ProtectedRoute><SpeakingPage /></ProtectedRoute>} />
         <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+        <Route path="/partner" element={<ProtectedRoute><PartnerPage /></ProtectedRoute>} />
         <Route path="/progress" element={<ProtectedRoute><ProgressPage /></ProtectedRoute>} />
         <Route path="/recent-simulations" element={<ProtectedRoute><AllRecentSimulationsPage /></ProtectedRoute>} />
         <Route path="/lessons" element={<LessonsPage />} />
