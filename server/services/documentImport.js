@@ -22,8 +22,20 @@ const SECTION_LABELS = {
 };
 const LISTENING_STUDENT_INSTRUCTION = "Hören Sie den Audiotext und beantworten Sie die Aufgaben zu diesem Teil.";
 
-const normalizeText = (value) =>
+const removeImportedInstructionArtifacts = (value) =>
   String(value ?? "")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((line) => line
+      .replace(/(^|[\s([{])n{3,}(?=$|[\s.,;:!?)}\]])/gi, "$1")
+      .replace(/\b(?:n\s+){2,}n\b/gi, "")
+      .replace(/[ \t]{2,}/g, " ")
+      .trim())
+    .filter((line) => line && !/^(?:n\s*){3,}$/i.test(line))
+    .join("\n");
+
+const normalizeText = (value) =>
+  removeImportedInstructionArtifacts(value)
     .replace(/\r/g, "\n")
     .replace(/\u00a0/g, " ")
     .replace(/[ \t]+\n/g, "\n")

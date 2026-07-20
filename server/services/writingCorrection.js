@@ -24,16 +24,16 @@ const CRITERION_KEYS = [
 const VALIDATION_STATUSES = new Set(["valid", "empty", "too_short", "meaningless", "off_topic", "unavailable"]);
 const INVALID_VALIDATION_STATUSES = new Set(["empty", "too_short", "meaningless", "off_topic"]);
 const VALIDATION_MESSAGES = {
-  empty: "Vous n'avez pas encore ecrit de reponse. Veuillez rediger un texte en rapport avec le sujet avant de demander une correction.",
-  too_short: "Votre reponse est trop courte pour etre corrigee correctement. Veuillez ecrire un texte complet en rapport avec la consigne.",
-  meaningless: "Votre reponse ne semble pas etre un texte comprehensible. Nous ne pouvons pas proposer d'amelioration. Veuillez ecrire une reponse claire et structuree.",
-  off_topic: "Votre reponse est comprehensible, mais elle ne correspond pas au sujet demande. Nous ne pouvons pas proposer une amelioration fiable. Veuillez ecrire un texte qui repond directement a la consigne.",
+  empty: "Sie haben noch keine Antwort geschrieben. Schreiben Sie bitte einen Text zur Aufgabe, bevor Sie eine Korrektur anfordern.",
+  too_short: "Ihre Antwort ist zu kurz, um verlaesslich korrigiert zu werden. Schreiben Sie bitte einen vollstaendigen Text zur Aufgabenstellung.",
+  meaningless: "Ihre Antwort wirkt nicht wie ein verstaendlicher Text. Eine sinnvolle Verbesserung ist so nicht moeglich. Schreiben Sie bitte eine klare und strukturierte Antwort.",
+  off_topic: "Ihre Antwort ist verstaendlich, passt aber nicht zur Aufgabenstellung. Eine verlaessliche Verbesserung ist so nicht moeglich. Schreiben Sie bitte einen Text, der direkt auf die Aufgabe antwortet.",
 };
 const INVALID_NEXT_STEPS = {
-  empty: ["Relisez la consigne.", "Redigez une reponse complete avant de demander une correction."],
-  too_short: ["Developpez vos idees en plusieurs phrases.", "Repondez directement aux points demandes dans la consigne."],
-  meaningless: ["Ecrivez des phrases comprehensibles avec un sujet et un verbe.", "Structurez votre reponse avant de relancer la correction."],
-  off_topic: ["Comparez votre texte avec la consigne.", "Reecrivez une reponse qui traite directement le sujet demande."],
+  empty: ["Lesen Sie die Aufgabe noch einmal.", "Schreiben Sie eine vollstaendige Antwort, bevor Sie die Korrektur starten."],
+  too_short: ["Entwickeln Sie Ihre Ideen in mehreren Saetzen.", "Gehen Sie direkt auf die Punkte in der Aufgabenstellung ein."],
+  meaningless: ["Schreiben Sie verstaendliche Saetze mit Subjekt und Verb.", "Strukturieren Sie Ihre Antwort, bevor Sie die Korrektur erneut starten."],
+  off_topic: ["Vergleichen Sie Ihren Text mit der Aufgabenstellung.", "Schreiben Sie eine Antwort, die das geforderte Thema direkt behandelt."],
 };
 
 const RESPONSE_SCHEMA = {
@@ -329,7 +329,7 @@ const buildValidationEvaluation = (task, status) => {
     mainMessage: feedback,
     sentenceCorrections: [],
     improvedVersion: "",
-    nextSteps: INVALID_NEXT_STEPS[normalizedStatus] || ["Reprenez la consigne puis redigez une reponse complete."],
+    nextSteps: INVALID_NEXT_STEPS[normalizedStatus] || ["Lesen Sie die Aufgabe erneut und schreiben Sie dann eine vollstaendige Antwort."],
   };
 };
 
@@ -480,7 +480,7 @@ const buildPrompt = (task) => {
     "The score field is a percentage from 0 to 100, not the task maximum. The application converts it to its stored max score.",
     "For valid answers below 90, give suggestions and an improved version based mainly on the learner's own text. Preserve the learner's original ideas and do not write a completely new answer.",
     "For valid answers of 90 or above, congratulate the learner and give only minor refinements if useful.",
-    "Feedback must be in French, concise, practical, and examiner-style.",
+    "All user-facing feedback, warnings, errors, explanations, strengths, weaknesses, nextSteps, sentence correction explanations, and improvedVersion must be in German. Be concise, practical, and examiner-style.",
     "Criterion scores are diagnostic values from 0 to 10 for each criterion.",
     "Evaluate task relevance, completeness, coherence and organization, grammar and syntax, spelling and punctuation, vocabulary, sentence structure, and register/formality.",
     "Set shouldShowImprovement to false for invalid statuses. Set it to true for valid answers below 90.",
@@ -519,8 +519,8 @@ const normalizeEvaluation = (raw, task) => {
   const mainMessage = cleanText(
     getField(data, "mainMessage", "main_message", data.feedback) ||
       (scorePercentage >= 90
-        ? "Tres bon travail. Votre reponse est claire, pertinente et bien structuree. Quelques petites ameliorations peuvent encore rendre le texte plus naturel."
-        : "Correction terminee."),
+        ? "Sehr gute Arbeit. Ihre Antwort ist klar, passend und gut strukturiert. Einige kleine Verbesserungen koennen den Text noch natuerlicher machen."
+        : "Korrektur abgeschlossen."),
     4500
   );
   const shouldShowImprovement = !invalid && scorePercentage < 90;
@@ -557,7 +557,7 @@ const buildEmptyEvaluation = (task) => buildValidationEvaluation(task, "empty");
 
 const buildUnavailableEvaluation = (task, message) => {
   const feedback = cleanText(
-    message || "La correction IA est momentanement indisponible. La reponse est enregistree et pourra etre corrigee a nouveau.",
+    message || "Die KI-Korrektur ist im Moment nicht verfuegbar. Die Antwort wurde gespeichert und kann spaeter erneut korrigiert werden.",
     1000
   );
   return {
@@ -576,7 +576,7 @@ const buildUnavailableEvaluation = (task, message) => {
     mainMessage: feedback,
     sentenceCorrections: [],
     improvedVersion: "",
-    nextSteps: ["Relancez la correction dans quelques instants."],
+    nextSteps: ["Starten Sie die Korrektur in wenigen Augenblicken erneut."],
   };
 };
 
@@ -658,15 +658,15 @@ const getRetryDelayMs = (err, attempt) => {
 
 const getCorrectionFailureMessage = (err) => {
   if (err?.status === 429) {
-    return "Trop de demandes de correction en meme temps. Attendez environ une minute, puis relancez la correction.";
+    return "Zu viele Korrekturanfragen gleichzeitig. Warten Sie ungefaehr eine Minute und starten Sie die Korrektur dann erneut.";
   }
   if (err?.status >= 500) {
-    return "Le service de correction IA est surcharge pour le moment. Les reponses sont enregistrees; relancez la correction dans quelques instants.";
+    return "Der KI-Korrekturdienst ist im Moment ueberlastet. Die Antworten wurden gespeichert; starten Sie die Korrektur in wenigen Augenblicken erneut.";
   }
   if (err?.message === "AI correction deadline reached" || err?.message === "Gemini request timed out") {
-    return "La correction IA a pris trop de temps. Les reponses sont enregistrees; relancez la correction dans quelques instants.";
+    return "Die KI-Korrektur hat zu lange gedauert. Die Antworten wurden gespeichert; starten Sie die Korrektur in wenigen Augenblicken erneut.";
   }
-  return "La correction IA est momentanement indisponible. Les reponses sont enregistrees; relancez la correction dans quelques instants.";
+  return "Die KI-Korrektur ist im Moment nicht verfuegbar. Die Antworten wurden gespeichert; starten Sie die Korrektur in wenigen Augenblicken erneut.";
 };
 
 const evaluateTaskWithRetry = async ({ apiKey, model, task, deadlineAt = 0, maxAttempts = GEMINI_MAX_ATTEMPTS }) => {
@@ -727,7 +727,7 @@ const buildBatchPrompt = (tasks) => {
     "The score field is a percentage from 0 to 100, not the task maximum. The application converts it to its stored max score.",
     "For valid answers below 90, give suggestions and an improved version based mainly on the learner's own text. Preserve the learner's original ideas and do not write a completely new answer.",
     "For valid answers of 90 or above, congratulate the learner and give only minor refinements if useful.",
-    "Feedback must be in French, concise, practical, and examiner-style.",
+    "All user-facing feedback, warnings, errors, explanations, strengths, weaknesses, nextSteps, sentence correction explanations, and improvedVersion must be in German. Be concise, practical, and examiner-style.",
     "Criterion scores are diagnostic values from 0 to 10 for each criterion.",
     "Evaluate task relevance, completeness, coherence and organization, grammar and syntax, spelling and punctuation, vocabulary, sentence structure, and register/formality.",
     "Set shouldShowImprovement to false for invalid statuses. Set it to true for valid answers below 90.",
@@ -784,7 +784,7 @@ const evaluateTasksWithRetry = async ({ apiKey, model, tasks, deadlineAt = 0, ma
           if (!rawTask) {
             return {
               task,
-              evaluation: buildUnavailableEvaluation(task, "La correction IA n'a pas retourne de resultat pour cette tache."),
+              evaluation: buildUnavailableEvaluation(task, "Die KI-Korrektur hat fuer diese Aufgabe kein Ergebnis zurueckgegeben."),
               aiSucceeded: false,
               aiFailed: true,
               errorMessage: "Missing task correction in AI response.",
@@ -1132,23 +1132,23 @@ const buildOverall = (taskResults, status) => {
   const invalidCount = taskResults.filter((item) => isInvalidValidationStatus(item.evaluation.validationStatus)).length;
   const allInvalid = invalidCount > 0 && invalidCount === taskResults.length;
 
-  let overallFeedback = "Correction terminee.";
+  let overallFeedback = "Korrektur abgeschlossen.";
   if (status === "failed") {
-    overallFeedback = "La correction automatique n'a pas pu etre terminee. Les reponses sont enregistrees pour une nouvelle tentative.";
+    overallFeedback = "Die automatische Korrektur konnte nicht abgeschlossen werden. Die Antworten wurden fuer einen neuen Versuch gespeichert.";
   } else if (status === "partial") {
-    overallFeedback = "Correction partielle: certaines taches ont ete evaluees, mais au moins une correction IA a echoue.";
+    overallFeedback = "Teilkorrektur: Einige Aufgaben wurden bewertet, aber mindestens eine KI-Korrektur ist fehlgeschlagen.";
   } else if (allInvalid) {
-    overallFeedback = "La reponse ne peut pas etre corrigee comme une production ecrite valide. Redigez un texte clair et lie a la consigne avant de relancer la correction.";
+    overallFeedback = "Die Antwort kann nicht als gueltige schriftliche Produktion korrigiert werden. Schreiben Sie einen klaren Text zur Aufgabenstellung, bevor Sie die Korrektur erneut starten.";
   } else if (invalidCount) {
-    overallFeedback = "Certaines reponses ne peuvent pas etre corrigees normalement. Les textes valides ont ete evalues, mais les reponses invalides doivent etre reecrites.";
+    overallFeedback = "Einige Antworten koennen nicht normal korrigiert werden. Die gueltigen Texte wurden bewertet, aber ungueltige Antworten muessen neu geschrieben werden.";
   } else if (percentage >= 90) {
-    overallFeedback = "Tres bon travail. Votre reponse est claire, pertinente et bien structuree. Quelques petites ameliorations peuvent encore rendre le texte plus naturel.";
+    overallFeedback = "Sehr gute Arbeit. Ihre Antwort ist klar, passend und gut strukturiert. Einige kleine Verbesserungen koennen den Text noch natuerlicher machen.";
   } else if (percentage >= 70) {
-    overallFeedback = "Production solide: la tache est globalement accomplie, avec des points linguistiques a consolider.";
+    overallFeedback = "Solide Leistung: Die Aufgabe ist insgesamt erfuellt, aber einige sprachliche Punkte sollten noch gefestigt werden.";
   } else if (percentage >= 50) {
-    overallFeedback = "Production partiellement reussie: il faut renforcer la structure, la precision et la correction grammaticale.";
+    overallFeedback = "Teilweise gelungene Leistung: Struktur, Genauigkeit und grammatische Korrektheit muessen verbessert werden.";
   } else {
-    overallFeedback = "Production insuffisante: reprenez les consignes, structurez la reponse et corrigez les bases grammaticales.";
+    overallFeedback = "Unzureichende Leistung: Arbeiten Sie die Aufgabenstellung erneut durch, strukturieren Sie die Antwort und korrigieren Sie die grammatischen Grundlagen.";
   }
 
   return {
@@ -1318,7 +1318,7 @@ const correctWritingSimulation = async (pool, simulation, options = {}) => {
         evaluation,
         aiSucceeded: false,
         aiFailed: true,
-        errorMessage: "La correction IA n'est pas configuree sur le serveur.",
+        errorMessage: "Die KI-Korrektur ist auf dem Server nicht konfiguriert.",
       });
       await finishLog(pool, logId, {
         status: "failed",
@@ -1399,7 +1399,7 @@ const correctWritingSimulation = async (pool, simulation, options = {}) => {
     evaluation: buildUnavailableEvaluation(task),
     aiSucceeded: false,
     aiFailed: true,
-    errorMessage: "La correction IA est momentanement indisponible.",
+    errorMessage: "Die KI-Korrektur ist im Moment nicht verfuegbar.",
   });
 
   await Promise.all(taskResults.map(({ task, evaluation, model: taskModel }) =>
@@ -1421,9 +1421,9 @@ const correctWritingSimulation = async (pool, simulation, options = {}) => {
   const failureMessages = uniqueStrings(taskResults.map((item) => item.errorMessage).filter(Boolean), 3);
   const errorMessage =
     status === "failed"
-      ? failureMessages[0] || "La correction IA n'a pas pu corriger les taches non vides."
+      ? failureMessages[0] || "Die KI-Korrektur konnte die nicht leeren Aufgaben nicht korrigieren."
       : status === "partial"
-        ? failureMessages[0] || "La correction IA a echoue pour au moins une tache."
+        ? failureMessages[0] || "Die KI-Korrektur ist bei mindestens einer Aufgabe fehlgeschlagen."
         : null;
 
   const updated = await pool.query(

@@ -647,22 +647,22 @@ const withMinimumWritingWords = (tasks) =>
   }));
 
 const CORRECTION_CRITERION_LABELS = {
-  instructions: "Consignes",
-  taskCompletion: "Tache",
-  coherence: "Coherence",
-  grammar: "Grammaire",
-  spelling: "Orthographe",
-  vocabulary: "Vocabulaire",
-  register: "Registre",
+  instructions: "Aufgaben",
+  taskCompletion: "Aufgabenerfuellung",
+  coherence: "Kohaerenz",
+  grammar: "Grammatik",
+  spelling: "Rechtschreibung",
+  vocabulary: "Wortschatz",
+  register: "Register",
 };
 const INVALID_WRITING_STATUSES = new Set(["empty", "too_short", "meaningless", "off_topic"]);
 const WRITING_VALIDATION_LABELS = {
-  valid: "Reponse valide",
-  empty: "Reponse vide",
-  too_short: "Trop courte",
-  meaningless: "Texte incomprehensible",
-  off_topic: "Hors sujet",
-  unavailable: "Indisponible",
+  valid: "Gueltige Antwort",
+  empty: "Leere Antwort",
+  too_short: "Zu kurz",
+  meaningless: "Unverstaendlicher Text",
+  off_topic: "Nicht zum Thema",
+  unavailable: "Nicht verfuegbar",
 };
 
 const firstPositiveNumber = (...values) => {
@@ -729,7 +729,7 @@ const buildWritingCorrectionTasks = (module, answers, examParts, context) => {
 
     return {
       taskId: task.sourceQuestionId || task.id,
-      title: task.title || task.question || `Tache ${index + 1}`,
+      title: task.title || task.question || `Aufgabe ${index + 1}`,
       instructions,
       subtitles: uniqueTextValues([part?.displayTitle, part?.title, task.typeLabel, task.partTitle]),
       examType: context.examHeading,
@@ -1197,7 +1197,7 @@ const MODULES = {
     Icon: Mic,
     simulationSeconds: 60 * 60,
     tasks: withGermanPrompts(speakingTasks, germanSpeakingPrompts),
-    focus: ["Prononciation", "Fluidité", "Interaction", "Organisation des idées"],
+    focus: ["Aussprache", "Fluidité", "Interaktion", "Organisation des idées"],
     advancement: [
       "Réponses plus longues",
       "Temps de préparation réduit",
@@ -1473,9 +1473,23 @@ const normalizePartKey = (value, fallback = "part-1") => {
   return safe ? `part-${safe}` : fallback;
 };
 
+const cleanImportedInstructionArtifacts = (value) =>
+  String(value ?? "")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((line) => line
+      .replace(/(^|[\s([{])n{3,}(?=$|[\s.,;:!?)}\]])/gi, "$1")
+      .replace(/\b(?:n\s+){2,}n\b/gi, "")
+      .replace(/[ \t]{2,}/g, " ")
+      .trim())
+    .filter((line) => line && !/^(?:n\s*){3,}$/i.test(line))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
 const plainRichText = (value, fallback = "") => {
   const text = hasRichTextMarkup(value) ? richTextToPlainText(value) : String(value ?? "");
-  return text.replace(/\s+/g, " ").trim() || fallback;
+  return cleanImportedInstructionArtifacts(text).replace(/\s+/g, " ").trim() || fallback;
 };
 
 const cleanPartDisplayTitle = (value, fallback = "Anweisungen") =>
@@ -1502,7 +1516,7 @@ const buildExamParts = (module) => {
       id: partKey,
       number: part.number || index + 1,
       title: part.heading || part.title || part.label || `Part ${index + 1}`,
-      instructions: part.instructions || part.text || "",
+      instructions: cleanImportedInstructionArtifacts(part.instructions || part.text || ""),
       durationMinutes: part.durationMinutes,
       points: part.points,
       sourceMetadata: part.sourceMetadata || {},
@@ -1517,7 +1531,7 @@ const buildExamParts = (module) => {
         id: partKey,
         number: task.partNumber || partMap.size + 1,
         title: task.partTitle || String(task.typeLabel || `Part ${partMap.size + 1}`).replace(/\s+-\s+.+$/, ""),
-        instructions: task.partInstructions || "",
+        instructions: cleanImportedInstructionArtifacts(task.partInstructions || ""),
         durationMinutes: task.partDurationMinutes,
         points: task.partPoints,
         sourceMetadata: task.partSourceMetadata || {},
@@ -1526,7 +1540,7 @@ const buildExamParts = (module) => {
     }
     const part = partMap.get(partKey);
     part.taskIndexes.push(index);
-    if (!part.instructions && task.partInstructions) part.instructions = task.partInstructions;
+    if (!part.instructions && task.partInstructions) part.instructions = cleanImportedInstructionArtifacts(task.partInstructions);
     if (!part.durationMinutes && task.partDurationMinutes) part.durationMinutes = task.partDurationMinutes;
     if (!part.points && task.partPoints) part.points = task.partPoints;
     if (
@@ -1543,7 +1557,7 @@ const buildExamParts = (module) => {
       ...part,
       number: part.number || index + 1,
       displayTitle: `Teil ${part.number || index + 1} - ${cleanPartDisplayTitle(part.title)}`,
-      sourceText: stripQuestionMaterial(part.instructions, part.taskIndexes.map((taskIndex) => module.tasks[taskIndex])),
+      sourceText: cleanImportedInstructionArtifacts(stripQuestionMaterial(part.instructions, part.taskIndexes.map((taskIndex) => module.tasks[taskIndex]))),
       firstIndex: part.taskIndexes[0],
       lastIndex: part.taskIndexes[part.taskIndexes.length - 1],
     }));
@@ -1994,7 +2008,7 @@ const buildResultSummary = (module, answers) => {
         isCorrect: null,
         userAnswer: `${countWords(answers[index])} mots`,
         correctAnswer: formatWritingRequirementFrench(task),
-        explanation: "Reponse enregistree. La note finale vient de la correction IA.",
+        explanation: "Antwort gespeichert. Die Endnote kommt aus der KI-Korrektur.",
       };
     }
 
@@ -2005,9 +2019,9 @@ const buildResultSummary = (module, answers) => {
         title: toPlainDisplayText(task.title ?? task.question, `Aufgabe ${index + 1}`),
         typeLabel: toPlainDisplayText(task.typeLabel),
         isCorrect: null,
-        userAnswer: answers[index]?.duration ? `${answers[index].duration}s` : "Aucune réponse",
+        userAnswer: answers[index]?.duration ? `${answers[index].duration}s` : "Keine Antwort",
         correctAnswer: "",
-        explanation: "Enregistrement sauvegardé. La note finale vient de la correction orale IA.",
+        explanation: "Aufnahme gespeichert. Die Endnote kommt aus der KI-Sprechkorrektur.",
       };
     }
 
@@ -2548,9 +2562,9 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       if (!auth?.id) {
         if (isWritingModule) {
           setWritingCorrectionLoading(false);
-          setWritingCorrectionError("Connectez-vous pour lancer la correction automatique.");
+          setWritingCorrectionError("Melden Sie sich an, um die automatische Korrektur zu starten.");
         }
-        setResultStatus("Résultat gardé en local. Connectez-vous pour l'ajouter au dashboard.");
+        setResultStatus("Ergebnis lokal gespeichert. Melden Sie sich an, um es zum Dashboard hinzuzufuegen.");
         return;
       }
 
@@ -2652,17 +2666,17 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           const simulationId = response.data?.simulation?.id;
           if (simulationId) setSavedSimulationId(simulationId);
           if (!correction && simulationId) {
-            setResultStatus("Résultat enregistré. Correction IA en cours.");
+            setResultStatus("Ergebnis gespeichert. KI-Korrektur laeuft.");
             try {
               const correctionResponse = await API.post(`/api/simulations/${simulationId}/writing-correction`);
               correction = correctionResponse.data?.correction ?? null;
             } catch {
-              setWritingCorrectionError("Résultat enregistré, mais la correction IA n'a pas pu se terminer. Relancez la correction depuis ce résultat.");
+              setWritingCorrectionError("Ergebnis gespeichert, aber die KI-Korrektur konnte nicht abgeschlossen werden. Starten Sie die Korrektur von diesem Ergebnis aus erneut.");
             }
           }
           setWritingCorrection(correction);
           if (correction?.status === "partial" || correction?.status === "failed") {
-            setWritingCorrectionError(correction.errorMessage || "Correction IA indisponible pour le moment.");
+            setWritingCorrectionError(correction.errorMessage || "Die KI-Korrektur ist im Moment nicht verfuegbar.");
           }
         }
         if (isSpeakingModule) {
@@ -2677,17 +2691,17 @@ export default function SimulationModulePage({ moduleIdOverride }) {
               setSpeakingCorrection(correction);
               const correctionStatus = correction?.status;
               if (correctionStatus === "completed") {
-                setResultStatus("Correction orale IA terminee. Score de pratique disponible.");
+                setResultStatus("KI-Sprechkorrektur abgeschlossen. Uebungsscore verfuegbar.");
               } else if (correctionStatus === "unconfigured") {
-                setResultStatus("Resultat enregistre. Correction orale IA en attente de credits/configuration OpenAI.");
+                setResultStatus("Ergebnis gespeichert. KI-Sprechkorrektur wartet auf OpenAI-Guthaben oder Serverkonfiguration.");
               } else if (correctionStatus === "audio_required") {
-                setResultStatus("Resultat enregistre. Reprenez les parties sans audio serveur pour lancer la correction IA.");
+                setResultStatus("Ergebnis gespeichert. Nehmen Sie die Teile ohne serverseitiges Audio erneut auf, um die KI-Korrektur zu starten.");
               } else if (correctionStatus === "failed") {
-                setSpeakingCorrectionError(correction?.errorMessage || "Correction orale IA indisponible pour le moment.");
+                setSpeakingCorrectionError(correction?.errorMessage || "Die KI-Sprechkorrektur ist im Moment nicht verfuegbar.");
               }
             } catch {
-              setSpeakingCorrectionError("La correction orale IA pourra etre relancee plus tard.");
-              setResultStatus("Resultat enregistre. La correction orale IA pourra etre relancee plus tard.");
+              setSpeakingCorrectionError("Die KI-Sprechkorrektur kann spaeter erneut gestartet werden.");
+              setResultStatus("Ergebnis gespeichert. Die KI-Sprechkorrektur kann spaeter erneut gestartet werden.");
             } finally {
               setSpeakingCorrectionLoading(false);
             }
@@ -2696,16 +2710,16 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           }
         }
         if (!isSpeakingModule) {
-          setResultStatus("Résultat enregistré dans le dashboard.");
+          setResultStatus("Ergebnis im Dashboard gespeichert.");
         }
       } catch {
         if (isWritingModule) {
-          setWritingCorrectionError("Correction IA indisponible: le resultat n'a pas pu etre envoye au backend.");
+          setWritingCorrectionError("KI-Korrektur nicht verfuegbar: Das Ergebnis konnte nicht an das Backend gesendet werden.");
         }
         if (isSpeakingModule) {
-          setSpeakingCorrectionError("Correction orale IA indisponible: le resultat n'a pas pu etre envoye au backend.");
+          setSpeakingCorrectionError("KI-Sprechkorrektur nicht verfuegbar: Das Ergebnis konnte nicht an das Backend gesendet werden.");
         }
-        setResultStatus("Résultat gardé en local. Le backend n'est pas joignable pour le moment.");
+        setResultStatus("Ergebnis lokal gespeichert. Das Backend ist im Moment nicht erreichbar.");
       } finally {
         if (isWritingModule) setWritingCorrectionLoading(false);
         if (isSpeakingModule) setSpeakingCorrectionLoading(false);
@@ -3561,7 +3575,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   };
 
   const renderPartMaterial = (part, { compact = false } = {}) => {
-    const sourceText = part?.sourceText || module.passage?.intro || currentTask?.prompt || currentTask?.question || "";
+    const sourceText = cleanImportedInstructionArtifacts(part?.sourceText || module.passage?.intro || currentTask?.prompt || currentTask?.question || "");
     if (hasRichTextMarkup(sourceText)) {
       return (
         <div
@@ -4055,7 +4069,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const isAnswerBankLine = (line) => /^\s*[a-o]\)\s+/i.test(line);
 
   const splitTelcSprachPartMaterial = (part) => {
-    const lines = String(part?.instructions || part?.sourceText || "")
+    const lines = cleanImportedInstructionArtifacts(part?.instructions || part?.sourceText || "")
       .replace(/\r/g, "")
       .split("\n")
       .map((line) => line.trim())
@@ -5289,18 +5303,18 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           {recordError ? <p className={styles.warningText}><AlertCircle size={16} /> {toGermanStatus(recordError)}</p> : null}
 
           {playbackSrc ? (
-            <SmoothedAudioPlayer key={playbackSrc} src={playbackSrc} label="Lecture de votre reponse orale" />
+            <SmoothedAudioPlayer key={playbackSrc} src={playbackSrc} label="Wiedergabe Ihrer muendlichen Antwort" />
           ) : answer.simulated ? (
             <p className={styles.mutedText}>Réponse minutée enregistrée sans fichier audio.</p>
           ) : (
-            <p className={styles.mutedText}>Votre lecture apparaîtra ici après l'enregistrement.</p>
+            <p className={styles.mutedText}>Ihre Wiedergabe erscheint hier nach der Aufnahme.</p>
           )}
           {answer.uploadStatus === "uploading" ? (
-            <p className={styles.mutedText}>Enregistrement sauvegarde pour la future correction IA.</p>
+            <p className={styles.mutedText}>Aufnahme fuer die spaetere KI-Korrektur gespeichert.</p>
           ) : answer.uploadStatus === "failed" ? (
-            <p className={styles.warningText}><AlertCircle size={16} /> Enregistrement local conserve, mais l'envoi serveur a echoue.</p>
+            <p className={styles.warningText}><AlertCircle size={16} /> Lokale Aufnahme behalten, aber das Senden an den Server ist fehlgeschlagen.</p>
           ) : answer.recordingId ? (
-            <p className={styles.mutedText}>Enregistrement pret pour la correction IA.</p>
+            <p className={styles.mutedText}>Aufnahme bereit fuer die KI-Korrektur.</p>
           ) : null}
         </section>
 
@@ -5308,7 +5322,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           <section className={styles.supportPanel}>
             <div className={styles.sectionLabel}>
               <ClipboardCheck size={18} />
-              Grille de réponse
+              Antwortcheckliste
             </div>
             <ul>
               {currentTask.checklist.map((item) => (
@@ -5331,14 +5345,14 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       const correction = correctionResponse.data?.correction ?? null;
       setWritingCorrection(correction);
       if (correction?.status === "partial" || correction?.status === "failed") {
-        setWritingCorrectionError(correction.errorMessage || "Correction IA indisponible pour le moment.");
+        setWritingCorrectionError(correction.errorMessage || "Die KI-Korrektur ist im Moment nicht verfuegbar.");
       } else if (correction?.status === "processing") {
-        setResultStatus("Correction IA en cours.");
+        setResultStatus("KI-Korrektur laeuft.");
       } else {
-        setResultStatus("Correction IA terminée.");
+        setResultStatus("KI-Korrektur abgeschlossen.");
       }
     } catch (err) {
-      setWritingCorrectionError(err?.response?.data?.error || "La correction IA n'a pas pu se terminer. Vous pouvez réessayer dans quelques instants.");
+      setWritingCorrectionError(err?.response?.data?.error || "Die KI-Korrektur konnte nicht abgeschlossen werden. Sie koennen es in wenigen Augenblicken erneut versuchen.");
     } finally {
       setWritingCorrectionLoading(false);
     }
@@ -5351,14 +5365,14 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       return (
         <section className={styles.aiCorrectionPanel} data-status="processing">
           <div className={styles.aiCorrectionHeader}>
-            <span><WandSparkles size={18} /> Correction IA</span>
-            <strong><ImportedLoadingDots label="Correction IA en cours" /></strong>
+            <span><WandSparkles size={18} /> KI-Korrektur</span>
+            <strong><ImportedLoadingDots label="KI-Korrektur laeuft" /></strong>
           </div>
-          <p className={styles.aiCorrectionMessage}>Analyse des consignes et de vos réponses. Le score final apparait dès que la correction est terminée.</p>
+          <p className={styles.aiCorrectionMessage}>Analyse der Aufgaben und Ihrer Antworten. Der Endscore erscheint, sobald die Korrektur abgeschlossen ist.</p>
           <div className={styles.aiProgressSteps} aria-hidden="true">
-            <span>Consignes</span>
-            <span>Texte candidat</span>
-            <span>Score final</span>
+            <span>Aufgaben</span>
+            <span>Kandidatentext</span>
+            <span>Endscore</span>
           </div>
         </section>
       );
@@ -5368,15 +5382,15 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       return writingCorrectionError ? (
         <section className={styles.aiCorrectionPanel} data-status="failed">
           <div className={styles.aiCorrectionHeader}>
-            <span><AlertCircle size={18} /> Correction IA</span>
-            <strong>Indisponible</strong>
+            <span><AlertCircle size={18} /> KI-Korrektur</span>
+            <strong>Nicht verfuegbar</strong>
           </div>
           <p className={styles.aiCorrectionMessage}>{writingCorrectionError}</p>
           {savedSimulationId ? (
             <div className={styles.aiCorrectionActions}>
               <button type="button" className={styles.secondaryButton} onClick={retryWritingCorrection}>
                 <RotateCcw size={16} />
-                Relancer la correction
+                Korrektur erneut starten
               </button>
             </div>
           ) : null}
@@ -5387,29 +5401,29 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     const tasks = Array.isArray(writingCorrection.tasks) ? writingCorrection.tasks : [];
     const statusLabel =
       writingCorrection.status === "completed"
-        ? "Terminee"
+        ? "Abgeschlossen"
         : writingCorrection.status === "partial"
-          ? "Partielle"
+          ? "Teilweise"
           : writingCorrection.status === "failed"
-            ? "Echec"
-            : "En cours";
+            ? "Fehlgeschlagen"
+            : "Laeuft";
     const correctionHasScores = ["completed", "partial"].includes(writingCorrection.status);
 
     return (
       <section className={styles.aiCorrectionPanel} data-status={writingCorrection.status}>
         <div className={styles.aiCorrectionHeader}>
-          <span><WandSparkles size={18} /> Correction IA Expression Ecrite</span>
+          <span><WandSparkles size={18} /> KI-Korrektur Schreiben</span>
           <strong>{statusLabel}</strong>
         </div>
 
         {correctionHasScores ? (
           <div className={styles.aiScoreGrid}>
             <div>
-              <span>Score total</span>
+              <span>Gesamtscore</span>
               <strong>{formatCorrectionScore(writingCorrection.totalScore)} / {formatCorrectionScore(writingCorrection.maxScore)}</strong>
             </div>
             <div>
-              <span>Pourcentage</span>
+              <span>Prozent</span>
               <strong>{formatCorrectionScore(writingCorrection.percentage)}%</strong>
             </div>
           </div>
@@ -5421,19 +5435,19 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
         <div className={styles.aiSummaryGrid}>
           <div>
-            <h3><CheckCircle2 size={17} /> Points forts</h3>
+            <h3><CheckCircle2 size={17} /> Staerken</h3>
             {writingCorrection.overallStrengths?.length ? (
               <ul>{writingCorrection.overallStrengths.map((item) => <li key={item}>{item}</li>)}</ul>
             ) : (
-              <p>Aucun point fort specifique n'a ete identifie.</p>
+              <p>Keine spezifische Staerke wurde identifiziert.</p>
             )}
           </div>
           <div>
-            <h3><AlertCircle size={17} /> A ameliorer</h3>
+            <h3><AlertCircle size={17} /> Zu verbessern</h3>
             {writingCorrection.overallWeaknesses?.length ? (
               <ul>{writingCorrection.overallWeaknesses.map((item) => <li key={item}>{item}</li>)}</ul>
             ) : (
-              <p>Aucun point faible majeur n'a ete signale.</p>
+              <p>Keine groessere Schwaeche wurde gemeldet.</p>
             )}
           </div>
         </div>
@@ -5457,7 +5471,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             return (
               <article key={`${task.taskId || task.id}-${task.taskIndex}`} className={styles.aiTaskCard}>
                 <div className={styles.aiTaskHeader}>
-                  <span><ClipboardCheck size={16} /> Tache {Number(task.taskIndex) + 1}</span>
+                  <span><ClipboardCheck size={16} /> Aufgabe {Number(task.taskIndex) + 1}</span>
                   <div className={styles.aiTaskHeaderMeta}>
                     <em className={styles.aiValidationBadge} data-status={validationBadgeStatus}>
                       {getWritingValidationLabel(validationStatus)}
@@ -5487,31 +5501,31 @@ export default function SimulationModulePage({ moduleIdOverride }) {
                 {!isInvalidWritingStatus(validationStatus) ? (
                   <div className={styles.aiTaskFeedbackGrid}>
                     <div>
-                      <h4><ShieldCheck size={15} /> Forces</h4>
+                      <h4><ShieldCheck size={15} /> Staerken</h4>
                       {task.strengths?.length ? (
                         <ul>{task.strengths.map((item) => <li key={item}>{item}</li>)}</ul>
                       ) : (
-                        <p>Aucune force specifique.</p>
+                        <p>Keine spezifische Staerke.</p>
                       )}
                     </div>
                     <div>
-                      <h4><Gauge size={15} /> Faiblesses</h4>
+                      <h4><Gauge size={15} /> Schwaechen</h4>
                       {task.weaknesses?.length ? (
                         <ul>{task.weaknesses.map((item) => <li key={item}>{item}</li>)}</ul>
                       ) : (
-                        <p>Aucune faiblesse specifique.</p>
+                        <p>Keine spezifische Schwaeche.</p>
                       )}
                     </div>
                   </div>
                 ) : task.weaknesses?.length ? (
                   <div className={styles.aiNextSteps}>
-                    <h4><AlertCircle size={15} /> Pourquoi la correction est bloquee</h4>
+                    <h4><AlertCircle size={15} /> Warum die Korrektur blockiert ist</h4>
                     <ul>{task.weaknesses.map((item) => <li key={item}>{item}</li>)}</ul>
                   </div>
                 ) : null}
                 {shouldShowImprovement && sentenceCorrections.length ? (
                   <div className={styles.aiSentenceCorrections}>
-                    <h4><PencilLine size={15} /> Corrections basees sur votre texte</h4>
+                    <h4><PencilLine size={15} /> Korrekturen auf Basis Ihres Textes</h4>
                     <div className={styles.aiSentenceCorrectionList}>
                       {sentenceCorrections.map((item, index) => (
                         <div key={`${item.original || item.improved}-${index}`} className={styles.aiSentenceCorrection}>
@@ -5523,7 +5537,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
                           ) : null}
                           {item.improved ? (
                             <p>
-                              <span>Ameliore</span>
+                              <span>Verbessert</span>
                               {item.improved}
                             </p>
                           ) : null}
@@ -5535,13 +5549,13 @@ export default function SimulationModulePage({ moduleIdOverride }) {
                 ) : null}
                 {shouldShowImprovement && task.improvedVersion ? (
                   <div className={styles.aiImprovedVersion}>
-                    <h4><WandSparkles size={15} /> Version amelioree de votre texte</h4>
+                    <h4><WandSparkles size={15} /> Verbesserte Version Ihres Textes</h4>
                     <p>{task.improvedVersion}</p>
                   </div>
                 ) : null}
                 {nextSteps.length ? (
                   <div className={styles.aiNextSteps}>
-                    <h4><Flag size={15} /> Prochaines etapes</h4>
+                    <h4><Flag size={15} /> Naechste Schritte</h4>
                     <ul>{nextSteps.map((item) => <li key={item}>{item}</li>)}</ul>
                   </div>
                 ) : null}
@@ -5557,7 +5571,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             {savedSimulationId ? (
               <button type="button" className={styles.secondaryButton} onClick={retryWritingCorrection}>
                 <RotateCcw size={16} />
-                Relancer la correction
+                Korrektur erneut starten
               </button>
             ) : null}
           </div>
@@ -5576,16 +5590,16 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       const correction = correctionResponse.data?.correction ?? null;
       setSpeakingCorrection(correction);
       if (correction?.status === "completed") {
-        setResultStatus("Correction orale IA terminee. Score de pratique disponible.");
+        setResultStatus("KI-Sprechkorrektur abgeschlossen. Uebungsscore verfuegbar.");
       } else if (correction?.status === "unconfigured") {
-        setResultStatus("Correction orale IA en attente de credits/configuration OpenAI.");
+        setResultStatus("KI-Sprechkorrektur wartet auf OpenAI-Guthaben oder Serverkonfiguration.");
       } else if (correction?.status === "audio_required") {
-        setSpeakingCorrectionError(correction.errorMessage || "Aucun audio serveur n'est disponible pour cette tentative.");
+        setSpeakingCorrectionError(correction.errorMessage || "Fuer diesen Versuch ist kein serverseitiges Audio verfuegbar.");
       } else if (correction?.status === "failed") {
-        setSpeakingCorrectionError(correction.errorMessage || "Correction orale IA indisponible pour le moment.");
+        setSpeakingCorrectionError(correction.errorMessage || "Die KI-Sprechkorrektur ist im Moment nicht verfuegbar.");
       }
     } catch (err) {
-      setSpeakingCorrectionError(err?.response?.data?.error || "La correction orale IA n'a pas pu se terminer. Vous pouvez reessayer plus tard.");
+      setSpeakingCorrectionError(err?.response?.data?.error || "Die KI-Sprechkorrektur konnte nicht abgeschlossen werden. Sie koennen es spaeter erneut versuchen.");
     } finally {
       setSpeakingCorrectionLoading(false);
     }
@@ -5598,16 +5612,16 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       return (
         <section className={styles.aiCorrectionPanel} data-status="processing">
           <div className={styles.aiCorrectionHeader}>
-            <span><WandSparkles size={18} /> Correction IA Expression Orale</span>
-            <strong><ImportedLoadingDots label="Correction orale en cours" /></strong>
+            <span><WandSparkles size={18} /> KI-Korrektur Sprechen</span>
+            <strong><ImportedLoadingDots label="Sprechkorrektur laeuft" /></strong>
           </div>
           <p className={styles.aiCorrectionMessage}>
-            Analyse des enregistrements et des consignes. Le score affiche reste une estimation de pratique, pas une note officielle.
+            Analyse der Aufnahmen und Aufgaben. Der angezeigte Score bleibt eine Uebungseinschaetzung, keine offizielle Note.
           </p>
           <div className={styles.aiProgressSteps} aria-hidden="true">
             <span>Audio</span>
-            <span>Transcription cachee</span>
-            <span>Evaluation</span>
+            <span>Verborgene Transkription</span>
+            <span>Bewertung</span>
           </div>
         </section>
       );
@@ -5617,15 +5631,15 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       return speakingCorrectionError ? (
         <section className={styles.aiCorrectionPanel} data-status="failed">
           <div className={styles.aiCorrectionHeader}>
-            <span><AlertCircle size={18} /> Correction IA Expression Orale</span>
-            <strong>Indisponible</strong>
+            <span><AlertCircle size={18} /> KI-Korrektur Sprechen</span>
+            <strong>Nicht verfuegbar</strong>
           </div>
           <p className={styles.aiCorrectionMessage}>{speakingCorrectionError}</p>
           {savedSimulationId ? (
             <div className={styles.aiCorrectionActions}>
               <button type="button" className={styles.secondaryButton} onClick={retrySpeakingCorrection}>
                 <RotateCcw size={16} />
-                Relancer la correction
+                Korrektur erneut starten
               </button>
             </div>
           ) : null}
@@ -5635,26 +5649,26 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
     const statusLabel =
       speakingCorrection.status === "completed"
-        ? "Terminee"
+        ? "Abgeschlossen"
         : speakingCorrection.status === "unconfigured"
-          ? "En attente"
+          ? "Wartet"
           : speakingCorrection.status === "audio_required"
-            ? "Audio requis"
+            ? "Audio erforderlich"
             : speakingCorrection.status === "failed"
-              ? "Echec"
-              : "En cours";
+              ? "Fehlgeschlagen"
+              : "Laeuft";
     const providerResult = speakingCorrection.providerResult ?? {};
     const diagnostics = speakingCorrection.diagnostics ?? {};
     const feedback = speakingCorrection.feedback ?? {};
     const taskScores = Array.isArray(providerResult.task_scores) ? providerResult.task_scores : [];
     const diagnosticLabels = {
-      taskCompletion: "Respect de la tache",
-      coherence: "Coherence",
-      grammar: "Grammaire",
-      vocabulary: "Vocabulaire",
-      fluency: "Fluidite",
-      pronunciationEstimate: "Prononciation",
-      interaction: "Interaction",
+      taskCompletion: "Aufgabenerfuellung",
+      coherence: "Kohaerenz",
+      grammar: "Grammatik",
+      vocabulary: "Wortschatz",
+      fluency: "Fluessigkeit",
+      pronunciationEstimate: "Aussprache",
+      interaction: "Interaktion",
     };
     const diagnosticRows = Object.entries(diagnosticLabels)
       .map(([key, label]) => [key, label, diagnostics[key]])
@@ -5664,28 +5678,28 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     return (
       <section className={styles.aiCorrectionPanel} data-status={speakingCorrection.status}>
         <div className={styles.aiCorrectionHeader}>
-          <span><WandSparkles size={18} /> Correction IA Expression Orale</span>
+          <span><WandSparkles size={18} /> KI-Korrektur Sprechen</span>
           <strong>{statusLabel}</strong>
         </div>
 
         {hasScore ? (
           <div className={styles.aiScoreGrid}>
             <div>
-              <span>Score de pratique</span>
+              <span>Uebungsscore</span>
               <strong>{formatCorrectionScore(providerResult.raw_score)} / {formatCorrectionScore(providerResult.raw_max)}</strong>
             </div>
             <div>
-              <span>Pourcentage</span>
+              <span>Prozent</span>
               <strong>{formatCorrectionScore(speakingCorrection.percentage)}%</strong>
             </div>
           </div>
         ) : null}
 
         <p className={styles.aiCorrectionMessage}>
-          {feedback.summary || speakingCorrection.errorMessage || "Correction orale sauvegardee. Elle sera terminee des que la configuration serveur le permet."}
+          {feedback.summary || speakingCorrection.errorMessage || "Sprechkorrektur gespeichert. Sie wird abgeschlossen, sobald die Serverkonfiguration es ermoeglicht."}
         </p>
         <p className={styles.aiCorrectionMessage}>
-          Estimation de pratique uniquement. La prononciation est une estimation IA, pas une certification officielle.
+          Nur eine Uebungseinschaetzung. Die Aussprache ist eine KI-Schaetzung, keine offizielle Zertifizierung.
         </p>
 
         {diagnosticRows.length ? (
@@ -5701,19 +5715,19 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
         <div className={styles.aiSummaryGrid}>
           <div>
-            <h3><CheckCircle2 size={17} /> Points forts</h3>
+            <h3><CheckCircle2 size={17} /> Staerken</h3>
             {feedback.strengths?.length ? (
               <ul>{feedback.strengths.map((item) => <li key={item}>{item}</li>)}</ul>
             ) : (
-              <p>Aucun point fort specifique n'a encore ete identifie.</p>
+              <p>Noch keine spezifische Staerke identifiziert.</p>
             )}
           </div>
           <div>
-            <h3><AlertCircle size={17} /> A ameliorer</h3>
+            <h3><AlertCircle size={17} /> Zu verbessern</h3>
             {feedback.weaknesses?.length ? (
               <ul>{feedback.weaknesses.map((item) => <li key={item}>{item}</li>)}</ul>
             ) : (
-              <p>Aucune faiblesse specifique n'a encore ete signalee.</p>
+              <p>Noch keine spezifische Schwaeche gemeldet.</p>
             )}
           </div>
         </div>
@@ -5723,7 +5737,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             {taskScores.map((task, index) => (
               <article key={`${task.taskId || index}`} className={styles.aiTaskCard}>
                 <div className={styles.aiTaskHeader}>
-                  <span><ClipboardCheck size={16} /> Partie {index + 1}</span>
+                  <span><ClipboardCheck size={16} /> Teil {index + 1}</span>
                   <strong>{formatCorrectionScore(task.score)} / {formatCorrectionScore(task.maxScore)}</strong>
                 </div>
                 {task.feedback ? <p className={styles.aiExaminerComment}>{task.feedback}</p> : null}
@@ -5734,7 +5748,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
         {feedback.nextSteps?.length ? (
           <div className={styles.aiNextSteps}>
-            <h4><Flag size={15} /> Prochaines etapes</h4>
+            <h4><Flag size={15} /> Naechste Schritte</h4>
             <ul>{feedback.nextSteps.map((item) => <li key={item}>{item}</li>)}</ul>
           </div>
         ) : null}
@@ -5743,7 +5757,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           <div className={styles.aiCorrectionActions}>
             <button type="button" className={styles.secondaryButton} onClick={retrySpeakingCorrection}>
               <RotateCcw size={16} />
-              Relancer la correction
+              Korrektur erneut starten
             </button>
           </div>
         ) : null}
@@ -5809,8 +5823,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       const unlocked = displayedScore !== null && displayedScore >= PASS_SCORE;
       const scoreHeading = displayedScore === null
         ? correctionFailed || speakingCorrectionBlocked
-          ? isSpeakingResult ? "Correction orale IA" : "Correction IA"
-          : <ImportedLoadingDots label="Correction IA en cours" />
+          ? isSpeakingResult ? "KI-Sprechkorrektur" : "KI-Korrektur"
+          : <ImportedLoadingDots label="KI-Korrektur laeuft" />
         : `${displayedScore}%`;
       const germanResultMessage = isWritingResult
         ? correctionScoreReady

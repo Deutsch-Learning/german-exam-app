@@ -33,10 +33,10 @@ const clampNumber = (value, min, max, fallback = min) => {
 const getErrorMessage = (err) => {
   const message = String(err?.message || err || "Unknown error");
   if (/insufficient_quota|quota|billing|credit/i.test(message)) {
-    return "Correction orale IA en attente: le compte OpenAI n'a pas assez de credits pour terminer l'analyse.";
+    return "KI-Sprechkorrektur wartet: Das OpenAI-Konto hat nicht genug Guthaben, um die Analyse abzuschliessen.";
   }
   if (/401|invalid.*api.*key|unauthorized/i.test(message)) {
-    return "Correction orale IA en attente: la cle OpenAI serveur est invalide ou non autorisee.";
+    return "KI-Sprechkorrektur wartet: Der serverseitige OpenAI-Schluessel ist ungueltig oder nicht autorisiert.";
   }
   return message.slice(0, 500);
 };
@@ -161,7 +161,7 @@ const transcribeRecording = async (recording) => {
 
 const evaluateSpeakingAttempt = async ({ simulation, tasks, transcripts, rawMax }) => {
   const prompt = {
-    language: "fr",
+    language: "de",
     instruction:
       "Evaluate a German speaking exam practice attempt. It is a practice estimate only, not an official certificate. Use the provider/level/task context and hidden transcripts. Do not reveal model answers. Penalize missing/empty audio gently but clearly. Score cannot exceed max values.",
     simulation: {
@@ -180,7 +180,7 @@ const evaluateSpeakingAttempt = async ({ simulation, tasks, transcripts, rawMax 
     })),
     diagnosticScale: "0 to 10",
     requiredOutput:
-      "Return strict JSON. Feedback must be concise, useful to a German learner, and in French. Pronunciation is only an AI pronunciation estimate because no specialist pronunciation engine is configured.",
+      "Return strict JSON. All user-facing feedback, warnings, errors, strengths, weaknesses, task feedback, nextSteps, quality notes, and summaries must be concise, useful, and in German. Pronunciation is only an AI pronunciation estimate because no specialist pronunciation engine is configured.",
   };
 
   const response = await openAiFetch("/v1/chat/completions", {
@@ -295,8 +295,8 @@ const buildPendingEvaluation = (simulation, status, message, extra = {}) => ({
     strengths: [],
     weaknesses: [message],
     nextSteps: [
-      "Enregistrez chaque partie avec un micro clair.",
-      "Relancez la correction quand les credits OpenAI et les modeles serveur sont configures.",
+      "Nehmen Sie jeden Teil mit einem klaren Mikrofon auf.",
+      "Starten Sie die Korrektur erneut, sobald OpenAI-Guthaben und Servermodelle konfiguriert sind.",
     ],
   },
   quality: extra.quality || { audioBand: "pending", notes: [message] },
@@ -443,7 +443,7 @@ async function correctSpeakingSimulation(pool, simulation, { force = false } = {
       pool,
       simulation,
       "audio_required",
-      "Aucune piste audio serveur n'est disponible pour cette tentative. Reprenez l'enregistrement ou verifiez l'autorisation micro."
+      "Fuer diesen Versuch ist keine serverseitige Audiodatei verfuegbar. Nehmen Sie die Antwort erneut auf oder pruefen Sie die Mikrofonberechtigung."
     );
   }
 
@@ -452,8 +452,8 @@ async function correctSpeakingSimulation(pool, simulation, { force = false } = {
       pool,
       simulation,
       "unconfigured",
-      "Correction orale IA en attente: OPENAI_API_KEY n'est pas configure ou le compte n'a pas encore de credits.",
-      { quality: { audioBand: "uploaded", notes: [`${recordingIds.length} enregistrement(s) serveur disponible(s).`] } }
+      "KI-Sprechkorrektur wartet: OPENAI_API_KEY ist nicht konfiguriert oder das Konto hat noch kein Guthaben.",
+      { quality: { audioBand: "uploaded", notes: [`${recordingIds.length} serverseitige Aufnahme(n) verfuegbar.`] } }
     );
   }
 
@@ -472,7 +472,7 @@ async function correctSpeakingSimulation(pool, simulation, { force = false } = {
       pool,
       simulation,
       "audio_required",
-      "Aucun enregistrement serveur appartenant a cette tentative n'a ete trouve."
+      "Es wurde keine serverseitige Aufnahme gefunden, die zu diesem Versuch gehoert."
     );
   }
 
@@ -568,7 +568,7 @@ async function correctSpeakingSimulation(pool, simulation, { force = false } = {
       simulation,
       /credit|quota|billing/i.test(message) ? "unconfigured" : "failed",
       message,
-      { quality: { audioBand: "uploaded", notes: [`${orderedRecordings.length} enregistrement(s) serveur disponible(s).`] } }
+      { quality: { audioBand: "uploaded", notes: [`${orderedRecordings.length} serverseitige Aufnahme(n) verfuegbar.`] } }
     );
   }
 }
