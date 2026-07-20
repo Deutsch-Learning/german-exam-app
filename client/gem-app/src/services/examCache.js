@@ -1,7 +1,7 @@
 const DATABASE_NAME = "deutsch-pruefungen-exams";
 const DATABASE_VERSION = 1;
 const STORE_NAME = "publishedExamMetadata";
-export const EXAM_CACHE_VERSION = "2026-07-14-v1";
+export const EXAM_CACHE_VERSION = "2026-07-20-v2";
 const MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 const openDatabase = () => new Promise((resolve, reject) => {

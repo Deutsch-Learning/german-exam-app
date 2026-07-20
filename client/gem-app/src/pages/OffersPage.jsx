@@ -184,7 +184,7 @@ const CheckoutModal = ({
         <div className="pricing-modal-summary">
           <span>Prix de base</span><strong>{formatEuro(plan.priceEur)} par certification</strong>
           <span>Durée</span><strong>{plan.durationDays} jours</strong>
-          <span>Simulateur écrit</span><strong>{plan.writingSimulatorAttempts} essais</strong>
+          <span>Simulateur oral</span><strong>{plan.speakingSimulatorQuota ?? 20} essais</strong>
           <span>Sélection</span><strong>{selectedCount || 0} certification{selectedCount > 1 ? "s" : ""}</strong>
           <span>Total</span><strong>{formatEuro(totalPrice)}</strong>
         </div>
@@ -913,9 +913,11 @@ export default function OffersPage() {
             <div className="pricing-level-header">
               <h2 id={`pricing-${section.level}`}>NIVEAU {section.level}</h2>
               <div className="pricing-cert-tabs" aria-label={`Certifications ${section.level}`}>
-                <span>Goethe / ÖSD</span>
-                <span>TELC</span>
-                <span>ECL</span>
+                {certificationOptions.map((option) => (
+                  <span className={`pricing-cert-tab pricing-cert-tab-${option.key}`} key={option.key}>
+                    {option.label}
+                  </span>
+                ))}
               </div>
             </div>
 
@@ -940,7 +942,7 @@ export default function OffersPage() {
                       </div>
                       <p className="pricing-version">Version <strong>2026</strong></p>
                       <p className="pricing-attempts">
-                        Simulateur expression écrite : <strong>{plan.writingSimulatorAttempts} essais</strong>
+                        Simulateur expression orale : <strong>{plan.speakingSimulatorQuota ?? 20} essais</strong>
                       </p>
                       <p className="pricing-access">Accès : {plan.durationDays} Jours</p>
                       <button

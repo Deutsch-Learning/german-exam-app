@@ -2683,7 +2683,10 @@ const toPublicSeriesList = (rows, routeMeta = {}) => {
   }
 
   return Array.from(groups.values()).map((series) => {
-    const expectedModules = series.examId === "telc"
+    const seriesProvider = normalizeProviderId(
+      routeMeta.publicProvider || series.accessExamId || series.examId || series.examName
+    );
+    const expectedModules = seriesProvider === "telc"
       ? MODULE_ORDER
       : MODULE_ORDER.filter((moduleId) => moduleId !== "sprach");
     expectedModules.forEach((moduleId) => {

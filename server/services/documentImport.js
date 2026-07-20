@@ -198,6 +198,17 @@ const splitByMatches = (text, regex) => {
   });
 };
 
+const getBlockBodyAfterMatch = (block) => {
+  const text = String(block?.text || "");
+  const marker = String(block?.match?.[0] || "");
+  if (text.startsWith(marker)) return text.slice(marker.length);
+  const trimmedMarker = marker.trimStart();
+  if (trimmedMarker && text.startsWith(trimmedMarker)) return text.slice(trimmedMarker.length);
+  const compactMarker = marker.trim();
+  if (compactMarker && text.startsWith(compactMarker)) return text.slice(compactMarker.length);
+  return text;
+};
+
 const getBetweenMarkers = (text, startRegex, endRegexes = []) => {
   const start = text.search(startRegex);
   if (start < 0) return "";
@@ -1896,7 +1907,7 @@ const parseEclListeningSeries = (text, metadata) => {
 
 const normalizeBooleanAnswer = (value) => /^(richtig|true|vrai|ja|yes|\+)$/i.test(compactText(value)) ? "true" : "false";
 
-const buildTrueFalseListeningQuestion = ({ prompt, answer, position, transcript, audio, metadata = {}, points = 1 }) => ({
+const buildTrueFalseListeningQuestion = ({ prompt, answer, position, transcript, audio, metadata = {}, points = 1, explanation = null }) => ({
   questionType: "true_false",
   prompt: trimForDb(prompt),
   options: [
@@ -1904,7 +1915,7 @@ const buildTrueFalseListeningQuestion = ({ prompt, answer, position, transcript,
     { value: "false", label: "Falsch" },
   ],
   correctAnswer: answer ? { value: normalizeBooleanAnswer(answer), label: compactText(answer) } : {},
-  explanation: null,
+  explanation: explanation ? trimForDb(explanation, MAX_EXPLANATION_CHARS) : null,
   position,
   transcript,
   audio,
@@ -1913,12 +1924,12 @@ const buildTrueFalseListeningQuestion = ({ prompt, answer, position, transcript,
   sectionType: "listen",
 });
 
-const buildMultipleChoiceListeningQuestion = ({ prompt, options, answer, position, transcript, audio, metadata = {}, points = 1 }) => ({
+const buildMultipleChoiceListeningQuestion = ({ prompt, options, answer, position, transcript, audio, metadata = {}, points = 1, explanation = null }) => ({
   questionType: "multiple_choice",
   prompt: trimForDb(prompt),
   options: (options || []).filter((option) => option.value && option.label),
   correctAnswer: answer ? { value: String(answer).trim().slice(0, 1).toUpperCase() } : {},
-  explanation: null,
+  explanation: explanation ? trimForDb(explanation, MAX_EXPLANATION_CHARS) : null,
   position,
   transcript,
   audio,
@@ -1927,12 +1938,12 @@ const buildMultipleChoiceListeningQuestion = ({ prompt, options, answer, positio
   sectionType: "listen",
 });
 
-const buildMatchingListeningQuestion = ({ prompt, options, answer, position, transcript, audio, metadata = {}, points = 1 }) => ({
+const buildMatchingListeningQuestion = ({ prompt, options, answer, position, transcript, audio, metadata = {}, points = 1, explanation = null }) => ({
   questionType: "matching",
   prompt: trimForDb(prompt),
   options: (options || []).filter((option) => option.value && option.label),
   correctAnswer: answer ? { value: String(answer).trim() } : {},
-  explanation: null,
+  explanation: explanation ? trimForDb(explanation, MAX_EXPLANATION_CHARS) : null,
   position,
   transcript,
   audio,
@@ -2282,26 +2293,123 @@ const parseOsdListeningSeries = (text, metadata) => {
 };
 
 const parseGoetheCorrections = (solutionText) => {
-  const partBlocks = splitByMatches(solutionText, /(?:^|\n)Teil\s+([1-4])\s*(?=\n)/gi);
+  const visibleCorrectionBlocks = splitByMatches(
+    solutionText,
+    /(?:^|\n)CORRECTION_VISIBLE_AFTER_SUBMIT[^\n]*Teil\s+([1-4])/gi
+  );
+  const partBlocks = visibleCorrectionBlocks.length
+    ? visibleCorrectionBlocks
+    : splitByMatches(solutionText, /(?:^|\n)Teil\s+([1-4])\s*(?=\n)/gi);
   const answers = new Map();
+  const makeEntry = (answer, explanation = "") => ({
+    answer: compactText(answer),
+    explanation: trimForDb(explanation, MAX_EXPLANATION_CHARS),
+  });
+  const isTableHeading = (line) =>
+    /^(?:correction_visible_after_submit.*|teil\s+\d+|nr\.?|loesung|lösung|begr[uü]ndung(?:\s+b1)?|mc)$/i.test(foldForSearch(line));
+  const isNumberLine = (line) => /^\d{1,2}$/.test(compactText(line));
+
   partBlocks.forEach((block) => {
     const part = Number(block.match[1]);
     const partAnswers = new Map();
+    const lines = compactText(block.text)
+      .split("\n")
+      .map((line) => compactText(line))
+      .filter(Boolean)
+      .filter((line) => !isTableHeading(line));
+
     if (part === 1) {
-      [...block.text.matchAll(/(?:^|\n)\s*(\d)\s+(Richtig|Falsch)[\s\S]{0,120}?MC:\s*([ABC])/gi)].forEach((match) => {
-        const n = Number(match[1]);
-        partAnswers.set(n, match[2]);
-        partAnswers.set(n + 5, match[3]);
-      });
+      for (let index = 0; index < lines.length;) {
+        if (!isNumberLine(lines[index])) {
+          index += 1;
+          continue;
+        }
+        const number = Number(lines[index]);
+        index += 1;
+        const answerLine = lines[index] || "";
+        index += 1;
+
+        const trueFalseAnswer = answerLine.match(/\b(Richtig|Falsch)\b/i)?.[1] || "";
+        let multipleChoiceAnswer = answerLine.match(/\bMC\s*:\s*([ABC])\b/i)?.[1] || "";
+        if (!multipleChoiceAnswer && /^MC\s*:\s*([ABC])$/i.test(lines[index] || "")) {
+          multipleChoiceAnswer = lines[index].match(/^MC\s*:\s*([ABC])$/i)?.[1] || "";
+          index += 1;
+        }
+
+        const trueFalseExplanation = [];
+        const multipleChoiceExplanation = [];
+        let readingMultipleChoiceExplanation = false;
+        while (index < lines.length && !isNumberLine(lines[index])) {
+          const line = lines[index];
+          const mcExplanation = line.match(/^MC\s*:\s*([ABC])\)?\s*(.*)$/i);
+          if (mcExplanation) {
+            readingMultipleChoiceExplanation = true;
+            if (!multipleChoiceAnswer) multipleChoiceAnswer = mcExplanation[1];
+            if (mcExplanation[2]) multipleChoiceExplanation.push(mcExplanation[2]);
+          } else if (readingMultipleChoiceExplanation) {
+            multipleChoiceExplanation.push(line);
+          } else {
+            trueFalseExplanation.push(line);
+          }
+          index += 1;
+        }
+
+        if (trueFalseAnswer) {
+          partAnswers.set(number, makeEntry(trueFalseAnswer, trueFalseExplanation.join(" ")));
+        }
+        if (multipleChoiceAnswer) {
+          partAnswers.set(number + 5, makeEntry(multipleChoiceAnswer, multipleChoiceExplanation.join(" ")));
+        }
+      }
     } else {
-      compactText(block.text).split("\n").forEach((line) => {
-        const match = line.match(/^\s*(\d{1,2})\s+(Richtig|Falsch|[ABC]|Herr\s+[^\s]+|Frau\s+[^\s]+|Dr\.\s+[^\s]+|Moderatorin?|Niemand)/i);
-        if (match) partAnswers.set(Number(match[1]), compactText(match[2]));
-      });
+      for (let index = 0; index < lines.length;) {
+        if (!isNumberLine(lines[index])) {
+          index += 1;
+          continue;
+        }
+        const number = Number(lines[index]);
+        const answer = lines[index + 1] || "";
+        index += 2;
+        const explanationLines = [];
+        while (index < lines.length && !isNumberLine(lines[index])) {
+          explanationLines.push(lines[index]);
+          index += 1;
+        }
+        if (answer && !isTableHeading(answer)) {
+          partAnswers.set(number, makeEntry(answer, explanationLines.join(" ")));
+        }
+      }
     }
     answers.set(part, partAnswers);
   });
   return answers;
+};
+
+const getCorrectionAnswer = (entry) => {
+  if (!entry) return "";
+  return typeof entry === "string" ? entry : entry.answer || "";
+};
+
+const getCorrectionExplanation = (entry) => {
+  if (!entry || typeof entry === "string") return "";
+  return entry.explanation || "";
+};
+
+const extractGoetheMatchingOptions = (taskBody, transcript = "") => {
+  const taskText = compactText(taskBody);
+  const optionBlock = taskText.match(/Ordnen\s+Sie[\s\S]{0,500}?\(([^)]+)\)\s*:/i)?.[1] || "";
+  const labels = optionBlock
+    ? optionBlock.split("/").map((item) => compactText(item)).filter(Boolean)
+    : [];
+  const fallbackLabels = labels.length
+    ? labels
+    : [
+        ...extractSpeakerNamesFromTranscript(transcript).filter((name) => !/^text\s+\d+/i.test(name)),
+        "Niemand",
+      ];
+  return [...new Set(fallbackLabels)]
+    .map((label) => ({ value: label, label }))
+    .filter((option) => option.value && option.label);
 };
 
 const parseGoetheTaskQuestions = ({ taskBody, partNumber, answers, transcript, audio, seriesNumber }) => {
@@ -2310,13 +2418,15 @@ const parseGoetheTaskQuestions = ({ taskBody, partNumber, answers, transcript, a
     const questions = [];
     blocks.forEach((block) => {
       const textNumber = Number(block.match[1]);
-      const raw = block.text.slice(block.match[0].length);
+      const raw = getBlockBodyAfterMatch(block);
       const rf = raw.match(/Richtig\/Falsch\s*:\s*([^\n]+)/i);
       const mc = raw.match(/Multiple Choice\s*:\s*([^\n]+)([\s\S]*)/i);
       if (rf) {
+        const correction = answers.get(textNumber);
         questions.push(buildTrueFalseListeningQuestion({
           prompt: compactText(rf[1]),
-          answer: answers.get(textNumber),
+          answer: getCorrectionAnswer(correction),
+          explanation: getCorrectionExplanation(correction),
           position: textNumber,
           transcript,
           audio,
@@ -2324,6 +2434,7 @@ const parseGoetheTaskQuestions = ({ taskBody, partNumber, answers, transcript, a
         }));
       }
       if (mc) {
+        const correction = answers.get(textNumber + 5);
         const options = [...mc[2].matchAll(/(?:^|\n)\s*([ABC])\)\s*([^\n]+)/gi)].map((match) => ({
           value: match[1].toUpperCase(),
           label: compactText(match[2]),
@@ -2331,7 +2442,8 @@ const parseGoetheTaskQuestions = ({ taskBody, partNumber, answers, transcript, a
         questions.push(buildMultipleChoiceListeningQuestion({
           prompt: compactText(mc[1]),
           options,
-          answer: answers.get(textNumber + 5),
+          answer: getCorrectionAnswer(correction),
+          explanation: getCorrectionExplanation(correction),
           position: textNumber + 5,
           transcript,
           audio,
@@ -2345,7 +2457,8 @@ const parseGoetheTaskQuestions = ({ taskBody, partNumber, answers, transcript, a
   const blocks = splitByMatches(taskBody, /(?:^|\n)\s*(\d{1,2})\.\s+/g);
   return blocks.map((block) => {
     const number = Number(block.match[1]);
-    const raw = block.text.slice(block.match[0].length);
+    const raw = getBlockBodyAfterMatch(block);
+    const correction = answers.get(number);
     if (partNumber === 2) {
       const optionStart = raw.search(/(?:^|\n)\s*A\)/i);
       const prompt = compactText(raw.slice(0, optionStart >= 0 ? optionStart : raw.length));
@@ -2356,7 +2469,8 @@ const parseGoetheTaskQuestions = ({ taskBody, partNumber, answers, transcript, a
       return buildMultipleChoiceListeningQuestion({
         prompt,
         options,
-        answer: answers.get(number),
+        answer: getCorrectionAnswer(correction),
+        explanation: getCorrectionExplanation(correction),
         position: number,
         transcript,
         audio,
@@ -2366,23 +2480,20 @@ const parseGoetheTaskQuestions = ({ taskBody, partNumber, answers, transcript, a
     if (partNumber === 3) {
       return buildTrueFalseListeningQuestion({
         prompt: compactText(raw),
-        answer: answers.get(number),
+        answer: getCorrectionAnswer(correction),
+        explanation: getCorrectionExplanation(correction),
         position: number,
         transcript,
         audio,
         metadata: { goethePart: partNumber, seriesNumber, sourceQuestionNumber: number },
       });
     }
-    const options = [
-      { value: "Moderator", label: "Moderator/in" },
-      { value: "Herr Brandt", label: "Herr Brandt / Sprecher 1" },
-      { value: "Frau Ngo", label: "Frau Ngo / Sprecherin" },
-      { value: "Niemand", label: "Niemand" },
-    ];
+    const options = extractGoetheMatchingOptions(taskBody, transcript);
     return buildMatchingListeningQuestion({
       prompt: compactText(raw),
       options,
-      answer: answers.get(number),
+      answer: getCorrectionAnswer(correction),
+      explanation: getCorrectionExplanation(correction),
       position: number,
       transcript,
       audio,
@@ -2421,7 +2532,7 @@ const parseGoetheListeningSeries = (text, metadata) => {
     const taskText = scriptStart >= 0 ? block.text.slice(0, scriptStart) : block.text;
     const scriptText = scriptStart >= 0 ? block.text.slice(scriptStart, correctionStart >= 0 ? correctionStart : block.text.length) : "";
     const productionText = getBetweenMarkers(scriptText, /B\.\s*Plan\s+de\s+Production\s+Audio/i, [/Tableau\s+Param/i]);
-    const corrections = correctionStart >= 0 ? block.text.slice(correctionStart) : "";
+    const corrections = correctionStart >= 0 ? block.text.slice(correctionStart) : taskText;
     const answerMap = parseGoetheCorrections(corrections);
     const partMatches = [...taskText.matchAll(/(?:^|\n)Teil\s+([1-4])\s*[—-]\s*([^\n]+)/gi)];
     const sections = partMatches.map((match, index) => {
