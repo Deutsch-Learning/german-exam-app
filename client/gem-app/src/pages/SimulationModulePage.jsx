@@ -2993,7 +2993,9 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const startPartTransition = useCallback((nextPart, nextIndex, message = "") => {
     if (!nextPart || partTransitionActiveRef.current) return false;
     partTransitionActiveRef.current = true;
-    timerDeadlineRef.current = null;
+    if (module.id !== "write") {
+      timerDeadlineRef.current = null;
+    }
     prepDeadlineRef.current = null;
     setPrepActive(false);
     setPartIntroVisible(false);
@@ -3005,7 +3007,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     });
     if (message) setResultStatus(message);
     return true;
-  }, []);
+  }, [module.id]);
 
   const completePartTransition = useCallback(() => {
     if (!partTransition?.nextPart) return;
@@ -3408,6 +3410,12 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     if (audioPlaying) {
       pauseListeningAudio();
     }
+    if (module.id === "write") {
+      setResultStatus("Zeit abgelaufen. Ihre Schreiben-Pruefung wird automatisch abgegeben.");
+      persistProgress(`Schreiben automatisch abgegeben um ${formatClock()}`);
+      finishModule();
+      return;
+    }
     persistProgress(`Temps termine a ${formatClock()}`);
 
     setPrepActive(false);
@@ -3415,15 +3423,28 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setResultStatus("Zeit abgelaufen. Bitte pruefen Sie Ihre Antworten und klicken Sie auf Abgeben.");
   }, [
     audioPlaying,
+    finishModule,
     isRecording,
+    module.id,
     pauseListeningAudio,
     persistProgress,
     stopRecording,
   ]);
 
   useEffect(() => {
-    if (!simulationMode || completed || partIntroVisible || partTransition || module.unavailable) {
+    if (!simulationMode || completed || module.unavailable) {
       timerDeadlineRef.current = null;
+      timerExpiredRef.current = false;
+      return undefined;
+    }
+
+    if (module.id !== "write" && (partIntroVisible || partTransition)) {
+      timerDeadlineRef.current = null;
+      timerExpiredRef.current = false;
+      return undefined;
+    }
+
+    if (module.id === "write" && partIntroVisible && !timerDeadlineRef.current) {
       timerExpiredRef.current = false;
       return undefined;
     }
@@ -3449,7 +3470,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     }, 250);
 
     return () => window.clearInterval(interval);
-  }, [completed, finishCurrentTimedSection, module.unavailable, partIntroVisible, partTransition, simulationMode]);
+  }, [completed, finishCurrentTimedSection, module.id, module.unavailable, partIntroVisible, partTransition, simulationMode]);
 
   useEffect(() => {
     if (module.id !== "speak" || !simulationMode || !prepActive || completed || partIntroVisible || partTransition) {

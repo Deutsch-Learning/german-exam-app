@@ -3668,8 +3668,8 @@ h4 {
   z-index: 0;
   background-repeat: no-repeat;
   background-color: #031329;
-  background-size: cover;
-  background-position: center top;
+  background-size: 100% 100%, 100% 100%, auto clamp(560px, 64vh, 650px);
+  background-position: center, center, right -48px top 0;
   filter: saturate(1.12) contrast(1.06) brightness(1.02);
 }
 
@@ -3855,8 +3855,8 @@ h4 {
 
 @media (min-width: 1501px) {
   .hero-redesign-bg::before {
-    background-size: cover;
-    background-position: center top;
+    background-size: 100% 100%, 100% 100%, auto clamp(585px, 66vh, 680px);
+    background-position: center, center, right -28px top 0;
   }
 
   .hero-foreground-people {
@@ -3898,8 +3898,8 @@ h4 {
       linear-gradient(90deg, rgba(3, 16, 34, 0.82) 0%, rgba(3, 16, 34, 0.56) 48%, rgba(3, 16, 34, 0.1) 100%),
       linear-gradient(180deg, rgba(3, 16, 34, 0) 0%, rgba(3, 16, 34, 0.08) 58%, #031329 100%),
       var(--hero-people-image);
-    background-size: auto clamp(560px, 68vw, 700px);
-    background-position: 58% top;
+    background-size: 100% 100%, 100% 100%, auto clamp(470px, 55vw, 560px);
+    background-position: center, center, right -118px top 0;
   }
 
   .hero-foreground-people {
@@ -3935,8 +3935,8 @@ h4 {
       linear-gradient(90deg, rgba(3, 16, 34, 0.82) 0%, rgba(3, 16, 34, 0.5) 54%, rgba(3, 16, 34, 0.12) 100%),
       linear-gradient(180deg, rgba(3, 16, 34, 0.02) 0%, rgba(3, 16, 34, 0.12) 52%, #031329 100%),
       var(--hero-people-image);
-    background-size: auto clamp(450px, 118vw, 540px);
-    background-position: 60% top;
+    background-size: 100% 100%, 100% 100%, auto clamp(345px, 96vw, 405px);
+    background-position: center, center, right -176px top 0;
   }
 
   .hero-foreground-people {
