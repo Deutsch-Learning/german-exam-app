@@ -982,11 +982,14 @@ function AdminAffiliates() {
 
   const updatePartner = async (partner, next) => {
     setStatus("");
-    await API.patch(`/api/admin/affiliates/partners/${partner.id}`, {
+    const res = await API.patch(`/api/admin/affiliates/partners/${partner.id}`, {
       status: next.status || partner.status,
       commissionRate: next.commissionRate ?? partner.commissionRate,
     });
-    setStatus("Partner updated.");
+    const emailStatus = res.data?.approvalEmail;
+    setStatus(emailStatus
+      ? `Partner updated. Approval email: ${emailStatus.sent ? "sent" : emailStatus.provider === "disabled" ? "logged only" : "not sent"}.`
+      : "Partner updated.");
     reload();
   };
 

@@ -399,9 +399,20 @@ const renderPartnerApprovedEmail = ({ user, code, partnerUrl }) => {
       title: "Demande partenaire approuvee",
       body: `
         <p style="margin:0 0 16px;">Bonjour ${escapeHtml(name)},</p>
-        <p style="margin:0 0 16px;">Votre demande partenaire a ete approuvee par l'administration.</p>
-        ${code ? `<p style="margin:0 0 16px;">Votre code partenaire : <strong>${escapeHtml(code)}</strong></p>` : ""}
-        <p style="margin:0;">Vous pouvez maintenant ouvrir votre espace partenaire, copier votre lien et suivre vos recommandations.</p>
+        <p style="margin:0 0 16px;">Votre demande partenaire a ete approuvee par l'administration. Votre espace partenaire est maintenant actif.</p>
+        ${code ? `
+          <div style="margin:18px 0;padding:18px;border:1px solid #bbf7d0;background:#f0fdf4;border-radius:14px;text-align:center;">
+            <div style="font-size:12px;font-weight:800;color:#166534;text-transform:uppercase;letter-spacing:.08em;">Code partenaire</div>
+            <div style="margin-top:8px;font-size:30px;font-weight:900;color:#14532d;letter-spacing:.08em;">${escapeHtml(code)}</div>
+          </div>
+        ` : ""}
+        <div style="margin:18px 0;padding:16px;border:1px solid #e5e7eb;background:#f8fafc;border-radius:12px;">
+          <p style="margin:0 0 10px;font-weight:800;color:#111827;">Ce que vous pouvez faire maintenant :</p>
+          <p style="margin:0 0 6px;">1. Copier votre code et votre lien de recommandation.</p>
+          <p style="margin:0 0 6px;">2. Suivre les inscriptions et clients payants depuis votre tableau de bord.</p>
+          <p style="margin:0;">3. Demander un retrait quand le solde disponible atteint le minimum du programme.</p>
+        </div>
+        <p style="margin:0;">Vous pouvez ouvrir votre espace partenaire depuis le bouton ci-dessous.</p>
       `,
       buttonHref: partnerUrl,
       buttonText: "Ouvrir mon espace partenaire",

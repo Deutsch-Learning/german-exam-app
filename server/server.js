@@ -138,9 +138,9 @@ const JWT_SECRET =
   "dev-only-change-me-german-exam-app-secret";
 const JWT_ISSUER = "german-exam-app";
 const JWT_AUDIENCE = "german-exam-app-client";
-const ACCESS_TOKEN_EXPIRES_IN = "15m";
+const ACCESS_TOKEN_EXPIRES_IN = process.env.ACCESS_TOKEN_EXPIRES_IN || "7h";
 const REFRESH_COOKIE_NAME = "refresh_token";
-const REFRESH_DAYS = 7;
+const REFRESH_DAYS = Math.max(1, Number(process.env.REFRESH_DAYS || 30));
 const REFRESH_MAX_AGE_MS = REFRESH_DAYS * 24 * 60 * 60 * 1000;
 const COOKIE_SECURE = isProduction;
 const DEFAULT_TOTAL_AVAILABLE_EXAMS = Number(process.env.TOTAL_AVAILABLE_EXAMS || 20);
@@ -6480,6 +6480,7 @@ app.get("/api/affiliate/me", requireAuth, async (req, res) => {
 
 app.post("/api/affiliate/activate", requireAuth, async (req, res) => {
   const client = await pool.connect();
+  let committedPartner = null;
   try {
     const publicName = String(req.body?.publicName || "").trim().slice(0, 120);
     const payoutMethod = normalizePayoutMethod(req.body?.payoutMethod);
@@ -6524,17 +6525,42 @@ app.post("/api/affiliate/activate", requireAuth, async (req, res) => {
       [partner.id, req.user.id, safeJson({ payoutMethod, status: partner.status })]
     );
     await client.query("COMMIT");
+    committedPartner = partner;
+    let dashboard = {};
+    try {
+      dashboard = await getPartnerDashboard(req.user.id);
+    } catch (dashboardErr) {
+      console.error("Affiliate dashboard reload after request failed", dashboardErr);
+      dashboard = {
+        settings,
+        partner: mapAffiliatePartner(partner),
+        primaryCode: null,
+        codes: [],
+        referrals: [],
+        commissions: [],
+        payouts: [],
+        events: [],
+        metrics: {},
+      };
+    }
     return res.status(partner.status === "active" ? 200 : 202).json({
       ok: true,
       message: partner.status === "active"
         ? "Votre compte partenaire est actif."
         : "Votre demande a ete envoyee. Vous recevrez un retour par mail.",
-      ...(await getPartnerDashboard(req.user.id)),
+      ...dashboard,
     });
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});
     console.error("Affiliate partner request failed", err);
-    return res.status(500).json({ ok: false, error: "Partner request could not be submitted" });
+    if (committedPartner) {
+      return res.status(202).json({
+        ok: true,
+        message: "Votre demande a ete envoyee. Vous recevrez un retour par mail.",
+        partner: mapAffiliatePartner(committedPartner),
+      });
+    }
+    return res.status(500).json({ ok: false, error: "Votre demande est en cours de traitement. Veuillez actualiser la page dans un instant." });
   } finally {
     client.release();
   }
@@ -6824,14 +6850,15 @@ app.patch("/api/admin/affiliates/partners/:partnerId", requireAdmin, async (req,
     );
     await client.query("COMMIT");
 
-    if (status === "active" && current.status !== "active" && current.email) {
+    let approvalEmail = null;
+    if (status === "active" && current.email) {
       try {
         const email = renderPartnerApprovedEmail({
           user: current,
           code: primaryCode?.code || "",
           partnerUrl: `${FRONTEND_URL}/partner`,
         });
-        await sendEmail({
+        approvalEmail = await sendEmail({
           pool,
           userId: current.user_id,
           to: current.email,
@@ -6840,14 +6867,15 @@ app.patch("/api/admin/affiliates/partners/:partnerId", requireAdmin, async (req,
           html: email.html,
           type: "affiliate_partner_approved",
           metadata: { partnerId: partner.id, code: primaryCode?.code || null },
-          idempotencyKey: `affiliate-partner-approved-${partner.id}-${primaryCode?.id || "no-code"}`,
+          idempotencyKey: `affiliate-partner-approved-${partner.id}-${Date.now()}`,
         });
       } catch (emailErr) {
         console.error("Affiliate approval email failed", emailErr);
+        approvalEmail = { sent: false, provider: "error", error: emailErr.message };
       }
     }
 
-    return res.json({ ok: true, partner: mapAffiliatePartner(partner), code: mapAffiliateCode(primaryCode) });
+    return res.json({ ok: true, partner: mapAffiliatePartner(partner), code: mapAffiliateCode(primaryCode), approvalEmail });
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});
     console.error("Affiliate partner update failed", err);
