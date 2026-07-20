@@ -386,6 +386,14 @@
   color: var(--theme-red);
 }
 
+.field-helper {
+  display: block;
+  margin-top: -4px;
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
 .password-input-wrapper {
   position: relative;
   display: flex;

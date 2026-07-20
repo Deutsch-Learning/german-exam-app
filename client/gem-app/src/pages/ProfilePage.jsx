@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Award, BarChart3, BookOpenCheck, CalendarClock, Clock3, FileText, Flame, History, MailCheck, ShieldCheck, Sparkles, Target, Trophy } from "lucide-react";
+import { Award, BarChart3, BookOpenCheck, CalendarClock, Clock3, Copy, FileText, Flame, History, MailCheck, Send, ShieldCheck, Sparkles, Target, Trophy, Wallet } from "lucide-react";
 import API from "../services/api";
 import { fetchDashboardData } from "../services/dashboard";
 import styles from "./ProfilePage.module.css";
@@ -37,7 +37,17 @@ export default function ProfilePage() {
   const [resendingVerification, setResendingVerification] = useState(false);
   const [user, setUser] = useState(null);
   const [dashboard, setDashboard] = useState(null);
+  const [partnerData, setPartnerData] = useState(null);
   const [localHistory, setLocalHistory] = useState([]);
+  const [partnerBusy, setPartnerBusy] = useState(false);
+  const [partnerNotice, setPartnerNotice] = useState("");
+  const [partnerForm, setPartnerForm] = useState({
+    publicName: "",
+    payoutMethod: "mtn",
+    payoutDestination: "",
+    acceptedTerms: false,
+    payoutAmount: "",
+  });
   const [formData, setFormData] = useState({
     username: "",
     firstName: "",
@@ -76,6 +86,18 @@ export default function ProfilePage() {
       }
       setUser(res.data.user);
       if (dashboardPayload?.ok) setDashboard(dashboardPayload);
+      const partnerPayload = await API.get("/api/affiliate/me").catch(() => null);
+      if (partnerPayload?.data?.ok) {
+        const loadedUser = res.data.user;
+        const loadedName = `${loadedUser.first_name || ""} ${loadedUser.last_name || ""}`.trim() || loadedUser.username || "";
+        setPartnerData(partnerPayload.data);
+        setPartnerForm((previous) => ({
+          ...previous,
+          publicName: partnerPayload.data.partner?.publicName || loadedName,
+          payoutMethod: partnerPayload.data.partner?.payoutMethod || "mtn",
+          payoutDestination: partnerPayload.data.partner?.payoutDestination || "",
+        }));
+      }
       setLocalHistory(readSimulationHistory());
       setFormData({
         username: res.data.user.username ?? "",
@@ -212,6 +234,54 @@ export default function ProfilePage() {
       ["Speaking", skills.speak ?? 0],
     ];
   }, [dashboard?.skills, profileStats.progressPercent]);
+
+  const partnerLink = partnerData?.primaryCode?.code
+    ? `${window.location.origin}/register?ref=${encodeURIComponent(partnerData.primaryCode.code)}`
+    : "";
+  const currency = partnerData?.settings?.defaultCurrency || "XAF";
+  const formatMoney = (value) =>
+    new Intl.NumberFormat("fr-FR", { style: "currency", currency, maximumFractionDigits: 0 }).format(Number(value) || 0);
+  const copyText = async (value) => {
+    if (!value) return;
+    await navigator.clipboard?.writeText(value);
+    setPartnerNotice("Copie effectuee.");
+  };
+  const activatePartner = async (event) => {
+    event.preventDefault();
+    setPartnerBusy(true);
+    setPartnerNotice("");
+    setError("");
+    try {
+      const res = await API.post("/api/affiliate/activate", {
+        publicName: partnerForm.publicName,
+        payoutMethod: partnerForm.payoutMethod,
+        payoutDestination: partnerForm.payoutDestination,
+        acceptedTerms: partnerForm.acceptedTerms,
+      });
+      setPartnerData(res.data);
+      setPartnerNotice("Votre compte partenaire est actif.");
+    } catch (err) {
+      setError(err.response?.data?.error || "Impossible d'activer le programme partenaire.");
+    } finally {
+      setPartnerBusy(false);
+    }
+  };
+  const requestPayout = async () => {
+    setPartnerBusy(true);
+    setPartnerNotice("");
+    setError("");
+    try {
+      await API.post("/api/affiliate/payouts", { amount: partnerForm.payoutAmount });
+      const refreshed = await API.get("/api/affiliate/me");
+      setPartnerData(refreshed.data);
+      setPartnerForm((previous) => ({ ...previous, payoutAmount: "" }));
+      setPartnerNotice("Demande de retrait envoyee.");
+    } catch (err) {
+      setError(err.response?.data?.error || "Impossible de demander le retrait.");
+    } finally {
+      setPartnerBusy(false);
+    }
+  };
 
   return (
     <div className={styles.page}>
@@ -412,6 +482,90 @@ export default function ProfilePage() {
               <CalendarClock size={18} />
               <span>{profileStats.inProgress} in-progress module{profileStats.inProgress > 1 ? "s" : ""} · {profileStats.savedSeries} saved series</span>
             </div>
+          </section>
+
+          <section className={`${styles.card} ${styles.partnerCard}`}>
+            <div className={styles.cardHeader}>
+              <div>
+                <p className={styles.eyebrow}>Programme partenaire</p>
+                <h2>{partnerData?.partner ? "Mon code partenaire" : "Devenir partenaire"}</h2>
+              </div>
+              <Wallet size={22} />
+            </div>
+            {partnerNotice ? <p className={styles.success}>{partnerNotice}</p> : null}
+            {!partnerData?.partner ? (
+              <form className={styles.partnerForm} onSubmit={activatePartner}>
+                <p className={styles.legalIntro}>
+                  Recommandez la plateforme et gagnez une commission uniquement lorsqu'une recommandation realise un premier paiement verifie.
+                </p>
+                <label className={styles.label}>
+                  Nom public partenaire
+                  <input className={styles.input} value={partnerForm.publicName} onChange={(event) => setPartnerForm((previous) => ({ ...previous, publicName: event.target.value }))} />
+                </label>
+                <label className={styles.label}>
+                  Methode de retrait
+                  <select className={styles.input} value={partnerForm.payoutMethod} onChange={(event) => setPartnerForm((previous) => ({ ...previous, payoutMethod: event.target.value }))}>
+                    <option value="mtn">MTN Mobile Money</option>
+                    <option value="orange">Orange Money</option>
+                  </select>
+                </label>
+                <label className={styles.label}>
+                  Numero de paiement
+                  <input className={styles.input} value={partnerForm.payoutDestination} onChange={(event) => setPartnerForm((previous) => ({ ...previous, payoutDestination: event.target.value }))} placeholder="+237 6..." />
+                </label>
+                <label className={styles.checkboxRow}>
+                  <input type="checkbox" checked={partnerForm.acceptedTerms} onChange={(event) => setPartnerForm((previous) => ({ ...previous, acceptedTerms: event.target.checked }))} />
+                  <span>J'accepte les conditions du programme partenaire.<small>Le numero de paiement ne pourra etre modifie qu'en contactant le service client.</small></span>
+                </label>
+                <button className={styles.submitBtn} type="submit" disabled={partnerBusy}>{partnerBusy ? "Activation..." : "Activer mon compte partenaire"}</button>
+              </form>
+            ) : (
+              <div className={styles.partnerDashboard}>
+                <div className={styles.partnerCodeBox}>
+                  <span>Code</span>
+                  <strong>{partnerData.primaryCode?.code}</strong>
+                  <button type="button" onClick={() => copyText(partnerData.primaryCode?.code)}><Copy size={15} /> Copier</button>
+                </div>
+                <div className={styles.partnerLinkBox}>
+                  <span>Lien de recommandation</span>
+                  <code>{partnerLink}</code>
+                  <div className={styles.partnerActions}>
+                    <button type="button" onClick={() => copyText(partnerLink)}><Copy size={15} /> Lien</button>
+                    <a href={`https://wa.me/?text=${encodeURIComponent(partnerLink)}`} target="_blank" rel="noreferrer"><Send size={15} /> WhatsApp</a>
+                    {navigator.share ? <button type="button" onClick={() => navigator.share({ title: "Deutsch Pruefungen", url: partnerLink })}>Partager</button> : null}
+                  </div>
+                </div>
+                <div className={styles.partnerMetrics}>
+                  <span><strong>{partnerData.metrics?.clicks || 0}</strong> visites</span>
+                  <span><strong>{partnerData.metrics?.registered || 0}</strong> inscriptions</span>
+                  <span><strong>{partnerData.metrics?.converted || 0}</strong> clients payants</span>
+                  <span><strong>{partnerData.metrics?.conversionRate || 0}%</strong> conversion</span>
+                  <span><strong>{formatMoney(partnerData.metrics?.pendingCommission)}</strong> attente</span>
+                  <span><strong>{formatMoney(partnerData.metrics?.availableBalance)}</strong> disponible</span>
+                  <span><strong>{formatMoney(partnerData.metrics?.totalPaid)}</strong> paye</span>
+                  <span><strong>{formatMoney(partnerData.metrics?.totalEarned)}</strong> gagne</span>
+                </div>
+                <div className={styles.partnerPayout}>
+                  <p>Retrait: {partnerData.partner.payoutMethod?.toUpperCase()} {partnerData.partner.payoutDestination}</p>
+                  <div>
+                    <input className={styles.input} value={partnerForm.payoutAmount} onChange={(event) => setPartnerForm((previous) => ({ ...previous, payoutAmount: event.target.value }))} placeholder={`Minimum ${formatMoney(partnerData.settings?.minimumWithdrawalAmount)}`} inputMode="numeric" />
+                    <button className={styles.submitBtn} type="button" onClick={requestPayout} disabled={partnerBusy}>Demander un retrait</button>
+                  </div>
+                </div>
+                <div className={styles.partnerTables}>
+                  <div>
+                    <h3>Mes commissions</h3>
+                    {partnerData.commissions?.slice(0, 5).map((item) => <p key={item.id}><strong>{formatMoney(item.commissionAmount)}</strong><span>{item.status} · {formatDate(item.createdAt)}</span></p>)}
+                    {!partnerData.commissions?.length ? <p className={styles.emptyState}>Aucune commission pour le moment.</p> : null}
+                  </div>
+                  <div>
+                    <h3>Paiements</h3>
+                    {partnerData.payouts?.slice(0, 5).map((item) => <p key={item.id}><strong>{formatMoney(item.amount)}</strong><span>{item.status} · {formatDate(item.requestedAt)}</span></p>)}
+                    {!partnerData.payouts?.length ? <p className={styles.emptyState}>Aucun retrait demande.</p> : null}
+                  </div>
+                </div>
+              </div>
+            )}
           </section>
 
           <section className={styles.card}>

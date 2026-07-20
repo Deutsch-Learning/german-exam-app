@@ -15,6 +15,7 @@ import {
   storeAuthSession,
   touchAuthActivity,
 } from "./utils/access";
+import { captureAffiliateRefFromLocation } from "./utils/affiliateAttribution";
 
 const DashboardMainPage = lazy(() => import("./pages/DashboardMainPage"));
 const SimulationSelectionPage = lazy(() => import("./pages/SimulationSelectionPage"));
@@ -66,6 +67,10 @@ const RouteFallback = () => (
 function AppRoutes() {
   const location = useLocation();
   const [authReady, setAuthReady] = useState(() => isLoggedIn() || !hasAuthSessionHint());
+
+  useEffect(() => {
+    captureAffiliateRefFromLocation(location.search, location.pathname).catch(() => {});
+  }, [location.pathname, location.search]);
 
   useEffect(() => {
     if (hasExceededAuthInactivityLimit()) {

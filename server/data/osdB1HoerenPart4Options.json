@@ -1,0 +1,1002 @@
+{
+  "1": {
+    "options": [
+      {
+        "value": "M",
+        "label": "M - Moderatorin Petra"
+      },
+      {
+        "value": "A",
+        "label": "A - Andreas"
+      },
+      {
+        "value": "K",
+        "label": "K - Katrin"
+      }
+    ],
+    "corrections": {
+      "23": {
+        "correct": "K",
+        "explanation": "Katrin: 'Ein Carsharing-Auto ersetzt bis zu acht Privatwagen.'"
+      },
+      "24": {
+        "correct": "A",
+        "explanation": "Andreas: 'Um sechs Uhr morgens sind die Autos oft schon vergeben.'"
+      },
+      "25": {
+        "correct": "K",
+        "explanation": "Katrin erklärt das Vorbuchen-System."
+      },
+      "26": {
+        "correct": "A",
+        "explanation": "Andreas: 'Das App hat manchmal nicht funktioniert.'"
+      },
+      "27": {
+        "correct": "A",
+        "explanation": "Andreas: 'Die Jahreskarte der Wiener Linien ist die beste Option.'"
+      },
+      "28": {
+        "correct": "K",
+        "explanation": "Katrin: 'eine Kombination aus öffentlichem Verkehr und Carsharing.'"
+      },
+      "29": {
+        "correct": "M",
+        "explanation": "Petra eröffnet die Diskussion mit diesem Thema."
+      },
+      "30": {
+        "correct": "A",
+        "explanation": "Andreas: 'Nicht jeder Bezirk ist gleich gut angebunden.'"
+      }
+    }
+  },
+  "2": {
+    "options": [
+      {
+        "value": "M",
+        "label": "M - Moderator Stefan"
+      },
+      {
+        "value": "L",
+        "label": "L - Lehrerin Ingrid"
+      },
+      {
+        "value": "E",
+        "label": "E - Elternteil Georg"
+      }
+    ],
+    "corrections": {
+      "23": {
+        "correct": "L",
+        "explanation": "Ingrid: 'Wir brauchen dringend mehr Fortbildungen.'"
+      },
+      "24": {
+        "correct": "E",
+        "explanation": "Georg: 'Meine Kinder verbringen schon zu viel Zeit vor Bildschirmen.'"
+      },
+      "25": {
+        "correct": "L",
+        "explanation": "Ingrid: 'Es gibt klare Regeln in meiner Klasse.'"
+      },
+      "26": {
+        "correct": "E",
+        "explanation": "Georg: 'wollen sie ihn auch für YouTube nutzen.'"
+      },
+      "27": {
+        "correct": "L",
+        "explanation": "Ingrid: 'Die meisten sind froh, dass es eine klare Grenze gibt.'"
+      },
+      "28": {
+        "correct": "E",
+        "explanation": "Georg: 'Ich wünschte, die Schulen hätten mehr Lehrmaterial in Buchform.'"
+      },
+      "29": {
+        "correct": "M",
+        "explanation": "Stefan eröffnet: 'Digitalisierung in österreichischen Schulen.'"
+      },
+      "30": {
+        "correct": "L",
+        "explanation": "Ingrid: 'Tablets und Computer im Unterricht sind eine große Chance.'"
+      }
+    }
+  },
+  "3": {
+    "options": [
+      {
+        "value": "M",
+        "label": "M - Moderatorin"
+      },
+      {
+        "value": "E",
+        "label": "E - Dr. Lang (Expertin)"
+      },
+      {
+        "value": "B",
+        "label": "B - Josef Bauer (Bürger)"
+      }
+    ],
+    "corrections": {
+      "23": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Das Bewusstsein ist deutlich gestiegen.'"
+      },
+      "24": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich habe angefangen, bewusster einzukaufen.'"
+      },
+      "25": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Krisen können Katalysatoren für positive Veränderungen sein.'"
+      },
+      "26": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich engagiere mich jetzt auch ehrenamtlich.'"
+      },
+      "27": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Gemeinschaft und Sinnhaftigkeit sind zentral für Wohlbefinden.'"
+      },
+      "28": {
+        "correct": "M",
+        "explanation": "Die Moderatorin nennt das Thema zu Beginn."
+      },
+      "29": {
+        "correct": "B",
+        "explanation": "Piège: er liest sie JETZT, früher hat er es nicht getan."
+      },
+      "30": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Menschen suchen in unsicheren Zeiten nach Kontrolle.'"
+      }
+    }
+  },
+  "4": {
+    "options": [
+      {
+        "value": "M",
+        "label": "M - Moderatorin"
+      },
+      {
+        "value": "E",
+        "label": "E - Dr. Lang (Expertin)"
+      },
+      {
+        "value": "B",
+        "label": "B - Josef Bauer (Bürger)"
+      }
+    ],
+    "corrections": {
+      "23": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Das Bewusstsein ist deutlich gestiegen.'"
+      },
+      "24": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich habe angefangen, bewusster einzukaufen.'"
+      },
+      "25": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Krisen können Katalysatoren für positive Veränderungen sein.'"
+      },
+      "26": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich engagiere mich jetzt auch ehrenamtlich.'"
+      },
+      "27": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Gemeinschaft und Sinnhaftigkeit sind zentral für Wohlbefinden.'"
+      },
+      "28": {
+        "correct": "M",
+        "explanation": "Die Moderatorin nennt das Thema zu Beginn."
+      },
+      "29": {
+        "correct": "B",
+        "explanation": "Piège: er liest sie JETZT, früher hat er es nicht getan."
+      },
+      "30": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Menschen suchen in unsicheren Zeiten nach Kontrolle.'"
+      }
+    }
+  },
+  "5": {
+    "options": [
+      {
+        "value": "M",
+        "label": "M - Moderatorin"
+      },
+      {
+        "value": "E",
+        "label": "E - Dr. Lang (Expertin)"
+      },
+      {
+        "value": "B",
+        "label": "B - Josef Bauer (Bürger)"
+      }
+    ],
+    "corrections": {
+      "23": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Das Bewusstsein ist deutlich gestiegen.'"
+      },
+      "24": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich habe angefangen, bewusster einzukaufen.'"
+      },
+      "25": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Krisen können Katalysatoren für positive Veränderungen sein.'"
+      },
+      "26": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich engagiere mich jetzt auch ehrenamtlich.'"
+      },
+      "27": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Gemeinschaft und Sinnhaftigkeit sind zentral für Wohlbefinden.'"
+      },
+      "28": {
+        "correct": "M",
+        "explanation": "Die Moderatorin nennt das Thema zu Beginn."
+      },
+      "29": {
+        "correct": "B",
+        "explanation": "Piège: er liest sie JETZT, früher hat er es nicht getan."
+      },
+      "30": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Menschen suchen in unsicheren Zeiten nach Kontrolle.'"
+      }
+    }
+  },
+  "6": {
+    "options": [
+      {
+        "value": "M",
+        "label": "M - Moderatorin"
+      },
+      {
+        "value": "E",
+        "label": "E - Dr. Lang (Expertin)"
+      },
+      {
+        "value": "B",
+        "label": "B - Josef Bauer (Bürger)"
+      }
+    ],
+    "corrections": {
+      "23": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Das Bewusstsein ist deutlich gestiegen.'"
+      },
+      "24": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich habe angefangen, bewusster einzukaufen.'"
+      },
+      "25": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Krisen können Katalysatoren für positive Veränderungen sein.'"
+      },
+      "26": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich engagiere mich jetzt auch ehrenamtlich.'"
+      },
+      "27": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Gemeinschaft und Sinnhaftigkeit sind zentral für Wohlbefinden.'"
+      },
+      "28": {
+        "correct": "M",
+        "explanation": "Die Moderatorin nennt das Thema zu Beginn."
+      },
+      "29": {
+        "correct": "B",
+        "explanation": "Piège: er liest sie JETZT, früher hat er es nicht getan."
+      },
+      "30": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Menschen suchen in unsicheren Zeiten nach Kontrolle.'"
+      }
+    }
+  },
+  "7": {
+    "options": [
+      {
+        "value": "M",
+        "label": "M - Moderatorin"
+      },
+      {
+        "value": "E",
+        "label": "E - Dr. Lang (Expertin)"
+      },
+      {
+        "value": "B",
+        "label": "B - Josef Bauer (Bürger)"
+      }
+    ],
+    "corrections": {
+      "23": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Das Bewusstsein ist deutlich gestiegen.'"
+      },
+      "24": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich habe angefangen, bewusster einzukaufen.'"
+      },
+      "25": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Krisen können Katalysatoren für positive Veränderungen sein.'"
+      },
+      "26": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich engagiere mich jetzt auch ehrenamtlich.'"
+      },
+      "27": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Gemeinschaft und Sinnhaftigkeit sind zentral für Wohlbefinden.'"
+      },
+      "28": {
+        "correct": "M",
+        "explanation": "Die Moderatorin nennt das Thema zu Beginn."
+      },
+      "29": {
+        "correct": "B",
+        "explanation": "Piège: er liest sie JETZT, früher hat er es nicht getan."
+      },
+      "30": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Menschen suchen in unsicheren Zeiten nach Kontrolle.'"
+      }
+    }
+  },
+  "8": {
+    "options": [
+      {
+        "value": "M",
+        "label": "M - Moderatorin"
+      },
+      {
+        "value": "E",
+        "label": "E - Dr. Lang (Expertin)"
+      },
+      {
+        "value": "B",
+        "label": "B - Josef Bauer (Bürger)"
+      }
+    ],
+    "corrections": {
+      "23": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Das Bewusstsein ist deutlich gestiegen.'"
+      },
+      "24": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich habe angefangen, bewusster einzukaufen.'"
+      },
+      "25": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Krisen können Katalysatoren für positive Veränderungen sein.'"
+      },
+      "26": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich engagiere mich jetzt auch ehrenamtlich.'"
+      },
+      "27": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Gemeinschaft und Sinnhaftigkeit sind zentral für Wohlbefinden.'"
+      },
+      "28": {
+        "correct": "M",
+        "explanation": "Die Moderatorin nennt das Thema zu Beginn."
+      },
+      "29": {
+        "correct": "B",
+        "explanation": "Piège: er liest sie JETZT, früher hat er es nicht getan."
+      },
+      "30": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Menschen suchen in unsicheren Zeiten nach Kontrolle.'"
+      }
+    }
+  },
+  "9": {
+    "options": [
+      {
+        "value": "M",
+        "label": "M - Moderatorin"
+      },
+      {
+        "value": "E",
+        "label": "E - Dr. Lang (Expertin)"
+      },
+      {
+        "value": "B",
+        "label": "B - Josef Bauer (Bürger)"
+      }
+    ],
+    "corrections": {
+      "23": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Das Bewusstsein ist deutlich gestiegen.'"
+      },
+      "24": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich habe angefangen, bewusster einzukaufen.'"
+      },
+      "25": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Krisen können Katalysatoren für positive Veränderungen sein.'"
+      },
+      "26": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich engagiere mich jetzt auch ehrenamtlich.'"
+      },
+      "27": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Gemeinschaft und Sinnhaftigkeit sind zentral für Wohlbefinden.'"
+      },
+      "28": {
+        "correct": "M",
+        "explanation": "Die Moderatorin nennt das Thema zu Beginn."
+      },
+      "29": {
+        "correct": "B",
+        "explanation": "Piège: er liest sie JETZT, früher hat er es nicht getan."
+      },
+      "30": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Menschen suchen in unsicheren Zeiten nach Kontrolle.'"
+      }
+    }
+  },
+  "10": {
+    "options": [
+      {
+        "value": "M",
+        "label": "M - Moderatorin"
+      },
+      {
+        "value": "E",
+        "label": "E - Dr. Lang (Expertin)"
+      },
+      {
+        "value": "B",
+        "label": "B - Josef Bauer (Bürger)"
+      }
+    ],
+    "corrections": {
+      "23": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Das Bewusstsein ist deutlich gestiegen.'"
+      },
+      "24": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich habe angefangen, bewusster einzukaufen.'"
+      },
+      "25": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Krisen können Katalysatoren für positive Veränderungen sein.'"
+      },
+      "26": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich engagiere mich jetzt auch ehrenamtlich.'"
+      },
+      "27": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Gemeinschaft und Sinnhaftigkeit sind zentral für Wohlbefinden.'"
+      },
+      "28": {
+        "correct": "M",
+        "explanation": "Die Moderatorin nennt das Thema zu Beginn."
+      },
+      "29": {
+        "correct": "B",
+        "explanation": "Piège: er liest sie JETZT, früher hat er es nicht getan."
+      },
+      "30": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Menschen suchen in unsicheren Zeiten nach Kontrolle.'"
+      }
+    }
+  },
+  "11": {
+    "options": [
+      {
+        "value": "M",
+        "label": "M - Moderatorin"
+      },
+      {
+        "value": "E",
+        "label": "E - Dr. Lang (Expertin)"
+      },
+      {
+        "value": "B",
+        "label": "B - Josef Bauer (Bürger)"
+      }
+    ],
+    "corrections": {
+      "23": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Das Bewusstsein ist deutlich gestiegen.'"
+      },
+      "24": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich habe angefangen, bewusster einzukaufen.'"
+      },
+      "25": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Krisen können Katalysatoren für positive Veränderungen sein.'"
+      },
+      "26": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich engagiere mich jetzt auch ehrenamtlich.'"
+      },
+      "27": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Gemeinschaft und Sinnhaftigkeit sind zentral für Wohlbefinden.'"
+      },
+      "28": {
+        "correct": "M",
+        "explanation": "Die Moderatorin nennt das Thema zu Beginn."
+      },
+      "29": {
+        "correct": "B",
+        "explanation": "Piège: er liest sie JETZT, früher hat er es nicht getan."
+      },
+      "30": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Menschen suchen in unsicheren Zeiten nach Kontrolle.'"
+      }
+    }
+  },
+  "12": {
+    "options": [
+      {
+        "value": "M",
+        "label": "M - Moderatorin"
+      },
+      {
+        "value": "E",
+        "label": "E - Dr. Lang (Expertin)"
+      },
+      {
+        "value": "B",
+        "label": "B - Josef Bauer (Bürger)"
+      }
+    ],
+    "corrections": {
+      "23": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Das Bewusstsein ist deutlich gestiegen.'"
+      },
+      "24": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich habe angefangen, bewusster einzukaufen.'"
+      },
+      "25": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Krisen können Katalysatoren für positive Veränderungen sein.'"
+      },
+      "26": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich engagiere mich jetzt auch ehrenamtlich.'"
+      },
+      "27": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Gemeinschaft und Sinnhaftigkeit sind zentral für Wohlbefinden.'"
+      },
+      "28": {
+        "correct": "M",
+        "explanation": "Die Moderatorin nennt das Thema zu Beginn."
+      },
+      "29": {
+        "correct": "B",
+        "explanation": "Piège: er liest sie JETZT, früher hat er es nicht getan."
+      },
+      "30": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Menschen suchen in unsicheren Zeiten nach Kontrolle.'"
+      }
+    }
+  },
+  "13": {
+    "options": [
+      {
+        "value": "M",
+        "label": "M - Moderatorin"
+      },
+      {
+        "value": "E",
+        "label": "E - Dr. Lang (Expertin)"
+      },
+      {
+        "value": "B",
+        "label": "B - Josef Bauer (Bürger)"
+      }
+    ],
+    "corrections": {
+      "23": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Das Bewusstsein ist deutlich gestiegen.'"
+      },
+      "24": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich habe angefangen, bewusster einzukaufen.'"
+      },
+      "25": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Krisen können Katalysatoren für positive Veränderungen sein.'"
+      },
+      "26": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich engagiere mich jetzt auch ehrenamtlich.'"
+      },
+      "27": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Gemeinschaft und Sinnhaftigkeit sind zentral für Wohlbefinden.'"
+      },
+      "28": {
+        "correct": "M",
+        "explanation": "Die Moderatorin nennt das Thema zu Beginn."
+      },
+      "29": {
+        "correct": "B",
+        "explanation": "Piège: er liest sie JETZT, früher hat er es nicht getan."
+      },
+      "30": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Menschen suchen in unsicheren Zeiten nach Kontrolle.'"
+      }
+    }
+  },
+  "14": {
+    "options": [
+      {
+        "value": "M",
+        "label": "M - Moderatorin"
+      },
+      {
+        "value": "E",
+        "label": "E - Dr. Lang (Expertin)"
+      },
+      {
+        "value": "B",
+        "label": "B - Josef Bauer (Bürger)"
+      }
+    ],
+    "corrections": {
+      "23": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Das Bewusstsein ist deutlich gestiegen.'"
+      },
+      "24": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich habe angefangen, bewusster einzukaufen.'"
+      },
+      "25": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Krisen können Katalysatoren für positive Veränderungen sein.'"
+      },
+      "26": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich engagiere mich jetzt auch ehrenamtlich.'"
+      },
+      "27": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Gemeinschaft und Sinnhaftigkeit sind zentral für Wohlbefinden.'"
+      },
+      "28": {
+        "correct": "M",
+        "explanation": "Die Moderatorin nennt das Thema zu Beginn."
+      },
+      "29": {
+        "correct": "B",
+        "explanation": "Piège: er liest sie JETZT, früher hat er es nicht getan."
+      },
+      "30": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Menschen suchen in unsicheren Zeiten nach Kontrolle.'"
+      }
+    }
+  },
+  "15": {
+    "options": [
+      {
+        "value": "M",
+        "label": "M - Moderatorin"
+      },
+      {
+        "value": "E",
+        "label": "E - Dr. Lang (Expertin)"
+      },
+      {
+        "value": "B",
+        "label": "B - Josef Bauer (Bürger)"
+      }
+    ],
+    "corrections": {
+      "23": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Das Bewusstsein ist deutlich gestiegen.'"
+      },
+      "24": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich habe angefangen, bewusster einzukaufen.'"
+      },
+      "25": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Krisen können Katalysatoren für positive Veränderungen sein.'"
+      },
+      "26": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich engagiere mich jetzt auch ehrenamtlich.'"
+      },
+      "27": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Gemeinschaft und Sinnhaftigkeit sind zentral für Wohlbefinden.'"
+      },
+      "28": {
+        "correct": "M",
+        "explanation": "Die Moderatorin nennt das Thema zu Beginn."
+      },
+      "29": {
+        "correct": "B",
+        "explanation": "Piège: er liest sie JETZT, früher hat er es nicht getan."
+      },
+      "30": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Menschen suchen in unsicheren Zeiten nach Kontrolle.'"
+      }
+    }
+  },
+  "16": {
+    "options": [
+      {
+        "value": "M",
+        "label": "M - Moderatorin"
+      },
+      {
+        "value": "E",
+        "label": "E - Dr. Lang (Expertin)"
+      },
+      {
+        "value": "B",
+        "label": "B - Josef Bauer (Bürger)"
+      }
+    ],
+    "corrections": {
+      "23": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Das Bewusstsein ist deutlich gestiegen.'"
+      },
+      "24": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich habe angefangen, bewusster einzukaufen.'"
+      },
+      "25": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Krisen können Katalysatoren für positive Veränderungen sein.'"
+      },
+      "26": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich engagiere mich jetzt auch ehrenamtlich.'"
+      },
+      "27": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Gemeinschaft und Sinnhaftigkeit sind zentral für Wohlbefinden.'"
+      },
+      "28": {
+        "correct": "M",
+        "explanation": "Die Moderatorin nennt das Thema zu Beginn."
+      },
+      "29": {
+        "correct": "B",
+        "explanation": "Piège: er liest sie JETZT, früher hat er es nicht getan."
+      },
+      "30": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Menschen suchen in unsicheren Zeiten nach Kontrolle.'"
+      }
+    }
+  },
+  "17": {
+    "options": [
+      {
+        "value": "M",
+        "label": "M - Moderatorin"
+      },
+      {
+        "value": "E",
+        "label": "E - Dr. Lang (Expertin)"
+      },
+      {
+        "value": "B",
+        "label": "B - Josef Bauer (Bürger)"
+      }
+    ],
+    "corrections": {
+      "23": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Das Bewusstsein ist deutlich gestiegen.'"
+      },
+      "24": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich habe angefangen, bewusster einzukaufen.'"
+      },
+      "25": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Krisen können Katalysatoren für positive Veränderungen sein.'"
+      },
+      "26": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich engagiere mich jetzt auch ehrenamtlich.'"
+      },
+      "27": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Gemeinschaft und Sinnhaftigkeit sind zentral für Wohlbefinden.'"
+      },
+      "28": {
+        "correct": "M",
+        "explanation": "Die Moderatorin nennt das Thema zu Beginn."
+      },
+      "29": {
+        "correct": "B",
+        "explanation": "Piège: er liest sie JETZT, früher hat er es nicht getan."
+      },
+      "30": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Menschen suchen in unsicheren Zeiten nach Kontrolle.'"
+      }
+    }
+  },
+  "18": {
+    "options": [
+      {
+        "value": "M",
+        "label": "M - Moderatorin"
+      },
+      {
+        "value": "E",
+        "label": "E - Dr. Lang (Expertin)"
+      },
+      {
+        "value": "B",
+        "label": "B - Josef Bauer (Bürger)"
+      }
+    ],
+    "corrections": {
+      "23": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Das Bewusstsein ist deutlich gestiegen.'"
+      },
+      "24": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich habe angefangen, bewusster einzukaufen.'"
+      },
+      "25": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Krisen können Katalysatoren für positive Veränderungen sein.'"
+      },
+      "26": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich engagiere mich jetzt auch ehrenamtlich.'"
+      },
+      "27": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Gemeinschaft und Sinnhaftigkeit sind zentral für Wohlbefinden.'"
+      },
+      "28": {
+        "correct": "M",
+        "explanation": "Die Moderatorin nennt das Thema zu Beginn."
+      },
+      "29": {
+        "correct": "B",
+        "explanation": "Piège: er liest sie JETZT, früher hat er es nicht getan."
+      },
+      "30": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Menschen suchen in unsicheren Zeiten nach Kontrolle.'"
+      }
+    }
+  },
+  "19": {
+    "options": [
+      {
+        "value": "M",
+        "label": "M - Moderatorin"
+      },
+      {
+        "value": "E",
+        "label": "E - Dr. Lang (Expertin)"
+      },
+      {
+        "value": "B",
+        "label": "B - Josef Bauer (Bürger)"
+      }
+    ],
+    "corrections": {
+      "23": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Das Bewusstsein ist deutlich gestiegen.'"
+      },
+      "24": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich habe angefangen, bewusster einzukaufen.'"
+      },
+      "25": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Krisen können Katalysatoren für positive Veränderungen sein.'"
+      },
+      "26": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich engagiere mich jetzt auch ehrenamtlich.'"
+      },
+      "27": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Gemeinschaft und Sinnhaftigkeit sind zentral für Wohlbefinden.'"
+      },
+      "28": {
+        "correct": "M",
+        "explanation": "Die Moderatorin nennt das Thema zu Beginn."
+      },
+      "29": {
+        "correct": "B",
+        "explanation": "Piège: er liest sie JETZT, früher hat er es nicht getan."
+      },
+      "30": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Menschen suchen in unsicheren Zeiten nach Kontrolle.'"
+      }
+    }
+  },
+  "20": {
+    "options": [
+      {
+        "value": "M",
+        "label": "M - Moderatorin"
+      },
+      {
+        "value": "E",
+        "label": "E - Dr. Lang (Expertin)"
+      },
+      {
+        "value": "B",
+        "label": "B - Josef Bauer (Bürger)"
+      }
+    ],
+    "corrections": {
+      "23": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Das Bewusstsein ist deutlich gestiegen.'"
+      },
+      "24": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich habe angefangen, bewusster einzukaufen.'"
+      },
+      "25": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Krisen können Katalysatoren für positive Veränderungen sein.'"
+      },
+      "26": {
+        "correct": "B",
+        "explanation": "Bauer: 'Ich engagiere mich jetzt auch ehrenamtlich.'"
+      },
+      "27": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Gemeinschaft und Sinnhaftigkeit sind zentral für Wohlbefinden.'"
+      },
+      "28": {
+        "correct": "M",
+        "explanation": "Die Moderatorin nennt das Thema zu Beginn."
+      },
+      "29": {
+        "correct": "B",
+        "explanation": "Piège: er liest sie JETZT, früher hat er es nicht getan."
+      },
+      "30": {
+        "correct": "E",
+        "explanation": "Dr. Lang: 'Menschen suchen in unsicheren Zeiten nach Kontrolle.'"
+      }
+    }
+  }
+}

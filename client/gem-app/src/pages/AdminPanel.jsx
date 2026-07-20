@@ -36,6 +36,7 @@ import {
   Upload,
   Users,
   Volume2,
+  Wallet,
 } from "lucide-react";
 import API from "../services/api";
 import logo from "../assets/images/logo.png";
@@ -370,6 +371,7 @@ function AdminShell({ children }) {
     { to: "/admin/dashboard", label: "Dashboard", icon: BarChart3 },
     { to: "/admin/users", label: "Users", icon: Users },
     { to: "/admin/subscriptions", label: "Subscriptions", icon: Shield },
+    { to: "/admin/affiliates", label: "Partners", icon: Wallet },
     { to: "/admin/testimonials", label: "Testimonials", icon: MessageSquareText },
     { to: "/admin/exams", label: "Exams", icon: FileJson },
     { to: "/admin/hoeren-studio", label: "Hören Studio", icon: Headphones },
@@ -959,6 +961,189 @@ function AdminSubscriptions() {
           </table>
         </div>
       </section>
+    </>
+  );
+}
+
+function AdminAffiliates() {
+  const loader = useCallback(async () => {
+    const res = await API.get("/api/admin/affiliates");
+    return res.data;
+  }, []);
+  const { data, loading, error, reload } = useAdminData(loader);
+  const [status, setStatus] = useState("");
+  const settings = data?.settings || {};
+  const overview = data?.overview || {};
+  const money = (value) => new Intl.NumberFormat("fr-FR", {
+    style: "currency",
+    currency: settings.defaultCurrency || "XAF",
+    maximumFractionDigits: 0,
+  }).format(Number(value) || 0);
+
+  const updatePartner = async (partner, next) => {
+    setStatus("");
+    await API.patch(`/api/admin/affiliates/partners/${partner.id}`, {
+      status: next.status || partner.status,
+      commissionRate: next.commissionRate ?? partner.commissionRate,
+    });
+    setStatus("Partner updated.");
+    reload();
+  };
+
+  const createCode = async (partner) => {
+    const code = window.prompt("Custom influencer code");
+    if (!code) return;
+    await API.post(`/api/admin/affiliates/partners/${partner.id}/codes`, { code });
+    setStatus("Code created.");
+    reload();
+  };
+
+  const processPayout = async (payout, nextStatus) => {
+    const transactionReference = nextStatus === "paid" ? window.prompt("Mobile Money transaction reference") : "";
+    const rejectionReason = nextStatus === "rejected" ? window.prompt("Rejection reason") : "";
+    if (nextStatus === "paid" && !transactionReference) return;
+    if (nextStatus === "rejected" && !rejectionReason) return;
+    await API.patch(`/api/admin/affiliates/payouts/${payout.id}`, {
+      status: nextStatus,
+      transactionReference,
+      rejectionReason,
+    });
+    setStatus("Payout updated.");
+    reload();
+  };
+
+  const cancelCommission = async (commission) => {
+    const reason = window.prompt("Cancellation reason");
+    if (!reason) return;
+    await API.patch(`/api/admin/affiliates/commissions/${commission.id}/cancel`, { reason });
+    setStatus("Commission cancelled.");
+    reload();
+  };
+
+  const saveSettings = async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    await API.patch("/api/admin/affiliates/settings", {
+      defaultCommissionPercent: form.get("defaultCommissionPercent"),
+      firstPurchaseDiscountPercent: form.get("firstPurchaseDiscountPercent"),
+      commissionHoldDays: form.get("commissionHoldDays"),
+      minimumWithdrawalAmount: form.get("minimumWithdrawalAmount"),
+      defaultCurrency: form.get("defaultCurrency"),
+      attributionCookieDays: form.get("attributionCookieDays"),
+      programmeEnabled: form.get("programmeEnabled") === "on",
+    });
+    setStatus("Settings saved.");
+    reload();
+  };
+
+  return (
+    <>
+      <Header title="Partner Programme" subtitle="Affiliate attribution, commissions, fraud review, and payout processing." />
+      {status ? <p className={styles.status}>{status}</p> : null}
+      {error ? <p className={styles.error}>{error}</p> : null}
+      {loading ? <p>Loading...</p> : null}
+      {!loading && data ? (
+        <>
+          <section className={styles.statGrid}>
+            {[
+              ["Total partners", overview.totalPartners],
+              ["Active partners", overview.activePartners],
+              ["Registrations", overview.registrations],
+              ["Paying referrals", overview.payingReferrals],
+              ["Pending", money(overview.pendingCommission)],
+              ["Available", money(overview.availableCommission)],
+              ["Paid", money(overview.paidCommission)],
+              ["Conversion", `${overview.conversionRate || 0}%`],
+            ].map(([label, value]) => (
+              <article className={styles.statCard} key={label}><span>{label}</span><strong>{value}</strong></article>
+            ))}
+          </section>
+
+          <section className={styles.panel}>
+            <div className={styles.panelHeader}><h2>Programme settings</h2></div>
+            <form className={styles.formGrid} onSubmit={saveSettings}>
+              <label>Default commission %<input name="defaultCommissionPercent" defaultValue={settings.defaultCommissionPercent} /></label>
+              <label>Student discount %<input name="firstPurchaseDiscountPercent" defaultValue={settings.firstPurchaseDiscountPercent} /></label>
+              <label>Hold days<input name="commissionHoldDays" defaultValue={settings.commissionHoldDays} /></label>
+              <label>Minimum withdrawal<input name="minimumWithdrawalAmount" defaultValue={settings.minimumWithdrawalAmount} /></label>
+              <label>Currency<input name="defaultCurrency" defaultValue={settings.defaultCurrency} /></label>
+              <label>Attribution days<input name="attributionCookieDays" defaultValue={settings.attributionCookieDays} /></label>
+              <label className={styles.checkRow}><input type="checkbox" name="programmeEnabled" defaultChecked={settings.programmeEnabled} /> Programme enabled</label>
+              <button className={styles.button} type="submit">Save settings</button>
+            </form>
+          </section>
+
+          <section className={styles.panel}>
+            <div className={styles.panelHeader}><h2>Partners</h2></div>
+            <div className={styles.tableWrap}>
+              <table className={styles.table}>
+                <thead><tr><th>Name</th><th>Codes</th><th>Status</th><th>Rate</th><th>Referrals</th><th>Available</th><th>Actions</th></tr></thead>
+                <tbody>
+                  {data.partners.map((partner) => (
+                    <tr key={partner.id}>
+                      <td><strong>{partner.publicName}</strong><br />{partner.email}</td>
+                      <td>{partner.codes.map((code) => <span className={styles.badge} key={code.id}>{code.code}</span>)}</td>
+                      <td>{partner.status}</td>
+                      <td>{partner.commissionRate}%</td>
+                      <td>{partner.converted}/{partner.referrals}</td>
+                      <td>{money(partner.available)}</td>
+                      <td className={styles.actions}>
+                        <button className={styles.secondaryButton} type="button" onClick={() => updatePartner(partner, { status: partner.status === "active" ? "suspended" : "active" })}>{partner.status === "active" ? "Suspend" : "Activate"}</button>
+                        <button className={styles.secondaryButton} type="button" onClick={() => createCode(partner)}>Custom code</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className={styles.panel}>
+            <div className={styles.panelHeader}><h2>Payout requests</h2></div>
+            <div className={styles.tableWrap}>
+              <table className={styles.table}>
+                <thead><tr><th>Partner</th><th>Amount</th><th>Destination</th><th>Status</th><th>Actions</th></tr></thead>
+                <tbody>
+                  {data.payouts.map((payout) => (
+                    <tr key={payout.id}>
+                      <td>{payout.publicName}<br />{payout.email}</td>
+                      <td>{money(payout.amount)}</td>
+                      <td>{payout.payoutMethod?.toUpperCase()} {payout.payoutDestination}</td>
+                      <td>{payout.status}</td>
+                      <td className={styles.actions}>
+                        <button className={styles.secondaryButton} type="button" onClick={() => processPayout(payout, "processing")}>Processing</button>
+                        <button className={styles.button} type="button" onClick={() => processPayout(payout, "paid")}>Paid</button>
+                        <button className={styles.dangerButton} type="button" onClick={() => processPayout(payout, "rejected")}>Reject</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className={styles.panel}>
+            <div className={styles.panelHeader}><h2>Commission ledger</h2></div>
+            <div className={styles.tableWrap}>
+              <table className={styles.table}>
+                <thead><tr><th>Partner</th><th>Payment</th><th>Base</th><th>Commission</th><th>Status</th><th>Action</th></tr></thead>
+                <tbody>
+                  {data.commissions.map((commission) => (
+                    <tr key={commission.id}>
+                      <td>{commission.publicName}</td>
+                      <td>{commission.paymentId}</td>
+                      <td>{money(commission.baseAmount)}</td>
+                      <td>{money(commission.commissionAmount)} ({commission.commissionRate}%)</td>
+                      <td>{commission.status}</td>
+                      <td>{["pending", "available"].includes(commission.status) ? <button className={styles.dangerButton} type="button" onClick={() => cancelCommission(commission)}>Cancel</button> : "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </>
+      ) : null}
     </>
   );
 }
@@ -4722,6 +4907,7 @@ export default function AdminPanel() {
         <Route path="dashboard" element={<AdminDashboard />} />
         <Route path="users" element={<AdminUsers />} />
         <Route path="subscriptions" element={<AdminSubscriptions />} />
+        <Route path="affiliates" element={<AdminAffiliates />} />
         <Route path="testimonials" element={<AdminTestimonials />} />
         <Route path="exams" element={<AdminExams />} />
         <Route path="hoeren-studio" element={<AdminHoerenStudio />} />

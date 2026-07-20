@@ -43,7 +43,7 @@ import logo from "../assets/images/logo.png";
 import speakingImage from "../assets/images/active_people.png";
 import { fetchImportedSeriesModule } from "../services/importedExams";
 import { getProgressKey, upsertSimulationHistoryEntry } from "../utils/simulationHistory";
-import { canOpenSeries, getAuthUser, isVisitorSeriesAttempt } from "../utils/access";
+import { canOpenSeries, canOpenSeriesModule, getAuthUser, isVisitorSeriesAttempt } from "../utils/access";
 import { useTestProtection } from "../utils/testProtection";
 import { useSimulationLanguage } from "../utils/simulationLanguage";
 import SmoothedAudioPlayer from "../components/SmoothedAudioPlayer";
@@ -2117,6 +2117,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const visitorSeriesAttempt = isVisitorSeriesAttempt(selectedSeries);
   const visitorAccessAllowed = Boolean(location.state?.visitorFreeAccess);
   const blockedSeriesAccess = Boolean(selectedSeries && !canOpenSeries(selectedSeries));
+  const blockedModuleAccess = Boolean(selectedSeries && !canOpenSeriesModule(selectedSeries, baseModule.id));
   const blockedVisitorRefresh = visitorSeriesAttempt && !visitorAccessAllowed;
   const waitingForImportedSeries = Boolean(params.seriesId && !selectedSeries && importedModuleState.loading);
   const module = useMemo(
@@ -2124,7 +2125,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     [baseModule, selectedSeriesContent, selectedSeries]
   );
   const shouldPersistProgress =
-    !module.unavailable && !blockedSeriesAccess && !blockedVisitorRefresh && !waitingForImportedSeries;
+    !module.unavailable && !blockedSeriesAccess && !blockedModuleAccess && !blockedVisitorRefresh && !waitingForImportedSeries;
   const ModuleIcon = module.Icon;
   const moduleTitle = t.modules[module.id] ?? module.title;
   const totalTasks = module.tasks.length;
@@ -5931,11 +5932,13 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     return <ComingSoonPage examId={params.examId} title="Dieses Modul ist noch nicht verfuegbar" />;
   }
 
-  if (blockedSeriesAccess || blockedVisitorRefresh) {
+  if (blockedSeriesAccess || blockedModuleAccess || blockedVisitorRefresh) {
     return (
       <NotFoundPage
         title="404-Fehler"
-        message="Diese Testsitzung ist nicht verfuegbar. Oeffnen Sie eine kostenlose Serie aus der Serienliste, um einen Besuchertest zu starten."
+        message={blockedModuleAccess
+          ? "Das Sprechen-Modul ist fuer Premium-Nutzer reserviert."
+          : "Diese Testsitzung ist nicht verfuegbar. Oeffnen Sie eine kostenlose Serie aus der Serienliste, um einen Besuchertest zu starten."}
       />
     );
   }

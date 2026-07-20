@@ -486,6 +486,37 @@
   gap: 12px;
 }
 
+.formGrid label {
+  display: grid;
+  gap: 6px;
+  color: #334155;
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.formGrid input {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font: inherit;
+  background: #ffffff;
+  color: #111827;
+}
+
+.checkRow {
+  align-self: end;
+  display: flex !important;
+  grid-template-columns: none !important;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+}
+
+.checkRow input {
+  width: auto;
+}
+
 .field {
   display: grid;
   gap: 6px;
