@@ -1,13 +1,13 @@
 export const unlockedSections = [
-  { title: "Compréhension Écrite", detail: "Tests en conditions réelles" },
-  { title: "Compréhension Orale", detail: "Simulations audio officielles" },
-  { title: "Expression Orale", detail: "Exercices guidés & corrections" },
-  { title: "Expression Écrite", detail: "Exercices guidés & corrections" },
+  { key: "reading", title: "Comprehension ecrite", detail: "Tests en conditions reelles" },
+  { key: "listening", title: "Comprehension orale", detail: "Simulations audio officielles" },
+  { key: "speaking", title: "Expression orale", detail: "Exercices guides et corrections" },
+  { key: "writing", title: "Expression ecrite", detail: "Exercices guides et corrections" },
 ];
 
 export const certificationOptions = [
   { key: "goethe", label: "Goethe" },
-  { key: "osd", label: "ÖSD" },
+  { key: "osd", label: "OSD" },
   { key: "telc", label: "TELC" },
   { key: "ecl", label: "ECL" },
 ];
@@ -16,7 +16,7 @@ export const certificationLabels = certificationOptions.map((option) => option.l
 export const certificationKeys = certificationOptions.map((option) => option.key);
 
 export const formatEuro = (value) =>
-  `€${Number(value || 0).toFixed(2).replace(".", ",")}`;
+  `\u20ac${Number(value || 0).toFixed(2).replace(".", ",")}`;
 
 export const pricingSections = [
   {

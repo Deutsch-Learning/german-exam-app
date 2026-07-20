@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { CheckCircle2, CreditCard, Landmark, Smartphone, X } from "lucide-react";
@@ -15,6 +15,269 @@ import {
   pricingSections,
   unlockedSections,
 } from "../data/pricingPlans";
+import { useLanguage } from "../context/LanguageContext";
+import { languageOptions } from "../utils/language";
+
+const offersCopy = {
+  fr: {
+    home: "Accueil",
+    kicker: "POSITIONNEMENT PREMIUM",
+    title: "Grille Tarifaire Officielle",
+    subtitle: "Packs de revision pour la preparation aux examens d'allemand - Niveaux B1 & B2",
+    level: "NIVEAU",
+    version: "Version",
+    oralSimulator: "Simulateur expression orale",
+    attempts: "essais",
+    access: "Acces",
+    days: "Jours",
+    preparing: "PREPARATION...",
+    subscribe: "S'ABONNER",
+    enterpriseKicker: "OFFRES ECOLES & INSTITUTIONS",
+    enterpriseTitle: "Paiement entreprise",
+    enterpriseSubtitle: "Packs concus pour les ecoles, centres de langue et partenaires qui veulent preparer plusieurs apprenants B1 et B2.",
+    billing: "Facturation",
+    oralSimulations: "Simulations orales",
+    modules: "Modules",
+    footer: "Tarifs valables pour les certifications ciblees : Goethe, OSD, TELC, ECL, a niveau et duree equivalents.",
+    features: {
+      reading: ["Comprehension ecrite", "Tests en conditions reelles"],
+      listening: ["Comprehension orale", "Simulations audio officielles"],
+      speaking: ["Expression orale", "Exercices guides et corrections"],
+      writing: ["Expression ecrite", "Exercices guides et corrections"],
+    },
+    notices: {
+      failed: "Le paiement n'a pas abouti. Vous pouvez reessayer ou choisir un autre moyen de paiement.",
+      pending: "Le paiement est en cours de verification. L'acces sera active automatiquement apres confirmation.",
+      verification_error: "Nous n'avons pas pu verifier ce paiement pour le moment. Si le montant a ete debite, contactez le support.",
+      missing_reference: "La reference du paiement est manquante. Veuillez relancer le paiement depuis cette page.",
+    },
+    modal: {
+      close: "Fermer",
+      selectedPack: "Pack selectionne",
+      level: "Niveau",
+      pack: "Pack",
+      exams: "Examens",
+      duration: "Duree",
+      quantity: "Quantite",
+      price: "Prix",
+      total: "Total EUR",
+      paymentCurrency: "Devise paiement",
+      reference: "Reference",
+      none: "Aucune selection",
+      calculating: "Calcul...",
+      toConfirm: "A confirmer",
+      estimated: " estime",
+      chooseCerts: "Choisissez les certifications que vous voulez debloquer pour ce pack.",
+      finalizeNext: "Vous allez finaliser le paiement a l'etape suivante.",
+      enterpriseUnlock: "Ce pack entreprise debloque automatiquement les examens B1 et B2 pour Goethe, OSD, TELC et ECL apres confirmation securisee du paiement.",
+      continue: "Continuer",
+      paymentMethod: "Choisissez votre moyen de paiement.",
+      card: "Carte bancaire",
+      cardSoon: "Bientot disponible",
+      cardPaySoon: "Paiement par carte bientot disponible",
+      mobileContinue: "Continuer avec Mobile Money",
+      back: "Retour",
+      mobileInstructions: "Selectionnez votre operateur, saisissez le numero Mobile Money, puis confirmez le paiement sur votre telephone.",
+      country: "Pays",
+      phone: "Numero Mobile Money",
+      invalidPhone: "Ce numero ne correspond pas clairement a l'operateur selectionne.",
+      paying: "Paiement en cours...",
+      pay: "Payer",
+      verifying: "Verification du paiement...",
+      verify: "Verifier le paiement",
+      retryIn: "Reessayer dans",
+      confirmed: "Paiement confirme",
+      confirmPhone: "Confirmez sur votre telephone",
+      checking: "Nous verifions la transaction existante aupres du prestataire. Aucun nouveau paiement n'est cree.",
+      accessActivated: "Paiement confirme. Votre acces aux examens a ete active.",
+      paymentSent: "Une demande Mobile Money vient d'etre envoyee. Validez-la sur votre telephone.",
+      notReceived: "Nous n'avons pas encore recu votre paiement.",
+      pendingPayment: "Nous n'avons pas encore recu votre paiement. La confirmation Mobile Money peut prendre un court instant.",
+      dashboard: "Aller au dashboard",
+      verifyHintWait: "La confirmation peut prendre un court instant. Vous pourrez verifier a nouveau apres ce delai.",
+      verifyHint: "Cliquez ici si le paiement a ete effectue.",
+      notConfirmed: "Paiement non confirme",
+      contactSupportText: "Si vous avez effectue le paiement mais que votre acces n'a pas ete active, contactez le service client.",
+      contactSupport: "Contacter le service client",
+      selectCertError: "Selectionnez au moins une certification.",
+      quoteError: "Le montant n'a pas pu etre confirme. Reessayez dans quelques instants.",
+      sessionError: "La session de paiement n'a pas pu etre preparee. Reessayez dans quelques instants.",
+      missingReference: "La reference de paiement est introuvable. Relancez le paiement ou contactez le service client si votre compte a ete debite.",
+    },
+  },
+  en: {
+    home: "Home",
+    kicker: "PREMIUM PLACEMENT",
+    title: "Official Pricing",
+    subtitle: "Revision packs for German exam preparation - B1 & B2 levels",
+    level: "LEVEL",
+    version: "Version",
+    oralSimulator: "Speaking simulator",
+    attempts: "attempts",
+    access: "Access",
+    days: "Days",
+    preparing: "PREPARING...",
+    subscribe: "SUBSCRIBE",
+    enterpriseKicker: "SCHOOL & INSTITUTION OFFERS",
+    enterpriseTitle: "Enterprise payment",
+    enterpriseSubtitle: "Packs designed for schools, language centres, and partners preparing several B1 and B2 learners.",
+    billing: "Billing",
+    oralSimulations: "Speaking simulations",
+    modules: "Modules",
+    footer: "Prices apply to targeted certifications: Goethe, OSD, TELC, ECL, with equivalent level and duration.",
+    features: {
+      reading: ["Reading comprehension", "Tests under real exam conditions"],
+      listening: ["Listening comprehension", "Official audio simulations"],
+      speaking: ["Speaking expression", "Guided exercises and corrections"],
+      writing: ["Written expression", "Guided exercises and corrections"],
+    },
+    notices: {
+      failed: "The payment did not go through. You can try again or choose another payment method.",
+      pending: "The payment is being verified. Access will activate automatically after confirmation.",
+      verification_error: "We could not verify this payment right now. If you were debited, contact support.",
+      missing_reference: "The payment reference is missing. Please restart payment from this page.",
+    },
+    modal: {
+      close: "Close",
+      selectedPack: "Selected pack",
+      level: "Level",
+      pack: "Pack",
+      exams: "Exams",
+      duration: "Duration",
+      quantity: "Quantity",
+      price: "Price",
+      total: "Total EUR",
+      paymentCurrency: "Payment currency",
+      reference: "Reference",
+      none: "No selection",
+      calculating: "Calculating...",
+      toConfirm: "To confirm",
+      estimated: " estimated",
+      chooseCerts: "Choose the certifications you want to unlock for this pack.",
+      finalizeNext: "You will finalize payment in the next step.",
+      enterpriseUnlock: "This enterprise pack automatically unlocks B1 and B2 exams for Goethe, OSD, TELC, and ECL after secure payment confirmation.",
+      continue: "Continue",
+      paymentMethod: "Choose your payment method.",
+      card: "Bank card",
+      cardSoon: "Coming soon",
+      cardPaySoon: "Card payment coming soon",
+      mobileContinue: "Continue with Mobile Money",
+      back: "Back",
+      mobileInstructions: "Select your operator, enter your Mobile Money number, then confirm the payment on your phone.",
+      country: "Country",
+      phone: "Mobile Money number",
+      invalidPhone: "This number does not clearly match the selected operator.",
+      paying: "Payment in progress...",
+      pay: "Pay",
+      verifying: "Verifying payment...",
+      verify: "Verify payment",
+      retryIn: "Retry in",
+      confirmed: "Payment confirmed",
+      confirmPhone: "Confirm on your phone",
+      checking: "We are checking the existing transaction with the provider. No new payment is being created.",
+      accessActivated: "Payment confirmed. Your exam access has been activated.",
+      paymentSent: "A Mobile Money request has been sent. Validate it on your phone.",
+      notReceived: "We have not received your payment yet.",
+      pendingPayment: "We have not received your payment yet. Mobile Money confirmation can take a short moment.",
+      dashboard: "Go to dashboard",
+      verifyHintWait: "Confirmation can take a short moment. You can check again after this delay.",
+      verifyHint: "Click here if the payment has been completed.",
+      notConfirmed: "Payment not confirmed",
+      contactSupportText: "If you completed the payment but your access was not activated, contact customer service.",
+      contactSupport: "Contact customer service",
+      selectCertError: "Select at least one certification.",
+      quoteError: "The amount could not be confirmed. Try again in a few moments.",
+      sessionError: "The payment session could not be prepared. Try again in a few moments.",
+      missingReference: "The payment reference cannot be found. Restart payment or contact customer service if your account was debited.",
+    },
+  },
+  de: {
+    home: "Start",
+    kicker: "PREMIUM-EINSTUFUNG",
+    title: "Offizielle Preisliste",
+    subtitle: "Wiederholungspakete fuer die Deutschpruefungsvorbereitung - Niveaus B1 & B2",
+    level: "NIVEAU",
+    version: "Version",
+    oralSimulator: "Simulator muendlicher Ausdruck",
+    attempts: "Versuche",
+    access: "Zugang",
+    days: "Tage",
+    preparing: "VORBEREITUNG...",
+    subscribe: "ABONNIEREN",
+    enterpriseKicker: "ANGEBOTE FUER SCHULEN & INSTITUTIONEN",
+    enterpriseTitle: "Unternehmenszahlung",
+    enterpriseSubtitle: "Pakete fuer Schulen, Sprachzentren und Partner, die mehrere Lernende auf B1 und B2 vorbereiten.",
+    billing: "Abrechnung",
+    oralSimulations: "Muendliche Simulationen",
+    modules: "Module",
+    footer: "Preise gelten fuer die Zielzertifikate Goethe, OSD, TELC und ECL bei gleichem Niveau und gleicher Dauer.",
+    features: {
+      reading: ["Leseverstehen", "Tests unter realen Pruefungsbedingungen"],
+      listening: ["Hoerverstehen", "Offizielle Audiosimulationen"],
+      speaking: ["Muendlicher Ausdruck", "Gefuehrte Uebungen und Korrekturen"],
+      writing: ["Schriftlicher Ausdruck", "Gefuehrte Uebungen und Korrekturen"],
+    },
+    notices: {
+      failed: "Die Zahlung war nicht erfolgreich. Sie koennen es erneut versuchen oder eine andere Zahlungsmethode waehlen.",
+      pending: "Die Zahlung wird geprueft. Der Zugang wird nach Bestaetigung automatisch aktiviert.",
+      verification_error: "Wir konnten diese Zahlung im Moment nicht pruefen. Wenn der Betrag abgebucht wurde, kontaktieren Sie den Support.",
+      missing_reference: "Die Zahlungsreferenz fehlt. Bitte starten Sie die Zahlung erneut von dieser Seite.",
+    },
+    modal: {
+      close: "Schliessen",
+      selectedPack: "Ausgewaehltes Paket",
+      level: "Niveau",
+      pack: "Paket",
+      exams: "Pruefungen",
+      duration: "Dauer",
+      quantity: "Anzahl",
+      price: "Preis",
+      total: "Total EUR",
+      paymentCurrency: "Zahlungswaehrung",
+      reference: "Referenz",
+      none: "Keine Auswahl",
+      calculating: "Berechnung...",
+      toConfirm: "Zu bestaetigen",
+      estimated: " geschaetzt",
+      chooseCerts: "Waehlen Sie die Zertifikate, die Sie mit diesem Paket freischalten moechten.",
+      finalizeNext: "Sie schliessen die Zahlung im naechsten Schritt ab.",
+      enterpriseUnlock: "Dieses Unternehmenspaket schaltet nach sicherer Zahlungsbestaetigung automatisch B1- und B2-Pruefungen fuer Goethe, OSD, TELC und ECL frei.",
+      continue: "Weiter",
+      paymentMethod: "Waehlen Sie Ihre Zahlungsmethode.",
+      card: "Bankkarte",
+      cardSoon: "Bald verfuegbar",
+      cardPaySoon: "Kartenzahlung bald verfuegbar",
+      mobileContinue: "Mit Mobile Money fortfahren",
+      back: "Zurueck",
+      mobileInstructions: "Waehlen Sie Ihren Anbieter, geben Sie die Mobile-Money-Nummer ein und bestaetigen Sie die Zahlung auf Ihrem Telefon.",
+      country: "Land",
+      phone: "Mobile-Money-Nummer",
+      invalidPhone: "Diese Nummer passt nicht eindeutig zum ausgewaehlten Anbieter.",
+      paying: "Zahlung laeuft...",
+      pay: "Zahlen",
+      verifying: "Zahlung wird geprueft...",
+      verify: "Zahlung pruefen",
+      retryIn: "Erneut versuchen in",
+      confirmed: "Zahlung bestaetigt",
+      confirmPhone: "Auf dem Telefon bestaetigen",
+      checking: "Wir pruefen die bestehende Transaktion beim Anbieter. Es wird keine neue Zahlung erstellt.",
+      accessActivated: "Zahlung bestaetigt. Ihr Pruefungszugang wurde aktiviert.",
+      paymentSent: "Eine Mobile-Money-Anfrage wurde gesendet. Bestaetigen Sie sie auf Ihrem Telefon.",
+      notReceived: "Wir haben Ihre Zahlung noch nicht erhalten.",
+      pendingPayment: "Wir haben Ihre Zahlung noch nicht erhalten. Die Mobile-Money-Bestaetigung kann kurz dauern.",
+      dashboard: "Zum Dashboard",
+      verifyHintWait: "Die Bestaetigung kann kurz dauern. Sie koennen nach dieser Frist erneut pruefen.",
+      verifyHint: "Klicken Sie hier, wenn die Zahlung durchgefuehrt wurde.",
+      notConfirmed: "Zahlung nicht bestaetigt",
+      contactSupportText: "Wenn Sie bezahlt haben, der Zugang aber nicht aktiviert wurde, kontaktieren Sie den Kundenservice.",
+      contactSupport: "Kundenservice kontaktieren",
+      selectCertError: "Waehlen Sie mindestens ein Zertifikat.",
+      quoteError: "Der Betrag konnte nicht bestaetigt werden. Versuchen Sie es gleich erneut.",
+      sessionError: "Die Zahlungssitzung konnte nicht vorbereitet werden. Versuchen Sie es gleich erneut.",
+      missingReference: "Die Zahlungsreferenz wurde nicht gefunden. Starten Sie die Zahlung erneut oder kontaktieren Sie den Kundenservice, wenn Ihr Konto belastet wurde.",
+    },
+  },
+};
 
 const buildEnterprisePlan = (offer) => ({
   id: `enterprise-${offer.offerKey}`,
@@ -40,10 +303,10 @@ const getSupportName = (user) =>
   user?.name || user?.full_name || user?.fullName || user?.username || user?.email || "Client";
 
 const PriceText = ({ value }) => {
-  const [euros, cents = ""] = String(value).replace("€", "").split(",");
+  const [euros, cents = ""] = String(value).replace(/\u20ac/g, "").split(",");
   return (
     <div className="official-price">
-      <span>€</span>
+      <span>{"\u20ac"}</span>
       <strong>{euros}</strong>
       <small>,{cents}</small>
     </div>
@@ -125,105 +388,6 @@ const scrollModalFirst = (event, modalElement) => {
   }
 };
 
-// Kept temporarily as a compatibility reference while the payment modal is migrated.
-const CheckoutModal = ({
-  plan,
-  selectedCertifications,
-  checkout,
-  loading,
-  error,
-  onClose,
-  onToggleCertification,
-  onConfirm,
-}) => {
-  if (!plan) return null;
-
-  const selectedCount = selectedCertifications.length;
-  const totalPrice = Number((plan.priceEur * selectedCount).toFixed(2));
-  const selectedLabels = certificationOptions
-    .filter((option) => selectedCertifications.includes(option.key))
-    .map((option) => `${option.label} ${plan.level}`);
-
-  return (
-    <div className="pricing-modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section
-        className="pricing-modal pricing-certification-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="checkout-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <button className="pricing-modal-close" type="button" aria-label="Fermer" onClick={onClose}>
-          <X size={18} />
-        </button>
-        <p className="pricing-kicker">Pack sélectionné</p>
-        <h2 id="checkout-title">{plan.level} {plan.planName}</h2>
-        <p className="pricing-modal-message compact">
-          Choisissez les certifications que vous voulez débloquer pour ce pack.
-        </p>
-
-        <div className="pricing-certification-grid" aria-label={`Certifications ${plan.level}`}>
-          {certificationOptions.map((option) => {
-            const selected = selectedCertifications.includes(option.key);
-            return (
-              <button
-                className={`pricing-certification-option ${selected ? "selected" : ""}`}
-                key={option.key}
-                type="button"
-                aria-pressed={selected}
-                onClick={() => onToggleCertification(option.key)}
-              >
-                <span>{option.label}</span>
-                <strong>{plan.level}</strong>
-                <CheckCircle2 size={18} />
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="pricing-modal-summary">
-          <span>Prix de base</span><strong>{formatEuro(plan.priceEur)} par certification</strong>
-          <span>Durée</span><strong>{plan.durationDays} jours</strong>
-          <span>Simulateur oral</span><strong>{plan.speakingSimulatorQuota ?? 20} essais</strong>
-          <span>Sélection</span><strong>{selectedCount || 0} certification{selectedCount > 1 ? "s" : ""}</strong>
-          <span>Total</span><strong>{formatEuro(totalPrice)}</strong>
-        </div>
-
-        {selectedLabels.length ? (
-          <p className="pricing-selection-note">
-            Accès choisi : {selectedLabels.join(", ")}
-          </p>
-        ) : (
-          <p className="pricing-selection-note muted">
-            Sélectionnez au moins une certification pour continuer.
-          </p>
-        )}
-
-        <p className="pricing-modal-message">
-          Apres confirmation, vous serez redirige vers le paiement securise Notch Pay.
-        </p>
-        {checkout?.checkoutSession?.status ? (
-          <p className="pricing-modal-status">
-            Session préparée : {checkout.checkoutSession.status} · Total {formatEuro(checkout.checkoutSession.finalPriceEur)}
-          </p>
-        ) : null}
-        {error ? <p className="pricing-modal-error">{error}</p> : null}
-        <button
-          className="pricing-modal-button"
-          type="button"
-          disabled={loading || selectedCount < 1}
-          onClick={onConfirm}
-        >
-          <CreditCard size={18} />
-          {loading ? "Préparation..." : "Continuer"}
-        </button>
-      </section>
-    </div>
-  );
-};
-
-void CheckoutModal;
-
 const CheckoutModalV2 = ({
   plan,
   selectedCertifications,
@@ -241,6 +405,7 @@ const CheckoutModalV2 = ({
   loading,
   error,
   supportUrl,
+  copy,
   onClose,
   onToggleCertification,
   onContinue,
@@ -254,6 +419,7 @@ const CheckoutModalV2 = ({
 }) => {
   const modalRef = useRef(null);
   if (!plan) return null;
+  const modalCopy = copy?.modal || offersCopy.fr.modal;
 
   const isEnterprise = Boolean(plan.isEnterprise);
   const selectedCount = isEnterprise ? 1 : selectedCertifications.length;
@@ -283,27 +449,27 @@ const CheckoutModalV2 = ({
     checkout?.checkoutSession?.transactionId ||
     "";
   const verificationButtonLabel = verifying
-    ? "Vérification du paiement..."
+    ? modalCopy.verifying
     : verifyCooldown > 0
-      ? `Réessayer dans ${verifyCooldown}s`
-      : "Vérifier le paiement";
+      ? `${modalCopy.retryIn} ${verifyCooldown}s`
+      : modalCopy.verify;
   const processingTitle = verifying
-    ? "Vérification du paiement..."
+    ? modalCopy.verifying
     : paymentSucceeded
-      ? "Paiement confirmé"
-      : "Confirmez sur votre téléphone";
+      ? modalCopy.confirmed
+      : modalCopy.confirmPhone;
   const verifiedProviderMessage = verificationChecked ? String(paymentStatus?.message || "").trim() : "";
   const processingMessage = verifying
-    ? "Nous vérifions la transaction existante auprès du prestataire. Aucun nouveau paiement n'est créé."
+    ? modalCopy.checking
     : paymentSucceeded
-      ? "Paiement confirmé. Votre accès aux examens a été activé."
+      ? modalCopy.accessActivated
       : verifiedProviderMessage
         ? verifiedProviderMessage
         : verificationChecked && paymentPending
-          ? "Nous n'avons pas encore reçu votre paiement. La confirmation Mobile Money peut prendre un court instant."
+          ? modalCopy.pendingPayment
           : verificationChecked && paymentFailed
-            ? "Nous n'avons pas encore reçu votre paiement."
-            : paymentStatus?.message || checkout?.checkoutSession?.message || "Une demande Mobile Money vient d'être envoyée. Validez-la sur votre téléphone.";
+            ? modalCopy.notReceived
+            : paymentStatus?.message || checkout?.checkoutSession?.message || modalCopy.paymentSent;
 
   return createPortal((
     <div
@@ -325,28 +491,28 @@ const CheckoutModalV2 = ({
         onMouseDown={(event) => event.stopPropagation()}
         onWheel={(event) => scrollModalFirst(event, modalRef.current)}
       >
-        <button className="pricing-modal-close" type="button" aria-label="Fermer" onClick={onClose}>
+        <button className="pricing-modal-close" type="button" aria-label={modalCopy.close} onClick={onClose}>
           <X size={18} />
         </button>
-        <p className="pricing-kicker">Pack selectionne</p>
+        <p className="pricing-kicker">{modalCopy.selectedPack}</p>
         <h2 id="checkout-title">{plan.level} {plan.planName}</h2>
 
         <div className="pricing-summary-card">
-          <div><span>Niveau</span><strong>{plan.level}</strong></div>
-          <div><span>Pack</span><strong>{plan.planName}</strong></div>
-          <div><span>Examens</span><strong>{selectedLabels.length ? selectedLabels.join(", ") : "Aucune selection"}</strong></div>
-          <div><span>Duree</span><strong>{plan.accessLabel || `${plan.durationDays} jours`}</strong></div>
-          <div><span>Quantite</span><strong>{selectedCount || 0}</strong></div>
-          <div><span>Prix</span><strong>{formatEuro(plan.priceEur)}</strong></div>
-          <div><span>Total EUR</span><strong>{formatEuro(totalPrice)}</strong></div>
+          <div><span>{modalCopy.level}</span><strong>{plan.level}</strong></div>
+          <div><span>{modalCopy.pack}</span><strong>{plan.planName}</strong></div>
+          <div><span>{modalCopy.exams}</span><strong>{selectedLabels.length ? selectedLabels.join(", ") : modalCopy.none}</strong></div>
+          <div><span>{modalCopy.duration}</span><strong>{plan.accessLabel || `${plan.durationDays} jours`}</strong></div>
+          <div><span>{modalCopy.quantity}</span><strong>{selectedCount || 0}</strong></div>
+          <div><span>{modalCopy.price}</span><strong>{formatEuro(plan.priceEur)}</strong></div>
+          <div><span>{modalCopy.total}</span><strong>{formatEuro(totalPrice)}</strong></div>
           <div>
-            <span>Devise paiement</span>
+            <span>{modalCopy.paymentCurrency}</span>
             <strong>
               {visibleQuote
-                ? `${formatMobileAmount(visibleQuote.paymentAmount, visibleQuote.paymentCurrency)}${visibleQuote.estimated && quoteLoading ? " estime" : ""}`
+                ? `${formatMobileAmount(visibleQuote.paymentAmount, visibleQuote.paymentCurrency)}${visibleQuote.estimated && quoteLoading ? modalCopy.estimated : ""}`
                 : quoteLoading
-                  ? "Calcul..."
-                  : "A confirmer"}
+                  ? modalCopy.calculating
+                  : modalCopy.toConfirm}
             </strong>
           </div>
         </div>
@@ -354,7 +520,7 @@ const CheckoutModalV2 = ({
         {step === "certifications" && !isEnterprise ? (
           <>
             <p className="pricing-modal-message compact">
-              Choisissez les certifications que vous voulez debloquer pour ce pack.
+              {modalCopy.chooseCerts}
             </p>
             <div className="pricing-certification-grid" aria-label={`Certifications ${plan.level}`}>
               {certificationOptions.map((option) => {
@@ -374,10 +540,10 @@ const CheckoutModalV2 = ({
                 );
               })}
             </div>
-            <p className="pricing-modal-message">Vous allez finaliser le paiement a l'etape suivante.</p>
+            <p className="pricing-modal-message">{modalCopy.finalizeNext}</p>
             {error ? <p className="pricing-modal-error">{error}</p> : null}
             <button className="pricing-modal-button" type="button" disabled={selectedCount < 1} onClick={onContinue}>
-              Continuer
+              {modalCopy.continue}
             </button>
           </>
         ) : null}
@@ -385,7 +551,7 @@ const CheckoutModalV2 = ({
         {step === "certifications" && isEnterprise ? (
           <>
             <p className="pricing-modal-message compact">
-              Ce pack entreprise debloque automatiquement les examens B1 et B2 pour Goethe, OSD, TELC et ECL apres confirmation securisee du paiement.
+              {modalCopy.enterpriseUnlock}
             </p>
             <div className="pricing-enterprise-access-grid" aria-label="Acces entreprise inclus">
               {certificationOptions.map((option) => (
@@ -398,14 +564,14 @@ const CheckoutModalV2 = ({
             </div>
             {error ? <p className="pricing-modal-error">{error}</p> : null}
             <button className="pricing-modal-button" type="button" onClick={onContinue}>
-              Continuer
+              {modalCopy.continue}
             </button>
           </>
         ) : null}
 
         {step === "method" ? (
           <>
-            <p className="pricing-modal-message compact">Choisissez votre moyen de paiement.</p>
+            <p className="pricing-modal-message compact">{modalCopy.paymentMethod}</p>
             <div className="pricing-payment-methods">
               <button
                 className={`pricing-payment-method ${paymentMethod === "mobile_money" ? "selected" : ""}`}
@@ -422,12 +588,12 @@ const CheckoutModalV2 = ({
                 onClick={() => onSelectPaymentMethod("card")}
               >
                 <CreditCard size={22} />
-                <span>Carte bancaire</span>
-                <small>Bientot disponible</small>
+                <span>{modalCopy.card}</span>
+                <small>{modalCopy.cardSoon}</small>
               </button>
             </div>
             {paymentMethod === "mobile_money" ? (
-              <button className="pricing-modal-button" type="button" onClick={onContinue}>Continuer avec Mobile Money</button>
+              <button className="pricing-modal-button" type="button" onClick={onContinue}>{modalCopy.mobileContinue}</button>
             ) : null}
             {paymentMethod === "card" ? (
               <div className="pricing-card-placeholder">
@@ -438,21 +604,21 @@ const CheckoutModalV2 = ({
                   <div className="pricing-card-field">CVV</div>
                 </div>
                 <button className="pricing-modal-button" type="button" disabled>
-                  Paiement par carte bientot disponible
+                  {modalCopy.cardPaySoon}
                 </button>
               </div>
             ) : null}
-            <button className="pricing-modal-secondary" type="button" onClick={onBack}>Retour</button>
+            <button className="pricing-modal-secondary" type="button" onClick={onBack}>{modalCopy.back}</button>
           </>
         ) : null}
 
         {step === "mobile" ? (
           <>
             <p className="pricing-modal-message compact">
-              Selectionnez votre operateur, saisissez le numero Mobile Money, puis confirmez le paiement sur votre telephone.
+              {modalCopy.mobileInstructions}
             </p>
             <label className="pricing-field">
-              <span>Pays</span>
+              <span>{modalCopy.country}</span>
               <select value={mobileCountry} onChange={(event) => onSetMobileCountry(event.target.value)}>
                 {mobileMoneyCountries.map((item) => (
                   <option key={item.key} value={item.key}>{item.label} ({item.dialCode})</option>
@@ -474,7 +640,7 @@ const CheckoutModalV2 = ({
               ))}
             </div>
             <label className="pricing-field">
-              <span>Numero Mobile Money</span>
+              <span>{modalCopy.phone}</span>
               <input
                 value={mobilePhone}
                 onChange={(event) => onSetMobilePhone(event.target.value)}
@@ -483,7 +649,7 @@ const CheckoutModalV2 = ({
               />
             </label>
             {mobilePhone && !clientPhoneLooksValid ? (
-              <p className="pricing-modal-error">Ce numero ne correspond pas clairement a l'operateur selectionne.</p>
+              <p className="pricing-modal-error">{modalCopy.invalidPhone}</p>
             ) : null}
             {error ? <p className="pricing-modal-error">{error}</p> : null}
             <button
@@ -493,9 +659,9 @@ const CheckoutModalV2 = ({
               onClick={onPayMobileMoney}
             >
               <Smartphone size={18} />
-              {loading ? "Paiement en cours..." : `Payer ${visibleQuote ? formatMobileAmount(visibleQuote.paymentAmount, visibleQuote.paymentCurrency) : ""}`}
+              {loading ? modalCopy.paying : `${modalCopy.pay} ${visibleQuote ? formatMobileAmount(visibleQuote.paymentAmount, visibleQuote.paymentCurrency) : ""}`}
             </button>
-            <button className="pricing-modal-secondary" type="button" disabled={loading} onClick={onBack}>Retour</button>
+            <button className="pricing-modal-secondary" type="button" disabled={loading} onClick={onBack}>{modalCopy.back}</button>
           </>
         ) : null}
 
@@ -506,12 +672,12 @@ const CheckoutModalV2 = ({
               <h3>{processingTitle}</h3>
               <p>{processingMessage}</p>
               {displayedReference ? (
-                <small>Référence : {displayedReference}</small>
+                <small>{modalCopy.reference} : {displayedReference}</small>
               ) : null}
             </div>
             {error ? <p className="pricing-modal-error">{error}</p> : null}
             {paymentSucceeded ? (
-              <Link className="pricing-modal-button" to="/dashboard">Aller au dashboard</Link>
+              <Link className="pricing-modal-button" to="/dashboard">{modalCopy.dashboard}</Link>
             ) : (
               <>
                 <button className={`pricing-modal-button ${verifying ? "verifying" : ""}`} type="button" disabled={verifying || verifyCooldown > 0} onClick={onVerifyPayment}>
@@ -520,18 +686,18 @@ const CheckoutModalV2 = ({
                 </button>
                 <p className="pricing-verify-hint">
                   {verifyCooldown > 0
-                    ? "La confirmation peut prendre un court instant. Vous pourrez vérifier à nouveau après ce délai."
-                    : "Cliquez ici si le paiement a été effectué."}
+                    ? modalCopy.verifyHintWait
+                    : modalCopy.verifyHint}
                 </p>
                 {paymentNotConfirmed ? (
                   <div className="pricing-verification-alert" role="status" aria-live="polite">
-                    <strong>Paiement non confirme</strong>
-                    <p>Nous n'avons pas encore recu votre paiement.</p>
+                    <strong>{modalCopy.notConfirmed}</strong>
+                    <p>{modalCopy.notReceived}</p>
                     <p>
-                      Si vous avez effectué le paiement mais que votre accès n'a pas été activé, contactez le service client.
+                      {modalCopy.contactSupportText}
                     </p>
                     <a className="pricing-modal-secondary" href={supportUrl} target="_blank" rel="noreferrer">
-                      Contacter le service client
+                      {modalCopy.contactSupport}
                     </a>
                   </div>
                 ) : null}
@@ -547,6 +713,8 @@ const CheckoutModalV2 = ({
 export default function OffersPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { language, setLanguage } = useLanguage();
+  const copy = offersCopy[language] || offersCopy.fr;
   const [selectedPlan, setSelectedPlan] = useState(null);
   const [, setSelectedEnterpriseOffer] = useState(null);
   const [selectedCertifications, setSelectedCertifications] = useState([]);
@@ -567,12 +735,7 @@ export default function OffersPage() {
   const checkoutSubmittingRef = useRef(false);
   const user = useMemo(() => getAuthUser(), []);
   const paymentStatus = searchParams.get("payment");
-  const paymentNotice = {
-    failed: "Le paiement n'a pas abouti. Vous pouvez réessayer ou choisir un autre moyen de paiement.",
-    pending: "Le paiement est en cours de vérification. L'accès sera activé automatiquement après confirmation.",
-    verification_error: "Nous n'avons pas pu vérifier ce paiement pour le moment. Si le montant a été débité, contactez le support.",
-    missing_reference: "La référence du paiement est manquante. Veuillez relancer le paiement depuis cette page.",
-  }[paymentStatus] || "";
+  const paymentNotice = copy.notices[paymentStatus] || "";
 
   useEffect(() => {
     if (!selectedPlan) return undefined;
@@ -604,7 +767,7 @@ export default function OffersPage() {
         if (!cancelled) setCheckoutQuote(result.quote);
       })
       .catch(() => {
-        if (!cancelled) setCheckoutError("Le montant n'a pas pu etre confirme. Reessayez dans quelques instants.");
+        if (!cancelled) setCheckoutError(copy.modal.quoteError);
       })
       .finally(() => {
         if (!cancelled) setQuoteLoading(false);
@@ -722,7 +885,7 @@ export default function OffersPage() {
     setCheckoutError("");
     if (checkoutStep === "certifications") {
       if (!selectedPlan?.isEnterprise && selectedCertifications.length < 1) {
-        setCheckoutError("Selectionnez au moins une certification.");
+        setCheckoutError(copy.modal.selectCertError);
         return;
       }
       setQuoteLoading(true);
@@ -791,7 +954,7 @@ export default function OffersPage() {
     } catch (err) {
       setCheckoutError(
         err.response?.data?.error ||
-          "La session de paiement n’a pas pu être préparée. Réessayez dans quelques instants."
+          copy.modal.sessionError
       );
     } finally {
       setLoadingPlanId("");
@@ -809,7 +972,7 @@ export default function OffersPage() {
       ...(current || {}),
       status: current?.status || "processing",
       checked: false,
-      message: "Vérification du paiement...",
+      message: modalCopy.verifying,
     }));
     const startedAt = Date.now();
     try {
@@ -820,7 +983,7 @@ export default function OffersPage() {
           status: "processing",
           checked: true,
           message:
-            "La référence de paiement est introuvable. Relancez le paiement ou contactez le service client si votre compte a été débité.",
+            copy.modal.missingReference,
         }));
         setVerifyCooldown(8);
         return;
@@ -856,7 +1019,7 @@ export default function OffersPage() {
         checked: true,
         message:
           err.response?.data?.error ||
-          "Nous n'avons pas encore reçu votre paiement. La confirmation peut prendre un court instant.",
+          copy.modal.pendingPayment,
       }));
       setVerifyCooldown(8);
     } finally {
@@ -888,18 +1051,28 @@ export default function OffersPage() {
       <header className="pricing-topbar">
         <Link className="pricing-logo" to="/">
           <img src={logo} alt="" />
-          Deutschprüfungen
+          Deutschpruefungen
         </Link>
         <Link className="pricing-home-link" to={user?.id ? "/dashboard" : "/"}>
-          {user?.id ? "Dashboard" : "Accueil"}
+          {user?.id ? "Dashboard" : copy.home}
         </Link>
+        <select
+          className="pricing-home-link"
+          value={language}
+          onChange={(event) => setLanguage(event.target.value)}
+          aria-label="Language"
+        >
+          {languageOptions.map((option) => (
+            <option key={option.id} value={option.id}>{option.label}</option>
+          ))}
+        </select>
       </header>
 
       <main className="official-pricing-shell">
         <section className="pricing-heading">
-          <p className="pricing-kicker">POSITIONNEMENT PREMIUM</p>
-          <h1>Grille Tarifaire Officielle</h1>
-          <p>Packs de révision pour la préparation aux examens d’allemand - Niveaux B1 & B2</p>
+          <p className="pricing-kicker">{copy.kicker}</p>
+          <h1>{copy.title}</h1>
+          <p>{copy.subtitle}</p>
         </section>
 
         {paymentNotice ? (
@@ -911,7 +1084,7 @@ export default function OffersPage() {
         {pricingSections.map((section) => (
           <section className="pricing-level-section" key={section.level} aria-labelledby={`pricing-${section.level}`}>
             <div className="pricing-level-header">
-              <h2 id={`pricing-${section.level}`}>NIVEAU {section.level}</h2>
+              <h2 id={`pricing-${section.level}`}>{copy.level} {section.level}</h2>
               <div className="pricing-cert-tabs" aria-label={`Certifications ${section.level}`}>
                 {certificationOptions.map((option) => (
                   <span className={`pricing-cert-tab pricing-cert-tab-${option.key}`} key={option.key}>
@@ -935,16 +1108,16 @@ export default function OffersPage() {
                       <div className="pricing-feature-list">
                         {plan.sectionDetails.map((feature) => (
                           <div className="pricing-feature" key={feature.title}>
-                            <strong>{feature.title}</strong>
-                            <span>{feature.detail}</span>
+                            <strong>{copy.features?.[feature.key]?.[0] || feature.title}</strong>
+                            <span>{copy.features?.[feature.key]?.[1] || feature.detail}</span>
                           </div>
                         ))}
                       </div>
-                      <p className="pricing-version">Version <strong>2026</strong></p>
+                      <p className="pricing-version">{copy.version} <strong>2026</strong></p>
                       <p className="pricing-attempts">
-                        Simulateur expression orale : <strong>{plan.speakingSimulatorQuota ?? 20} essais</strong>
+                        {copy.oralSimulator} : <strong>{plan.speakingSimulatorQuota ?? 20} {copy.attempts}</strong>
                       </p>
-                      <p className="pricing-access">Accès : {plan.durationDays} Jours</p>
+                      <p className="pricing-access">{copy.access} : {plan.durationDays} {copy.days}</p>
                       <button
                         className="pricing-subscribe-button"
                         type="button"
@@ -952,7 +1125,7 @@ export default function OffersPage() {
                         disabled={loadingPlanId === plan.id}
                       >
                         <CheckCircle2 size={15} />
-                        {loadingPlanId === plan.id ? "PRÉPARATION..." : "S’ABONNER"}
+                        {loadingPlanId === plan.id ? copy.preparing : copy.subscribe}
                       </button>
                     </div>
                   </article>
@@ -964,11 +1137,9 @@ export default function OffersPage() {
 
         <section className="enterprise-pricing-section" aria-labelledby="enterprise-pricing-title">
           <div className="enterprise-pricing-heading">
-            <p className="pricing-kicker">OFFRES ÉCOLES & INSTITUTIONS</p>
-            <h2 id="enterprise-pricing-title">Paiement entreprise</h2>
-            <p>
-              Packs conçus pour les écoles, centres de langue et partenaires qui veulent préparer plusieurs apprenants B1 et B2.
-            </p>
+            <p className="pricing-kicker">{copy.enterpriseKicker}</p>
+            <h2 id="enterprise-pricing-title">{copy.enterpriseTitle}</h2>
+            <p>{copy.enterpriseSubtitle}</p>
           </div>
           <div className="enterprise-card-grid">
             {enterpriseOffers.map((offer) => (
@@ -981,14 +1152,14 @@ export default function OffersPage() {
                 <div className="enterprise-card-body">
                   <p>{offer.description}</p>
                   <dl>
-                    <div><dt>Accès</dt><dd>{offer.accessLabel}</dd></div>
-                    <div><dt>Facturation</dt><dd>{offer.billedLabel}</dd></div>
-                    <div><dt>Simulations orales</dt><dd>{offer.speakingSimulatorQuota}</dd></div>
-                    <div><dt>Modules</dt><dd>B1 + B2 · Goethe, ÖSD, TELC, ECL</dd></div>
+                    <div><dt>{copy.access}</dt><dd>{offer.accessLabel}</dd></div>
+                    <div><dt>{copy.billing}</dt><dd>{offer.billedLabel}</dd></div>
+                    <div><dt>{copy.oralSimulations}</dt><dd>{offer.speakingSimulatorQuota}</dd></div>
+                    <div><dt>{copy.modules}</dt><dd>B1 + B2 - Goethe, OSD, TELC, ECL</dd></div>
                   </dl>
                   <button className="enterprise-button" type="button" onClick={() => openEnterpriseCheckout(offer)}>
                     <CreditCard size={17} />
-                    S'abonner
+                    {copy.subscribe}
                   </button>
                 </div>
               </article>
@@ -997,7 +1168,7 @@ export default function OffersPage() {
         </section>
 
         <p className="pricing-footer-note">
-          Tarifs valables pour les certifications ciblées : Goethe, ÖSD, TELC, ECL, à niveau et durée équivalents.
+          {copy.footer}
         </p>
       </main>
 
@@ -1018,6 +1189,7 @@ export default function OffersPage() {
         loading={Boolean(loadingPlanId)}
         error={checkoutError}
         supportUrl={supportUrl}
+        copy={copy}
         onToggleCertification={toggleCertification}
         onContinue={continueCheckout}
         onBack={backCheckout}
@@ -1049,3 +1221,6 @@ export default function OffersPage() {
     </div>
   );
 }
+
+
+
