@@ -17,7 +17,6 @@ import {
 import "./LandingPage.css";
 import logo from "../assets/images/logo.png";
 import landingBerlinBackground from "../assets/images/landing-berlin-professionals.jpeg";
-import landingPeopleFocus from "../assets/images/landing-people-focus.png";
 import bookGoethe from "../assets/images/book-goethe.png";
 import bookOsd from "../assets/images/book-osd.png";
 import bookTelc from "../assets/images/book-telc.png";
@@ -234,7 +233,7 @@ export default function LandingPage() {
           aria-hidden="true"
           style={{
             "--hero-reference-image": `url(${landingBerlinBackground})`,
-            "--hero-people-image": `url(${landingPeopleFocus})`,
+            "--hero-people-image": `url(${landingBerlinBackground})`,
           }}
         >
           <div className="hero-foreground-people" />

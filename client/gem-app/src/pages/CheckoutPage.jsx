@@ -36,7 +36,7 @@ export default function CheckoutPage() {
           <div className="pricing-modal-summary">
             <span>Durée</span><strong>{plan.durationDays} jours</strong>
             <span>Prix de base</span><strong>{plan.displayPrice}</strong>
-            <span>Simulateur écrit</span><strong>{plan.writingSimulatorAttempts} essais</strong>
+            <span>Simulateur oral</span><strong>{plan.speakingSimulatorQuota ?? 20} essais</strong>
             <span>Certifications</span><strong>À choisir sur la page tarifs</strong>
           </div>
           <p className="pricing-modal-message">

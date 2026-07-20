@@ -114,11 +114,10 @@ export default function Navbar({ logo, language = "fr", onChangeLanguage, labels
     <>
       <header className={`top-nav landing-reference-nav ${mobileOpen ? "menu-open" : ""}`}>
         <div className="container nav-container reference-nav-container">
-          <Link className="reference-brand" to="/" aria-label={labels.homeLabel ?? "Deutsch Pruefungen home"} onClick={closeMenu}>
+          <Link className="reference-brand" to="/" aria-label="Deutsch Prüfungen home" onClick={closeMenu}>
             <img src={logo} alt="" />
             <span>
-              <strong>{labels.brandTitle ?? "Préparation"}</strong>
-              <small>{labels.brandSubtitle ?? "Examens d'Allemand"}</small>
+              <strong>Deutsch Prüfungen</strong>
             </span>
           </Link>
           <div className="reference-mobile-actions">

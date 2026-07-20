@@ -30,6 +30,7 @@ export const pricingSections = [
         displayPrice: "€14,99",
         durationDays: 5,
         writingSimulatorAttempts: 3,
+        speakingSimulatorQuota: 20,
       },
       {
         planKey: "standard",
@@ -39,6 +40,7 @@ export const pricingSections = [
         displayPrice: "€29,99",
         durationDays: 15,
         writingSimulatorAttempts: 6,
+        speakingSimulatorQuota: 45,
       },
       {
         planKey: "intensif",
@@ -48,6 +50,7 @@ export const pricingSections = [
         displayPrice: "€54,99",
         durationDays: 30,
         writingSimulatorAttempts: 10,
+        speakingSimulatorQuota: 65,
       },
     ],
   },
@@ -62,6 +65,7 @@ export const pricingSections = [
         displayPrice: "€19,99",
         durationDays: 5,
         writingSimulatorAttempts: 3,
+        speakingSimulatorQuota: 20,
       },
       {
         planKey: "standard",
@@ -71,6 +75,7 @@ export const pricingSections = [
         displayPrice: "€34,99",
         durationDays: 15,
         writingSimulatorAttempts: 6,
+        speakingSimulatorQuota: 45,
       },
       {
         planKey: "intensif",
@@ -80,6 +85,7 @@ export const pricingSections = [
         displayPrice: "€64,99",
         durationDays: 30,
         writingSimulatorAttempts: 10,
+        speakingSimulatorQuota: 65,
       },
     ],
   },

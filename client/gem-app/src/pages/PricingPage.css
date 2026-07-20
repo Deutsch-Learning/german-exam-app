@@ -111,10 +111,32 @@
 .pricing-cert-tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px 22px;
+  gap: 9px;
   color: #b90913;
   font-size: 0.82rem;
   font-weight: 950;
+}
+
+.pricing-cert-tab {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 15px;
+  border: 1px solid rgba(190, 23, 33, 0.12);
+  background: #ffffff;
+  border-radius: 999px;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
+
+.pricing-cert-tab-goethe {
+  border-radius: 16px 999px 999px 16px;
+}
+
+.pricing-cert-tab-osd {
+  border-radius: 999px 16px 16px 999px;
 }
 
 .pricing-card-grid {
@@ -968,14 +990,11 @@
 
   .pricing-cert-tabs {
     width: 100%;
-    gap: 8px 14px;
+    gap: 8px;
   }
 
-  .pricing-cert-tabs span {
-    border-radius: 999px;
-    background: #ffffff;
+  .pricing-cert-tab {
     padding: 7px 10px;
-    box-shadow: 0 8px 18px rgba(15, 23, 42, 0.05);
   }
 
   .pricing-card-grid {

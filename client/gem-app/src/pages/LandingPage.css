@@ -2840,10 +2840,10 @@ h4 {
 .reference-brand {
   display: inline-flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
   color: #ffffff;
   text-decoration: none;
-  min-width: 245px;
+  min-width: 224px;
 }
 
 .reference-brand img {
@@ -2853,19 +2853,22 @@ h4 {
 }
 
 .reference-brand span {
-  display: grid;
-  line-height: 1.1;
+  display: block;
+  min-width: 0;
+  line-height: 1;
 }
 
-.reference-brand strong,
-.reference-brand small {
+.reference-brand strong {
   color: #ffffff;
-  font-size: 1.06rem;
-  font-weight: 650;
+  font-size: 1.08rem;
+  font-weight: 850;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
 }
 
 .reference-brand small {
-  margin-top: 3px;
+  display: none;
 }
 
 .reference-tabs {
@@ -3212,7 +3215,7 @@ h4 {
   }
 
   .reference-brand {
-    min-width: 235px;
+    min-width: 205px;
     gap: 12px;
   }
 
@@ -3425,6 +3428,10 @@ h4 {
 }
 
 @media (max-width: 720px) {
+  .reference-brand {
+    gap: 10px;
+  }
+
   .reference-brand img {
     width: 38px;
     height: 38px;
@@ -3432,7 +3439,7 @@ h4 {
 
   .reference-brand strong,
   .reference-brand small {
-    font-size: 0.88rem;
+    font-size: 0.84rem;
   }
 
   .reference-nav-container {
@@ -3655,36 +3662,26 @@ h4 {
 /* Final reference pass: compact exam buttons and clearer people/background. */
 .hero-redesign-bg::before {
   background-image:
-    linear-gradient(90deg, rgba(3, 16, 34, 0.84) 0%, rgba(3, 16, 34, 0.48) 30%, rgba(3, 16, 34, 0.1) 62%, rgba(3, 16, 34, 0) 100%),
-    linear-gradient(180deg, rgba(3, 16, 34, 0) 0%, rgba(3, 16, 34, 0.06) 58%, rgba(3, 19, 41, 0.88) 100%),
-    var(--hero-reference-image);
+    linear-gradient(90deg, rgba(3, 16, 34, 0.88) 0%, rgba(3, 16, 34, 0.56) 30%, rgba(3, 16, 34, 0.16) 56%, rgba(3, 16, 34, 0.02) 100%),
+    linear-gradient(180deg, rgba(3, 16, 34, 0.03) 0%, rgba(3, 16, 34, 0.02) 54%, #031329 100%),
+    var(--hero-people-image);
   z-index: 0;
   background-repeat: no-repeat;
+  background-color: #031329;
   background-size: cover;
-  background-position: center -185px;
-  filter: saturate(1.14) contrast(1.04) brightness(0.96);
+  background-position: center top;
+  filter: saturate(1.1) contrast(1.04) brightness(1.02);
 }
 
 .hero-redesign-bg::after {
   z-index: 1;
   background:
-    linear-gradient(90deg, rgba(3, 16, 34, 0.54) 0%, rgba(3, 16, 34, 0.22) 36%, rgba(3, 16, 34, 0) 72%),
-    linear-gradient(180deg, rgba(3, 16, 34, 0) 0%, rgba(3, 16, 34, 0.04) 68%, #031329 100%);
+    linear-gradient(90deg, rgba(3, 16, 34, 0.36) 0%, rgba(3, 16, 34, 0.14) 34%, rgba(3, 16, 34, 0) 70%),
+    linear-gradient(180deg, rgba(3, 16, 34, 0) 0%, rgba(3, 16, 34, 0.02) 66%, #031329 100%);
 }
 
 .hero-foreground-people {
-  position: absolute;
-  z-index: 2;
-  top: 28px;
-  right: -10px;
-  width: min(63vw, 900px);
-  aspect-ratio: 900 / 428;
-  background-image: var(--hero-people-image);
-  background-repeat: no-repeat;
-  background-position: right top;
-  background-size: contain;
-  filter: saturate(1.08) contrast(1.04) brightness(1.02);
-  mask-image: linear-gradient(180deg, #000 0 76%, rgba(0, 0, 0, 0.92) 86%, transparent 100%);
+  display: none;
 }
 
 .hero-redesign-bg .berlin-skyline,
@@ -3813,7 +3810,8 @@ h4 {
 
 @media (min-width: 1501px) {
   .hero-redesign-bg::before {
-    background-position: center -230px;
+    background-size: cover;
+    background-position: center top;
   }
 
   .hero-foreground-people {
@@ -3851,7 +3849,8 @@ h4 {
 
 @media (max-width: 1120px) {
   .hero-redesign-bg::before {
-    background-position: center -95px;
+    background-size: cover;
+    background-position: 58% top;
   }
 
   .hero-foreground-people {
@@ -3883,20 +3882,15 @@ h4 {
 @media (max-width: 720px) {
   .hero-redesign-bg::before {
     background-image:
-      linear-gradient(90deg, rgba(3, 16, 34, 0.68) 0%, rgba(3, 16, 34, 0.34) 55%, rgba(3, 16, 34, 0.08) 100%),
-      linear-gradient(180deg, rgba(3, 16, 34, 0) 0%, rgba(3, 16, 34, 0.08) 46%, rgba(3, 19, 41, 0.94) 82%, #031329 100%),
-      var(--hero-reference-image);
-    background-size: auto 720px;
-    background-position: 58% 0;
+      linear-gradient(90deg, rgba(3, 16, 34, 0.82) 0%, rgba(3, 16, 34, 0.5) 54%, rgba(3, 16, 34, 0.12) 100%),
+      linear-gradient(180deg, rgba(3, 16, 34, 0.02) 0%, rgba(3, 16, 34, 0.1) 48%, #031329 100%),
+      var(--hero-people-image);
+    background-size: auto 560px;
+    background-position: 61% top;
   }
 
   .hero-foreground-people {
-    top: 92px;
-    right: -320px;
-    width: 660px;
-    opacity: 1;
-    filter: saturate(1.08) contrast(1.05) brightness(1.04);
-    mask-image: linear-gradient(180deg, #000 0 72%, rgba(0, 0, 0, 0.84) 84%, transparent 100%);
+    display: none;
   }
 
   .hero-copy-panel {
