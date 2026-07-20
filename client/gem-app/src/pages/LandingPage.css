@@ -3662,15 +3662,15 @@ h4 {
 /* Final reference pass: compact exam buttons and clearer people/background. */
 .hero-redesign-bg::before {
   background-image:
-    linear-gradient(90deg, rgba(3, 16, 34, 0.88) 0%, rgba(3, 16, 34, 0.56) 30%, rgba(3, 16, 34, 0.16) 56%, rgba(3, 16, 34, 0.02) 100%),
-    linear-gradient(180deg, rgba(3, 16, 34, 0.03) 0%, rgba(3, 16, 34, 0.02) 54%, #031329 100%),
-    var(--hero-people-image);
+    linear-gradient(90deg, rgba(3, 16, 34, 0.9) 0%, rgba(3, 16, 34, 0.58) 31%, rgba(3, 16, 34, 0.2) 58%, rgba(3, 16, 34, 0.03) 100%),
+    linear-gradient(180deg, rgba(3, 16, 34, 0) 0%, rgba(3, 16, 34, 0.06) 56%, #031329 100%),
+    var(--hero-reference-image);
   z-index: 0;
   background-repeat: no-repeat;
   background-color: #031329;
   background-size: cover;
-  background-position: center top;
-  filter: saturate(1.1) contrast(1.04) brightness(1.02);
+  background-position: center -260px;
+  filter: saturate(1.12) contrast(1.06) brightness(1.02);
 }
 
 .hero-redesign-bg::after {
@@ -3681,7 +3681,21 @@ h4 {
 }
 
 .hero-foreground-people {
-  display: none;
+  position: absolute;
+  top: clamp(34px, 6vh, 66px);
+  right: clamp(-56px, -2.4vw, -24px);
+  z-index: 2;
+  display: block;
+  width: min(66vw, 1100px);
+  aspect-ratio: 900 / 420;
+  background-image: var(--hero-people-image);
+  background-repeat: no-repeat;
+  background-position: center top;
+  background-size: contain;
+  filter: saturate(1.08) contrast(1.06) brightness(1.02);
+  -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000000 14%, #000000 100%);
+  mask-image: linear-gradient(90deg, transparent 0%, #000000 14%, #000000 100%);
+  pointer-events: none;
 }
 
 .hero-redesign-bg .berlin-skyline,
@@ -3811,13 +3825,13 @@ h4 {
 @media (min-width: 1501px) {
   .hero-redesign-bg::before {
     background-size: cover;
-    background-position: center top;
+    background-position: center -300px;
   }
 
   .hero-foreground-people {
-    right: 0;
-    top: 26px;
-    width: min(62vw, 960px);
+    right: -30px;
+    top: 50px;
+    width: min(66vw, 1120px);
   }
 
   .exam-card {
@@ -3850,14 +3864,14 @@ h4 {
 @media (max-width: 1120px) {
   .hero-redesign-bg::before {
     background-size: cover;
-    background-position: 58% top;
+    background-position: 58% -170px;
   }
 
   .hero-foreground-people {
-    top: 24px;
-    right: -120px;
-    width: min(104vw, 860px);
-    opacity: 0.98;
+    top: 20px;
+    right: -180px;
+    width: min(106vw, 920px);
+    opacity: 0.96;
   }
 
   .exam-card-grid {
@@ -3883,9 +3897,9 @@ h4 {
   .hero-redesign-bg::before {
     background-image:
       linear-gradient(90deg, rgba(3, 16, 34, 0.82) 0%, rgba(3, 16, 34, 0.5) 54%, rgba(3, 16, 34, 0.12) 100%),
-      linear-gradient(180deg, rgba(3, 16, 34, 0.02) 0%, rgba(3, 16, 34, 0.1) 48%, #031329 100%),
+      linear-gradient(180deg, rgba(3, 16, 34, 0.02) 0%, rgba(3, 16, 34, 0.12) 52%, #031329 100%),
       var(--hero-people-image);
-    background-size: auto 560px;
+    background-size: auto 430px;
     background-position: 61% top;
   }
 
@@ -3899,7 +3913,7 @@ h4 {
 
   .hero-redesign .hero-title {
     max-width: 340px;
-    margin-top: 84px;
+    margin-top: clamp(104px, 30vw, 140px);
     text-shadow: 0 4px 18px rgba(0, 0, 0, 0.76), 0 18px 44px rgba(0, 0, 0, 0.48);
   }
 
