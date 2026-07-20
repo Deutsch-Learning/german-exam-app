@@ -380,6 +380,36 @@ const renderPromotionalEmail = ({ title, message, ctaUrl, ctaLabel, unsubscribeU
   }),
 });
 
+const renderPartnerApprovedEmail = ({ user, code, partnerUrl }) => {
+  const name = user?.first_name || user?.username || "";
+  return {
+    subject: `Votre demande partenaire est approuvee - ${BRAND_NAME}`,
+    text: [
+      `Bonjour ${name},`,
+      "",
+      "Votre demande partenaire a ete approuvee par l'administration.",
+      code ? `Votre code partenaire est : ${code}` : "",
+      "Vous pouvez maintenant ouvrir votre espace partenaire, copier votre lien et suivre vos recommandations.",
+      partnerUrl,
+      "",
+      "Les commissions sont validees uniquement apres un premier paiement verifie et restent soumises aux conditions du programme.",
+    ].filter(Boolean).join("\n"),
+    html: renderLayout({
+      preview: "Votre espace partenaire est maintenant actif",
+      title: "Demande partenaire approuvee",
+      body: `
+        <p style="margin:0 0 16px;">Bonjour ${escapeHtml(name)},</p>
+        <p style="margin:0 0 16px;">Votre demande partenaire a ete approuvee par l'administration.</p>
+        ${code ? `<p style="margin:0 0 16px;">Votre code partenaire : <strong>${escapeHtml(code)}</strong></p>` : ""}
+        <p style="margin:0;">Vous pouvez maintenant ouvrir votre espace partenaire, copier votre lien et suivre vos recommandations.</p>
+      `,
+      buttonHref: partnerUrl,
+      buttonText: "Ouvrir mon espace partenaire",
+      note: "Les commissions sont validees uniquement apres un premier paiement verifie et restent soumises aux conditions du programme.",
+    }),
+  };
+};
+
 module.exports = {
   BRAND_NAME,
   getAppBaseUrl,
@@ -391,4 +421,5 @@ module.exports = {
   renderWelcomeEmail,
   renderPasswordChangedEmail,
   renderPromotionalEmail,
+  renderPartnerApprovedEmail,
 };

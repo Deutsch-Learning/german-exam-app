@@ -64,6 +64,14 @@ const IconProfile = ({ color }) => (
     <circle cx="18" cy="18" r="2" fill={color} stroke="none" />
   </svg>
 );
+const IconPartner = ({ color }) => (
+  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5">
+    <path d="M20 7h-4.5a2.5 2.5 0 0 0-5 0H6a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z" />
+    <path d="M8 7a4 4 0 0 1 8 0" />
+    <path d="M8 13h8" />
+    <path d="M8 17h5" />
+  </svg>
+);
 const IconLogout = ({ color }) => (
   <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5">
     <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
@@ -144,10 +152,11 @@ const TopNav = ({ onToggleMenu, onGoHome, onGoDashboard, onGoProfile, onGoActual
   );
 };
 
-const Sidebar = ({ isOpen, onClose, onGoProfile, onGoSimulations, onGoProgress, onLogout, labels }) => {
+const Sidebar = ({ isOpen, onClose, onGoProfile, onGoPartner, onGoSimulations, onGoProgress, onLogout, labels }) => {
   const menuItems = [
     { id: "simulations", label: "Simulations", icon: IconSimulations, activeColor: "#dc2626", isActive: true, onClick: onGoSimulations },
     { id: "progres", label: labels.progress, icon: IconProgress, activeColor: "#facc15", isActive: false, onClick: onGoProgress },
+    { id: "partner", label: labels.partnerProgramme, icon: IconPartner, activeColor: "#16a34a", isActive: false, onClick: onGoPartner },
     { id: "profil", label: labels.profile, icon: IconProfile, activeColor: "#3b82f6", isActive: false, onClick: onGoProfile },
   ];
   return (
@@ -410,6 +419,7 @@ export default function DashboardMainPage() {
       contact: common.contact,
       profile: common.profile,
       progress: common.progress,
+      partnerProgramme: common.partnerProgramme,
       dashboard: common.dashboard,
       logout: common.logout,
       modules: t.modules,
@@ -441,6 +451,7 @@ export default function DashboardMainPage() {
           isOpen={sidebarOpen}
           onClose={() => setSidebarOpen(false)}
           onGoProfile={() => navigate("/profile")}
+          onGoPartner={() => navigate("/partner")}
           onGoSimulations={goToSimulations}
           onGoProgress={() => navigate("/progress")}
           onLogout={onLogout}
