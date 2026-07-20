@@ -64,6 +64,7 @@ const PASS_SCORE = 70;
 const MOBILE_AUDIO_UNSUPPORTED_MESSAGE =
   "Fuer diese Hoeren-Aufgabe ist noch keine freigegebene Audiodatei verfuegbar. Bitte versuchen Sie es spaeter erneut.";
 const PART_TRANSITION_SECONDS = 10;
+const WRITING_GLOBAL_DURATION_MINUTES = 60;
 
 const ImportedLoadingDots = ({ label = "Importierte Aufgaben werden geladen" }) => (
   <span className={styles.importedLoadingDots} role="status" aria-label={label}>
@@ -1176,6 +1177,7 @@ const MODULES = {
     soft: "#f5f3ff",
     Icon: PencilLine,
     simulationSeconds: 60 * 60,
+    globalDurationMinutes: WRITING_GLOBAL_DURATION_MINUTES,
     tasks: withMinimumWritingWords(withGermanPrompts(writingTasks, germanWritingPrompts)),
     focus: ["Plan clair", "Registre adapté", "Connecteurs", "Correction grammaticale"],
     advancement: [
@@ -1885,7 +1887,9 @@ const buildSeriesModule = (baseModule, content, series) => {
       passage: content.passage ?? baseModule.passage,
       parts: content.parts ?? baseModule.parts,
       audio: content.audio ?? baseModule.audio,
-      globalDurationMinutes: content.globalDurationMinutes ?? baseModule.globalDurationMinutes,
+      globalDurationMinutes: baseModule.id === "write"
+        ? WRITING_GLOBAL_DURATION_MINUTES
+        : content.globalDurationMinutes ?? baseModule.globalDurationMinutes,
       focus: content.focus ?? baseModule.focus,
       advancement: content.advancement ?? baseModule.advancement,
       seriesContext: {
@@ -2130,6 +2134,9 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const progressKey = getProgressKey(progressScopeId);
   const totalExamDuration = useMemo(
     () => {
+      if (module.id === "write") {
+        return WRITING_GLOBAL_DURATION_MINUTES * 60;
+      }
       const configuredMinutes = Number(module.globalDurationMinutes);
       if (Number.isFinite(configuredMinutes) && configuredMinutes > 0) {
         return Math.round(configuredMinutes * 60);
@@ -2485,8 +2492,13 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setElapsedSeconds(Number(stored?.elapsedSeconds) || 0);
     const restoredTask = module.tasks[restoredIndex] ?? module.tasks[0];
     const savedTimer = Number(stored?.timerSeconds);
+    const hasLegacyWritingTimer =
+      module.id === "write" &&
+      Number.isFinite(savedTimer) &&
+      savedTimer > 0 &&
+      savedTimer <= 5 * 60;
     const restoredTimerSeconds =
-      Number.isFinite(savedTimer) && savedTimer > 0
+      Number.isFinite(savedTimer) && savedTimer > 0 && !hasLegacyWritingTimer
         ? savedTimer
         : totalExamDuration;
     const restoredPartIntroVisible = stored?.completed ? false : stored?.partIntroVisible ?? restoredIndex === 0;
