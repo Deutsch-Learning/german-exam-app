@@ -3662,14 +3662,14 @@ h4 {
 /* Final reference pass: compact exam buttons and clearer people/background. */
 .hero-redesign-bg::before {
   background-image:
-    linear-gradient(90deg, rgba(3, 16, 34, 0.9) 0%, rgba(3, 16, 34, 0.58) 31%, rgba(3, 16, 34, 0.2) 58%, rgba(3, 16, 34, 0.03) 100%),
-    linear-gradient(180deg, rgba(3, 16, 34, 0) 0%, rgba(3, 16, 34, 0.06) 56%, #031329 100%),
-    var(--hero-reference-image);
+    linear-gradient(90deg, rgba(3, 16, 34, 0.9) 0%, rgba(3, 16, 34, 0.6) 32%, rgba(3, 16, 34, 0.18) 62%, rgba(3, 16, 34, 0.02) 100%),
+    linear-gradient(180deg, rgba(3, 16, 34, 0) 0%, rgba(3, 16, 34, 0.08) 58%, #031329 100%),
+    var(--hero-people-image);
   z-index: 0;
   background-repeat: no-repeat;
   background-color: #031329;
   background-size: cover;
-  background-position: center -260px;
+  background-position: center top;
   filter: saturate(1.12) contrast(1.06) brightness(1.02);
 }
 
@@ -3685,7 +3685,7 @@ h4 {
   top: clamp(34px, 6vh, 66px);
   right: clamp(-56px, -2.4vw, -24px);
   z-index: 2;
-  display: block;
+  display: none;
   width: min(66vw, 1100px);
   aspect-ratio: 900 / 420;
   background-image: var(--hero-people-image);
@@ -3714,6 +3714,37 @@ h4 {
   opacity: 1;
   filter: none;
   transform: none;
+}
+
+.hero-redesign .hero-title {
+  min-height: 2.12em;
+}
+
+.hero-typing-text {
+  display: inline;
+}
+
+.hero-type-cursor {
+  display: inline-block;
+  width: 0.08em;
+  height: 0.88em;
+  margin-left: 0.08em;
+  border-radius: 999px;
+  background: #ffb800;
+  box-shadow: 0 0 18px rgba(255, 184, 0, 0.46);
+  transform: translateY(0.1em);
+  animation: heroTypeCursorBlink 860ms steps(1, end) infinite;
+}
+
+@keyframes heroTypeCursorBlink {
+  0%,
+  52% {
+    opacity: 1;
+  }
+  53%,
+  100% {
+    opacity: 0.12;
+  }
 }
 
 .exam-card-grid {
@@ -3825,7 +3856,7 @@ h4 {
 @media (min-width: 1501px) {
   .hero-redesign-bg::before {
     background-size: cover;
-    background-position: center -300px;
+    background-position: center top;
   }
 
   .hero-foreground-people {
@@ -3863,15 +3894,16 @@ h4 {
 
 @media (max-width: 1120px) {
   .hero-redesign-bg::before {
-    background-size: cover;
-    background-position: 58% -170px;
+    background-image:
+      linear-gradient(90deg, rgba(3, 16, 34, 0.82) 0%, rgba(3, 16, 34, 0.56) 48%, rgba(3, 16, 34, 0.1) 100%),
+      linear-gradient(180deg, rgba(3, 16, 34, 0) 0%, rgba(3, 16, 34, 0.08) 58%, #031329 100%),
+      var(--hero-people-image);
+    background-size: auto clamp(560px, 68vw, 700px);
+    background-position: 58% top;
   }
 
   .hero-foreground-people {
-    top: 20px;
-    right: -180px;
-    width: min(106vw, 920px);
-    opacity: 0.96;
+    display: none;
   }
 
   .exam-card-grid {
@@ -3894,13 +3926,17 @@ h4 {
 }
 
 @media (max-width: 720px) {
+  .hero-redesign-bg {
+    inset: -8px 0 0;
+  }
+
   .hero-redesign-bg::before {
     background-image:
       linear-gradient(90deg, rgba(3, 16, 34, 0.82) 0%, rgba(3, 16, 34, 0.5) 54%, rgba(3, 16, 34, 0.12) 100%),
       linear-gradient(180deg, rgba(3, 16, 34, 0.02) 0%, rgba(3, 16, 34, 0.12) 52%, #031329 100%),
       var(--hero-people-image);
-    background-size: auto 430px;
-    background-position: 61% top;
+    background-size: auto clamp(450px, 118vw, 540px);
+    background-position: 60% top;
   }
 
   .hero-foreground-people {
@@ -3908,12 +3944,13 @@ h4 {
   }
 
   .hero-copy-panel {
-    padding-top: 28px;
+    padding-top: 18px;
   }
 
   .hero-redesign .hero-title {
     max-width: 340px;
-    margin-top: clamp(104px, 30vw, 140px);
+    margin-top: clamp(170px, 47vw, 210px);
+    min-height: 2.2em;
     text-shadow: 0 4px 18px rgba(0, 0, 0, 0.76), 0 18px 44px rgba(0, 0, 0, 0.48);
   }
 
@@ -3953,6 +3990,13 @@ h4 {
     width: 32px;
     height: 32px;
     font-size: 0.98rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-type-cursor {
+    animation: none;
+    opacity: 0.8;
   }
 }
 

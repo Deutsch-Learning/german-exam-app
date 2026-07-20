@@ -82,6 +82,7 @@ const CLIENT_DIST_DIR = SERVE_CLIENT
   : "";
 const CLIENT_INDEX_FILE = CLIENT_DIST_DIR ? path.join(CLIENT_DIST_DIR, "index.html") : "";
 const isProduction = process.env.NODE_ENV === "production";
+const WRITING_GLOBAL_DURATION_MINUTES = 60;
 
 const normalizeOrigin = (value) =>
   String(value ?? "")
@@ -2351,7 +2352,7 @@ const PUBLIC_MODULE_META = {
     label: "Expression Écrite",
     shortLabel: "Written expression",
     description: "Imported writing prompts from the original exam document.",
-    defaultMinutes: 60,
+    defaultMinutes: WRITING_GLOBAL_DURATION_MINUTES,
   },
   speak: {
     id: "speak",
@@ -2676,10 +2677,11 @@ const toPublicSeriesList = (rows, routeMeta = {}) => {
       title: title || moduleMeta.label,
       questionCount: Number(row.question_count) || 0,
       sectionCount: Number(row.section_count) || 0,
-      durationMinutes:
-        Number(row.duration_minutes) ||
-        Number(metadata.globalDurationMinutes || metadata.scoring?.globalDurationMinutes) ||
-        moduleMeta.defaultMinutes,
+      durationMinutes: moduleId === "write"
+        ? WRITING_GLOBAL_DURATION_MINUTES
+        : Number(row.duration_minutes) ||
+          Number(metadata.globalDurationMinutes || metadata.scoring?.globalDurationMinutes) ||
+          moduleMeta.defaultMinutes,
     };
   }
 
@@ -3349,7 +3351,9 @@ const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {},
             : stripPublicListeningTranscriptFields(audioSummary);
         })()
       : undefined,
-    globalDurationMinutes: Number(metadata.globalDurationMinutes || metadata.scoring?.globalDurationMinutes) || null,
+    globalDurationMinutes: moduleId === "write"
+      ? WRITING_GLOBAL_DURATION_MINUTES
+      : Number(metadata.globalDurationMinutes || metadata.scoring?.globalDurationMinutes) || null,
     tasks,
     sourceExamId: exam.id,
   };
