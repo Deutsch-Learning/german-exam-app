@@ -60,6 +60,7 @@ const {
   TtsConfigurationError,
 } = require("./services/ttsService");
 const goetheB1HoerenQuestionFixes = require("./data/goetheB1HoerenQuestionFixes.json");
+const osdB1HoerenPart4Options = require("./data/osdB1HoerenPart4Options.json");
 const {
   getAppBaseUrl,
   normalizePublicUrl,
@@ -151,6 +152,18 @@ const LEVEL_ORDER = ["A1", "A2", "B1", "B2", "C1", "C2"];
 const NOT_SPECIFIED_LEVEL = "Not specified";
 const SUBSCRIPTION_CERTIFICATIONS = ["goethe", "osd", "telc", "ecl"];
 const SUBSCRIPTION_SECTIONS = ["read", "listen", "speak", "write"];
+const AFFILIATE_CODE_REGEX = /^[A-Z0-9][A-Z0-9_-]{2,31}$/;
+const AFFILIATE_PAYOUT_METHODS = ["mtn", "orange"];
+const AFFILIATE_DEFAULT_SETTINGS = {
+  default_partner_commission_percent: 10,
+  first_purchase_discount_percent: 5,
+  commission_scope: "first_successful_purchase",
+  commission_hold_days: 14,
+  minimum_withdrawal_amount: 10000,
+  default_currency: "XAF",
+  attribution_cookie_days: 30,
+  programme_enabled: true,
+};
 const SUBSCRIPTION_SPEAKING_QUOTAS = {
   starter: 20,
   standard: 45,
@@ -336,6 +349,23 @@ const normalizePaymentProvider = (value) => {
   const provider = String(value ?? "").trim().toLowerCase();
   if (provider === "notpay") return "notchpay";
   return ["stripe", "cinetpay", "notchpay", "manual"].includes(provider) ? provider : "manual";
+};
+
+const normalizeAffiliateCode = (value) =>
+  String(value ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9_-]/g, "")
+    .slice(0, 32);
+
+const normalizePayoutMethod = (value) => {
+  const method = String(value ?? "").trim().toLowerCase();
+  return AFFILIATE_PAYOUT_METHODS.includes(method) ? method : "";
+};
+
+const normalizeMoney = (value) => {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? Number(amount.toFixed(2)) : 0;
 };
 
 const MOBILE_MONEY_COUNTRIES = {
@@ -1008,6 +1038,352 @@ const userHasSubscriptionAccess = (user, subscription, certification, section) =
   );
 };
 
+const userHasPartialSeriesAccess = (user, series) => {
+  if (!user?.id || !series) return false;
+  const examIds = [series.examId, series.accessExamId]
+    .map((value) => String(value ?? "").trim().toLowerCase())
+    .filter(Boolean);
+  const seriesId = String(series.id ?? "").trim().toLowerCase();
+  return normalizePartialAccess(user.partial_access).some((grant) =>
+    examIds.includes(grant.examId) && grant.seriesId === seriesId
+  );
+};
+
+const userCanOpenImportedModule = async (user, series, moduleId) => {
+  if (moduleId !== "speak") return true;
+  if (!user?.id || !series) return false;
+  if (user.role === "admin" || user.has_full_access || user.hasFullAccess) return true;
+  if (userHasPartialSeriesAccess(user, series)) return true;
+
+  const level = normalizeSubscriptionLevel(series.level);
+  const certification = normalizeProviderId(series.accessExamId || series.examId || series.examName);
+  const subscription = await getActiveSubscriptionForUser(user.id, level, certification);
+  return userHasSubscriptionAccess(user, subscription, certification, "speak");
+};
+
+const getAffiliateSettings = async (client = pool) => {
+  const result = await client.query(`SELECT * FROM affiliate_settings WHERE id = TRUE LIMIT 1`);
+  const row = result.rows[0] || {};
+  return {
+    defaultCommissionPercent: Number(row.default_partner_commission_percent ?? AFFILIATE_DEFAULT_SETTINGS.default_partner_commission_percent),
+    firstPurchaseDiscountPercent: Number(row.first_purchase_discount_percent ?? AFFILIATE_DEFAULT_SETTINGS.first_purchase_discount_percent),
+    commissionScope: row.commission_scope || AFFILIATE_DEFAULT_SETTINGS.commission_scope,
+    commissionHoldDays: Number(row.commission_hold_days ?? AFFILIATE_DEFAULT_SETTINGS.commission_hold_days),
+    minimumWithdrawalAmount: Number(row.minimum_withdrawal_amount ?? AFFILIATE_DEFAULT_SETTINGS.minimum_withdrawal_amount),
+    defaultCurrency: row.default_currency || AFFILIATE_DEFAULT_SETTINGS.default_currency,
+    attributionCookieDays: Number(row.attribution_cookie_days ?? AFFILIATE_DEFAULT_SETTINGS.attribution_cookie_days),
+    programmeEnabled: row.programme_enabled !== false,
+  };
+};
+
+const findAffiliateCode = async (code, client = pool) => {
+  const normalized = normalizeAffiliateCode(code);
+  if (!AFFILIATE_CODE_REGEX.test(normalized)) return null;
+  const result = await client.query(
+    `SELECT ac.id, ac.partner_id, ac.code, ac.discount_percent, ac.commission_percent, ac.is_active, ac.expires_at,
+            ap.user_id AS partner_user_id, ap.public_name, ap.status AS partner_status, ap.commission_rate
+       FROM affiliate_codes ac
+       JOIN affiliate_partners ap ON ap.id = ac.partner_id
+      WHERE LOWER(ac.code) = LOWER($1)
+      LIMIT 1`,
+    [normalized]
+  );
+  return result.rows[0] || null;
+};
+
+const validateAffiliateCodeForPublic = async (code) => {
+  const settings = await getAffiliateSettings();
+  const row = await findAffiliateCode(code);
+  const now = Date.now();
+  const active = Boolean(
+    settings.programmeEnabled &&
+      row &&
+      row.is_active &&
+      row.partner_status === "active" &&
+      (!row.expires_at || new Date(row.expires_at).getTime() > now)
+  );
+  return {
+    valid: active,
+    code: normalizeAffiliateCode(code),
+    publicName: active ? row.public_name : "",
+    discountPercent: active ? Number(row.discount_percent || settings.firstPurchaseDiscountPercent) : 0,
+    attributionCookieDays: settings.attributionCookieDays,
+  };
+};
+
+const generateAffiliateCodeForUser = async (user, client = pool) => {
+  const base = normalizeAffiliateCode(user?.username || user?.first_name || user?.email || "PARTNER")
+    .replace(/[_-]/g, "")
+    .slice(0, 10) || "PARTNER";
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const suffix = crypto.randomBytes(3).toString("hex").toUpperCase().slice(0, 5);
+    const code = `${base}${suffix}`.slice(0, 16);
+    const exists = await client.query(`SELECT 1 FROM affiliate_codes WHERE LOWER(code) = LOWER($1) LIMIT 1`, [code]);
+    if (!exists.rows[0]) return code;
+  }
+  return `REF${crypto.randomBytes(6).toString("hex").toUpperCase()}`.slice(0, 16);
+};
+
+const mapAffiliatePartner = (row) => row ? ({
+  id: row.id,
+  userId: row.user_id,
+  publicName: row.public_name,
+  status: row.status,
+  commissionRate: Number(row.commission_rate ?? 0),
+  payoutMethod: row.payout_method || "",
+  payoutDestination: row.payout_destination || "",
+  termsAcceptedAt: row.terms_accepted_at,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+}) : null;
+
+const mapAffiliateCode = (row) => row ? ({
+  id: row.id,
+  partnerId: row.partner_id,
+  code: row.code,
+  discountPercent: Number(row.discount_percent ?? 0),
+  commissionPercent: row.commission_percent == null ? null : Number(row.commission_percent),
+  isActive: Boolean(row.is_active),
+  expiresAt: row.expires_at,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+}) : null;
+
+const getPartnerDashboard = async (userId, client = pool) => {
+  const partnerResult = await client.query(`SELECT * FROM affiliate_partners WHERE user_id = $1 LIMIT 1`, [userId]);
+  const partner = partnerResult.rows[0];
+  const settings = await getAffiliateSettings(client);
+  if (!partner) return { settings, partner: null };
+  await client.query(
+    `UPDATE affiliate_commissions
+        SET status = 'available', updated_at = NOW()
+      WHERE partner_id = $1
+        AND status = 'pending'
+        AND available_at <= NOW()`,
+    [partner.id]
+  );
+  const [codes, referrals, commissions, payouts, events, totals] = await Promise.all([
+    client.query(`SELECT * FROM affiliate_codes WHERE partner_id = $1 ORDER BY created_at`, [partner.id]),
+    client.query(
+      `SELECT id, status, attributed_at, converted_at, disqualification_reason
+         FROM affiliate_referrals
+        WHERE partner_id = $1
+        ORDER BY attributed_at DESC
+        LIMIT 100`,
+      [partner.id]
+    ),
+    client.query(
+      `SELECT id, payment_id, base_amount, commission_rate, commission_amount, currency, status, available_at,
+              cancellation_reason, payout_id, created_at
+         FROM affiliate_commissions
+        WHERE partner_id = $1
+        ORDER BY created_at DESC
+        LIMIT 100`,
+      [partner.id]
+    ),
+    client.query(`SELECT * FROM affiliate_payouts WHERE partner_id = $1 ORDER BY requested_at DESC LIMIT 50`, [partner.id]),
+    client.query(
+      `SELECT COUNT(*)::int AS clicks
+         FROM affiliate_events
+        WHERE partner_id = $1
+          AND event_type = 'click'`,
+      [partner.id]
+    ),
+    client.query(
+      `SELECT
+         COALESCE(SUM(commission_amount) FILTER (WHERE status = 'pending'), 0) AS pending,
+         COALESCE(SUM(commission_amount) FILTER (WHERE status = 'available' AND payout_id IS NULL), 0) AS available,
+         COALESCE(SUM(commission_amount) FILTER (WHERE status = 'paid'), 0) AS paid,
+         COALESCE(SUM(commission_amount) FILTER (WHERE status IN ('pending', 'available', 'paid')), 0) AS earned
+       FROM affiliate_commissions
+       WHERE partner_id = $1`,
+      [partner.id]
+    ),
+  ]);
+  const totalRow = totals.rows[0] || {};
+  const registered = referrals.rows.length;
+  const converted = referrals.rows.filter((row) => row.status === "converted").length;
+  return {
+    settings,
+    partner: mapAffiliatePartner(partner),
+    primaryCode: mapAffiliateCode(codes.rows.find((row) => row.is_active) || codes.rows[0]),
+    codes: codes.rows.map(mapAffiliateCode),
+    referrals: referrals.rows.map((row) => ({
+      id: row.id,
+      status: row.status,
+      attributedAt: row.attributed_at,
+      convertedAt: row.converted_at,
+      disqualificationReason: row.disqualification_reason,
+    })),
+    commissions: commissions.rows.map((row) => ({
+      id: row.id,
+      paymentId: row.payment_id,
+      baseAmount: Number(row.base_amount),
+      commissionRate: Number(row.commission_rate),
+      commissionAmount: Number(row.commission_amount),
+      currency: row.currency,
+      status: row.status,
+      availableAt: row.available_at,
+      cancellationReason: row.cancellation_reason,
+      payoutId: row.payout_id,
+      createdAt: row.created_at,
+    })),
+    payouts: payouts.rows.map((row) => ({
+      id: row.id,
+      amount: Number(row.amount),
+      currency: row.currency,
+      payoutMethod: row.payout_method,
+      payoutDestination: row.payout_destination,
+      status: row.status,
+      transactionReference: row.transaction_reference,
+      rejectionReason: row.rejection_reason,
+      requestedAt: row.requested_at,
+      processedAt: row.processed_at,
+    })),
+    metrics: {
+      clicks: Number(events.rows[0]?.clicks || 0),
+      registered,
+      converted,
+      pendingCommission: Number(totalRow.pending || 0),
+      availableBalance: Number(totalRow.available || 0),
+      totalPaid: Number(totalRow.paid || 0),
+      totalEarned: Number(totalRow.earned || 0),
+      conversionRate: registered ? Math.round((converted / registered) * 1000) / 10 : 0,
+    },
+  };
+};
+
+const createAffiliateCommissionForPayment = async (transaction, client) => {
+  const settings = await getAffiliateSettings(client);
+  if (!settings.programmeEnabled || settings.commissionScope !== "first_successful_purchase") return null;
+  const existingPayment = await client.query(`SELECT id FROM affiliate_commissions WHERE payment_id = $1 LIMIT 1`, [transaction.id]);
+  if (existingPayment.rows[0]) return null;
+  const previousPaid = await client.query(
+    `SELECT 1 FROM payment_transactions
+      WHERE user_id = $1 AND status = 'succeeded' AND id <> $2
+      LIMIT 1`,
+    [transaction.user_id, transaction.id]
+  );
+  if (previousPaid.rows[0]) return null;
+  const referralResult = await client.query(
+    `SELECT ar.*, ap.status AS partner_status, ap.commission_rate, ac.commission_percent
+       FROM affiliate_referrals ar
+       JOIN affiliate_partners ap ON ap.id = ar.partner_id
+       JOIN affiliate_codes ac ON ac.id = ar.affiliate_code_id
+      WHERE ar.referred_user_id = $1
+        AND ar.status = 'registered'
+      FOR UPDATE`,
+    [transaction.user_id]
+  );
+  const referral = referralResult.rows[0];
+  if (!referral || referral.partner_status !== "active") return null;
+  const rate = Number(referral.commission_percent ?? referral.commission_rate ?? settings.defaultCommissionPercent);
+  const baseAmount = normalizeMoney(transaction.amount);
+  const commissionAmount = normalizeMoney(baseAmount * (rate / 100));
+  const inserted = await client.query(
+    `INSERT INTO affiliate_commissions (
+       partner_id, referral_id, payment_id, base_amount, commission_rate, commission_amount,
+       currency, status, available_at
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', NOW() + ($8::int * INTERVAL '1 day'))
+     ON CONFLICT (payment_id) DO NOTHING
+     RETURNING *`,
+    [
+      referral.partner_id,
+      referral.id,
+      transaction.id,
+      baseAmount,
+      rate,
+      commissionAmount,
+      transaction.currency || settings.defaultCurrency,
+      settings.commissionHoldDays,
+    ]
+  );
+  const commission = inserted.rows[0];
+  if (!commission) return null;
+  await client.query(
+    `UPDATE affiliate_referrals
+        SET status = 'converted', converted_at = NOW(), updated_at = NOW()
+      WHERE id = $1`,
+    [referral.id]
+  );
+  await client.query(
+    `INSERT INTO affiliate_events (partner_id, affiliate_code_id, user_id, event_type, metadata)
+     VALUES ($1, $2, $3, 'commission_created', $4::jsonb)`,
+    [
+      referral.partner_id,
+      referral.affiliate_code_id,
+      transaction.user_id,
+      safeJson({ paymentId: transaction.id, commissionAmount, currency: transaction.currency }),
+    ]
+  );
+  return commission;
+};
+
+const applyAffiliateDiscountForUser = async (userId, quote, client = pool) => {
+  if (!quote || !Number.isInteger(Number(userId))) return quote;
+  const settings = await getAffiliateSettings(client);
+  if (!settings.programmeEnabled) return quote;
+  const previousPaid = await client.query(
+    `SELECT 1 FROM payment_transactions WHERE user_id = $1 AND status = 'succeeded' LIMIT 1`,
+    [Number(userId)]
+  );
+  if (previousPaid.rows[0]) return quote;
+  const referral = await client.query(
+    `SELECT ac.discount_percent, ac.code
+       FROM affiliate_referrals ar
+       JOIN affiliate_codes ac ON ac.id = ar.affiliate_code_id
+       JOIN affiliate_partners ap ON ap.id = ar.partner_id
+      WHERE ar.referred_user_id = $1
+        AND ar.status = 'registered'
+        AND ac.is_active = TRUE
+        AND ap.status = 'active'
+        AND (ac.expires_at IS NULL OR ac.expires_at > NOW())
+      LIMIT 1`,
+    [Number(userId)]
+  );
+  const row = referral.rows[0];
+  if (!row) return quote;
+  const discountPercent = Number(row.discount_percent ?? settings.firstPurchaseDiscountPercent);
+  if (!discountPercent) return quote;
+  const originalPaymentAmount = normalizeMoney(quote.paymentAmount);
+  const discountedPaymentAmount = normalizeMoney(originalPaymentAmount * (1 - discountPercent / 100));
+  return {
+    ...quote,
+    paymentAmount: discountedPaymentAmount,
+    affiliateDiscount: {
+      code: row.code,
+      percent: discountPercent,
+      originalPaymentAmount,
+      discountAmount: normalizeMoney(originalPaymentAmount - discountedPaymentAmount),
+      currency: quote.paymentCurrency,
+    },
+  };
+};
+
+const cancelAffiliateCommissionForPaymentReference = async (reference, reason, client = pool) => {
+  const normalizedReference = String(reference || "").trim();
+  if (!normalizedReference) return null;
+  const result = await client.query(
+    `UPDATE affiliate_commissions cm
+        SET status = 'cancelled',
+            cancellation_reason = $2,
+            updated_at = NOW()
+       FROM payment_transactions pt
+      WHERE cm.payment_id = pt.id
+        AND cm.status IN ('pending', 'available')
+        AND (
+          pt.provider_reference = $1
+          OR pt.metadata #>> '{notchpay,merchantReference}' = $1
+          OR pt.metadata #>> '{notchpay,reference}' = $1
+          OR pt.id::text = $1
+        )
+      RETURNING cm.*`,
+    [normalizedReference, String(reason || "Payment reversed").slice(0, 500)]
+  );
+  return result.rows;
+};
+
 const activateSubscriptionFromTransaction = async ({ providerReference, providerPayload = {}, eventType = "" }) => {
   const reference = String(providerReference || "").trim();
   if (!reference) return { activated: false, reason: "missing_reference" };
@@ -1134,8 +1510,15 @@ const activateSubscriptionFromTransaction = async ({ providerReference, provider
           ]
         );
       }
+      const commission = await createAffiliateCommissionForPayment(transaction, client);
       await client.query("COMMIT");
-      return { activated: true, subscriptionIds: createdSubscriptions, transactionId: transaction.id, enterprise: true };
+      return {
+        activated: true,
+        subscriptionIds: createdSubscriptions,
+        transactionId: transaction.id,
+        enterprise: true,
+        affiliateCommissionId: commission?.id || null,
+      };
     }
 
     const existing = await client.query(
@@ -1205,8 +1588,9 @@ const activateSubscriptionFromTransaction = async ({ providerReference, provider
         safeJson({ providerReference: reference, transactionId: transaction.id, eventType }),
       ]
     );
+    const commission = await createAffiliateCommissionForPayment(transaction, client);
     await client.query("COMMIT");
-    return { activated: true, subscriptionId, transactionId: transaction.id };
+    return { activated: true, subscriptionId, transactionId: transaction.id, affiliateCommissionId: commission?.id || null };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
@@ -1847,12 +2231,144 @@ async function ensureSchema() {
       ON user_subscriptions(payment_provider, payment_reference)
       WHERE payment_reference IS NOT NULL;
   `);
+  await pool.query(`CREATE EXTENSION IF NOT EXISTS pgcrypto;`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS affiliate_settings (
+      id BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (id = TRUE),
+      default_partner_commission_percent NUMERIC(5,2) NOT NULL DEFAULT 10 CHECK (default_partner_commission_percent >= 0 AND default_partner_commission_percent <= 100),
+      first_purchase_discount_percent NUMERIC(5,2) NOT NULL DEFAULT 5 CHECK (first_purchase_discount_percent >= 0 AND first_purchase_discount_percent <= 100),
+      commission_scope TEXT NOT NULL DEFAULT 'first_successful_purchase' CHECK (commission_scope IN ('first_successful_purchase')),
+      commission_hold_days INTEGER NOT NULL DEFAULT 14 CHECK (commission_hold_days >= 0),
+      minimum_withdrawal_amount NUMERIC(12,2) NOT NULL DEFAULT 10000 CHECK (minimum_withdrawal_amount >= 0),
+      default_currency TEXT NOT NULL DEFAULT 'XAF',
+      attribution_cookie_days INTEGER NOT NULL DEFAULT 30 CHECK (attribution_cookie_days > 0),
+      programme_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+      updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`INSERT INTO affiliate_settings (id) VALUES (TRUE) ON CONFLICT (id) DO NOTHING;`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS affiliate_partners (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+      public_name TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'pending_review')),
+      commission_rate NUMERIC(5,2) NOT NULL DEFAULT 10 CHECK (commission_rate >= 0 AND commission_rate <= 100),
+      payout_method TEXT CHECK (payout_method IN ('mtn', 'orange')),
+      payout_destination TEXT,
+      terms_accepted_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS affiliate_codes (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      partner_id UUID NOT NULL REFERENCES affiliate_partners(id) ON DELETE CASCADE,
+      code TEXT NOT NULL,
+      discount_percent NUMERIC(5,2) NOT NULL DEFAULT 5 CHECK (discount_percent >= 0 AND discount_percent <= 100),
+      commission_percent NUMERIC(5,2) CHECK (commission_percent IS NULL OR (commission_percent >= 0 AND commission_percent <= 100)),
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      expires_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS affiliate_codes_code_lower_unique ON affiliate_codes (LOWER(code));`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS affiliate_codes_partner_idx ON affiliate_codes(partner_id, is_active);`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS affiliate_referrals (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      partner_id UUID NOT NULL REFERENCES affiliate_partners(id) ON DELETE RESTRICT,
+      affiliate_code_id UUID NOT NULL REFERENCES affiliate_codes(id) ON DELETE RESTRICT,
+      referred_user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'registered' CHECK (status IN ('registered', 'converted', 'disqualified')),
+      attributed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      converted_at TIMESTAMPTZ,
+      disqualification_reason TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS affiliate_referrals_partner_status_idx ON affiliate_referrals(partner_id, status, attributed_at DESC);`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS affiliate_payouts (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      partner_id UUID NOT NULL REFERENCES affiliate_partners(id) ON DELETE RESTRICT,
+      amount NUMERIC(12,2) NOT NULL CHECK (amount > 0),
+      currency TEXT NOT NULL DEFAULT 'XAF',
+      payout_method TEXT NOT NULL CHECK (payout_method IN ('mtn', 'orange')),
+      payout_destination TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'requested' CHECK (status IN ('requested', 'processing', 'paid', 'rejected')),
+      transaction_reference TEXT,
+      rejection_reason TEXT,
+      requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      processed_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS affiliate_payouts_partner_status_idx ON affiliate_payouts(partner_id, status, requested_at DESC);`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS affiliate_commissions (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      partner_id UUID NOT NULL REFERENCES affiliate_partners(id) ON DELETE RESTRICT,
+      referral_id UUID NOT NULL REFERENCES affiliate_referrals(id) ON DELETE RESTRICT,
+      payment_id INTEGER NOT NULL REFERENCES payment_transactions(id) ON DELETE RESTRICT,
+      base_amount NUMERIC(12,2) NOT NULL CHECK (base_amount >= 0),
+      commission_rate NUMERIC(5,2) NOT NULL CHECK (commission_rate >= 0 AND commission_rate <= 100),
+      commission_amount NUMERIC(12,2) NOT NULL CHECK (commission_amount >= 0),
+      currency TEXT NOT NULL DEFAULT 'XAF',
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'available', 'paid', 'cancelled')),
+      available_at TIMESTAMPTZ NOT NULL,
+      cancellation_reason TEXT,
+      payout_id UUID REFERENCES affiliate_payouts(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(payment_id)
+    );
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS affiliate_commissions_partner_status_idx ON affiliate_commissions(partner_id, status, available_at DESC);`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS affiliate_events (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      partner_id UUID REFERENCES affiliate_partners(id) ON DELETE SET NULL,
+      affiliate_code_id UUID REFERENCES affiliate_codes(id) ON DELETE SET NULL,
+      user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      event_type TEXT NOT NULL,
+      ip_hash TEXT,
+      user_agent_hash TEXT,
+      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS affiliate_events_code_created_idx ON affiliate_events(affiliate_code_id, created_at DESC);`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS affiliate_admin_events (
+      id SERIAL PRIMARY KEY,
+      admin_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      partner_id UUID REFERENCES affiliate_partners(id) ON DELETE SET NULL,
+      action TEXT NOT NULL,
+      details JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
   await pool.query(`ALTER TABLE subscription_plans ENABLE ROW LEVEL SECURITY;`);
   await pool.query(`ALTER TABLE user_subscriptions ENABLE ROW LEVEL SECURITY;`);
   await pool.query(`ALTER TABLE writing_simulator_usage ENABLE ROW LEVEL SECURITY;`);
   await pool.query(`ALTER TABLE payment_transactions ENABLE ROW LEVEL SECURITY;`);
   await pool.query(`ALTER TABLE industrial_subscription_offers ENABLE ROW LEVEL SECURITY;`);
   await pool.query(`ALTER TABLE subscription_admin_events ENABLE ROW LEVEL SECURITY;`);
+  await pool.query(`ALTER TABLE affiliate_settings ENABLE ROW LEVEL SECURITY;`);
+  await pool.query(`ALTER TABLE affiliate_partners ENABLE ROW LEVEL SECURITY;`);
+  await pool.query(`ALTER TABLE affiliate_codes ENABLE ROW LEVEL SECURITY;`);
+  await pool.query(`ALTER TABLE affiliate_referrals ENABLE ROW LEVEL SECURITY;`);
+  await pool.query(`ALTER TABLE affiliate_commissions ENABLE ROW LEVEL SECURITY;`);
+  await pool.query(`ALTER TABLE affiliate_payouts ENABLE ROW LEVEL SECURITY;`);
+  await pool.query(`ALTER TABLE affiliate_events ENABLE ROW LEVEL SECURITY;`);
+  await pool.query(`ALTER TABLE affiliate_admin_events ENABLE ROW LEVEL SECURITY;`);
   await pool.query(`
     DO $$
     BEGIN
@@ -2262,6 +2778,43 @@ const optionalPaymentAuth = async (req, _res, next) => {
   return next();
 };
 
+const optionalContentAuth = async (req, _res, next) => {
+  try {
+    const token = getBearerToken(req);
+    if (!token) return next();
+    const payload = jwt.verify(token, JWT_SECRET, {
+      issuer: JWT_ISSUER,
+      audience: JWT_AUDIENCE,
+    });
+    const userId = Number(payload.sub ?? payload.id);
+    if (!Number.isInteger(userId) || userId <= 0) return next();
+    if (payload.jti) {
+      const revoked = await pool.query(`SELECT 1 FROM revoked_tokens WHERE jti = $1 LIMIT 1`, [payload.jti]);
+      if (revoked.rows[0]) return next();
+    }
+    const result = await pool.query(
+      `SELECT id, email, username, first_name, last_name, date_of_birth, country, phone,
+              auth_provider, avatar_url, role, status,
+              email_verified, has_full_access, partial_access, current_level, target_level,
+              marketing_emails_enabled,
+              created_at, last_login_at
+         FROM users
+        WHERE id = $1`,
+      [userId]
+    );
+    const user = result.rows[0];
+    if (!user || user.status !== "active" || !["user", "admin"].includes(String(user.role)) || payload.role !== user.role) {
+      return next();
+    }
+    req.token = token;
+    req.authPayload = payload;
+    req.user = user;
+  } catch {
+    // Public content remains public; premium modules check req.user explicitly.
+  }
+  return next();
+};
+
 const auditAdminAction = async (req, action, targetType, targetId, metadata = {}) => {
   try {
     const result = await pool.query(
@@ -2600,7 +3153,7 @@ const extractListeningStudentPrompt = (value, fallbackTitle = "") => {
     /(?:^|\n)\s*Aufgaben\s+\d{1,2}/i,
     /(?:^|\n)\s*Aufgabe\s+\d{1,2}\s*:/i,
     /(?:^|\n)\s*Fragen\s+\d{1,2}/i,
-    /(?:^|\n)\s*Questions?\s*\/?\s*T(?:A|Â)CHES/i,
+    /(?:^|\n)\s*Questions?\s*\/?\s*T(?:A|\u00c2)CHES/i,
     /(?:^|\n)\s*\d{1,2}\.\s+\S/i,
   ];
   const starts = markers
@@ -3244,6 +3797,29 @@ const getGoetheB1HoerenQuestionFixesForExam = (exam) => {
   return goetheB1HoerenQuestionFixes[seriesNumber] || null;
 };
 
+const getOsdB1HoerenQuestionFixesForExam = (exam) => {
+  const provider = normalizeProviderId(exam?.provider || exam?.exam_type || "");
+  const level = String(exam?.level || "").toUpperCase();
+  const sectionType = String(exam?.section_type || "").toLowerCase();
+  const seriesNumber = String(Number(exam?.series_number) || "");
+  if (provider !== "osd" || level !== "B1" || sectionType !== "listen" || !seriesNumber) return null;
+
+  const part4 = osdB1HoerenPart4Options[seriesNumber];
+  if (!part4?.options?.length) return null;
+
+  return Object.fromEntries(
+    Object.entries(part4.corrections || {}).map(([sourceQuestionNumber, correction]) => [
+      `4:${sourceQuestionNumber}`,
+      {
+        questionType: "matching",
+        options: part4.options,
+        correctAnswer: { value: correction.correct },
+        explanation: correction.explanation,
+      },
+    ])
+  );
+};
+
 const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {}, listeningAudioItems = [] }) => {
   const moduleId = exam.section_type;
   const moduleMeta = PUBLIC_MODULE_META[moduleId] ?? PUBLIC_MODULE_META.read;
@@ -3307,7 +3883,7 @@ const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {},
   } else if (moduleId === "speak") {
     tasks = questions.map((question, index) => buildSpeakingTask(question, index));
   } else if (moduleId === "listen") {
-    const sourceFixes = getGoetheB1HoerenQuestionFixesForExam(exam);
+    const sourceFixes = getGoetheB1HoerenQuestionFixesForExam(exam) || getOsdB1HoerenQuestionFixesForExam(exam);
     tasks = questions.map((question, index) => buildListeningTask(question, index, listeningAudioMap, sourceFixes));
   } else {
     tasks = questions.map((question, index) => buildReadingTask(question, index));
@@ -3374,7 +3950,7 @@ app.get("/api/exams/:provider/series", async (req, res) => {
   }
 });
 
-app.get("/api/exams/:provider/series/:seriesId/:moduleId", async (req, res) => {
+app.get("/api/exams/:provider/series/:seriesId/:moduleId", optionalContentAuth, async (req, res) => {
   try {
     const routeMeta = getProviderRouteMeta(req.params.provider);
     const { provider, level } = routeMeta;
@@ -3392,6 +3968,9 @@ app.get("/api/exams/:provider/series/:seriesId/:moduleId", async (req, res) => {
       importedRows.rows.find((row) => row.section_type === moduleId);
     if (!series) {
       return res.status(404).json({ ok: false, error: "Imported module not found" });
+    }
+    if (!(await userCanOpenImportedModule(req.user, series, moduleId))) {
+      return res.status(403).json({ ok: false, error: "Premium speaking access required" });
     }
     if (!exam) {
       const moduleMeta = PUBLIC_MODULE_META[moduleId];
@@ -3740,6 +4319,7 @@ app.post("/api/auth/google", googleAuthHandler);
 const registerHandler = async (req, res) => {
   try {
     const { email, password, username, firstName, lastName, country, phone, marketingEmailsEnabled } = req.body ?? {};
+    const affiliateCode = normalizeAffiliateCode(req.body?.affiliateCode);
 
     if (!isEmail(email) || typeof password !== "string") {
       return res.status(400).json({ ok: false, error: "A valid email and password are required" });
@@ -3763,6 +4343,10 @@ const registerHandler = async (req, res) => {
     }
     if (!/^\+[\d\s().-]{7,}$/.test(safePhone)) {
       return res.status(400).json({ ok: false, error: "A valid international phone number is required" });
+    }
+    if (affiliateCode) {
+      const validation = await validateAffiliateCodeForPublic(affiliateCode);
+      if (!validation.valid) return res.status(400).json({ ok: false, error: "Partner or promotional code is invalid" });
     }
     const passwordHash = await bcrypt.hash(password, 12);
     const verificationToken = EMAIL_VERIFICATION_ENABLED ? makeToken() : null;
@@ -5760,6 +6344,579 @@ app.get("/api/audio/generated/:assetId", async (req, res) => {
   }
 });
 
+app.get("/api/affiliate/validate/:code", async (req, res) => {
+  try {
+    const result = await validateAffiliateCodeForPublic(req.params.code);
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error("Affiliate code validation failed", err);
+    return res.status(500).json({ ok: false, error: "Code validation failed" });
+  }
+});
+
+app.post("/api/affiliate/click", async (req, res) => {
+  try {
+    const code = normalizeAffiliateCode(req.body?.code || req.query?.code);
+    const row = await findAffiliateCode(code);
+    if (row) {
+      await pool.query(
+        `INSERT INTO affiliate_events (partner_id, affiliate_code_id, event_type, ip_hash, user_agent_hash, metadata)
+         VALUES ($1, $2, 'click', $3, $4, $5::jsonb)`,
+        [
+          row.partner_id,
+          row.id,
+          tokenHash(getClientIp(req) || "unknown"),
+          tokenHash(String(req.get("user-agent") || "")),
+          safeJson({ code, landing: String(req.body?.landing || "").slice(0, 200) }),
+        ]
+      );
+    }
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("Affiliate click tracking failed", err);
+    return res.json({ ok: true });
+  }
+});
+
+app.post("/api/affiliate/claim", requireAuth, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const code = normalizeAffiliateCode(req.body?.code);
+    if (!AFFILIATE_CODE_REGEX.test(code)) return res.status(400).json({ ok: false, error: "Invalid partner code" });
+    await client.query("BEGIN");
+    const settings = await getAffiliateSettings(client);
+    if (!settings.programmeEnabled) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ ok: false, error: "Partner programme is currently disabled" });
+    }
+    const existingReferral = await client.query(`SELECT id FROM affiliate_referrals WHERE referred_user_id = $1 LIMIT 1`, [req.user.id]);
+    if (existingReferral.rows[0]) {
+      await client.query("COMMIT");
+      return res.json({ ok: true, claimed: false, reason: "already_attributed" });
+    }
+    const previousPaid = await client.query(`SELECT 1 FROM payment_transactions WHERE user_id = $1 AND status = 'succeeded' LIMIT 1`, [req.user.id]);
+    if (previousPaid.rows[0]) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ ok: false, error: "Referral code must be claimed before the first successful purchase" });
+    }
+    const affiliateCode = await findAffiliateCode(code, client);
+    const now = Date.now();
+    if (!affiliateCode || !affiliateCode.is_active || affiliateCode.partner_status !== "active" || (affiliateCode.expires_at && new Date(affiliateCode.expires_at).getTime() <= now)) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ ok: false, error: "Partner code is inactive or invalid" });
+    }
+    if (Number(affiliateCode.partner_user_id) === Number(req.user.id)) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ ok: false, error: "Self-referrals are not allowed" });
+    }
+    const inserted = await client.query(
+      `INSERT INTO affiliate_referrals (partner_id, affiliate_code_id, referred_user_id, status)
+       VALUES ($1, $2, $3, 'registered')
+       ON CONFLICT (referred_user_id) DO NOTHING
+       RETURNING id`,
+      [affiliateCode.partner_id, affiliateCode.id, req.user.id]
+    );
+    if (inserted.rows[0]) {
+      await client.query(
+        `INSERT INTO affiliate_events (partner_id, affiliate_code_id, user_id, event_type, metadata)
+         VALUES ($1, $2, $3, 'referral_claimed', $4::jsonb)`,
+        [affiliateCode.partner_id, affiliateCode.id, req.user.id, safeJson({ code })]
+      );
+    }
+    await client.query("COMMIT");
+    return res.json({ ok: true, claimed: Boolean(inserted.rows[0]), code });
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    console.error("Affiliate claim failed", err);
+    return res.status(500).json({ ok: false, error: "Referral could not be claimed" });
+  } finally {
+    client.release();
+  }
+});
+
+app.get("/api/affiliate/me", requireAuth, async (req, res) => {
+  try {
+    const dashboard = await getPartnerDashboard(req.user.id);
+    const referral = await pool.query(
+      `SELECT ar.status, ar.attributed_at, ar.converted_at, ac.code, ap.public_name
+         FROM affiliate_referrals ar
+         JOIN affiliate_codes ac ON ac.id = ar.affiliate_code_id
+         JOIN affiliate_partners ap ON ap.id = ar.partner_id
+        WHERE ar.referred_user_id = $1
+        LIMIT 1`,
+      [req.user.id]
+    );
+    return res.json({ ok: true, ...dashboard, myReferral: referral.rows[0] || null });
+  } catch (err) {
+    console.error("Affiliate dashboard failed", err);
+    return res.status(500).json({ ok: false, error: "Partner dashboard could not be loaded" });
+  }
+});
+
+app.post("/api/affiliate/activate", requireAuth, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const publicName = String(req.body?.publicName || "").trim().slice(0, 120);
+    const payoutMethod = normalizePayoutMethod(req.body?.payoutMethod);
+    const payoutDestination = String(req.body?.payoutDestination || "").trim().slice(0, 80);
+    const accepted = req.body?.acceptedTerms === true;
+    if (!publicName) return res.status(400).json({ ok: false, error: "Public partner name is required" });
+    if (!accepted) return res.status(400).json({ ok: false, error: "Partner conditions must be accepted" });
+    if (!payoutMethod || !payoutDestination) return res.status(400).json({ ok: false, error: "A valid MTN or Orange payout destination is required" });
+    await client.query("BEGIN");
+    const settings = await getAffiliateSettings(client);
+    if (!settings.programmeEnabled) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ ok: false, error: "Partner programme is currently disabled" });
+    }
+    const existing = await client.query(`SELECT * FROM affiliate_partners WHERE user_id = $1 LIMIT 1 FOR UPDATE`, [req.user.id]);
+    let partner = existing.rows[0];
+    if (!partner) {
+      const inserted = await client.query(
+        `INSERT INTO affiliate_partners (user_id, public_name, status, commission_rate, payout_method, payout_destination, terms_accepted_at)
+         VALUES ($1, $2, 'active', $3, $4, $5, NOW())
+         RETURNING *`,
+        [req.user.id, publicName, settings.defaultCommissionPercent, payoutMethod, payoutDestination]
+      );
+      partner = inserted.rows[0];
+      const code = await generateAffiliateCodeForUser({ ...req.user, first_name: publicName }, client);
+      await client.query(
+        `INSERT INTO affiliate_codes (partner_id, code, discount_percent, commission_percent, is_active)
+         VALUES ($1, $2, $3, NULL, TRUE)`,
+        [partner.id, code, settings.firstPurchaseDiscountPercent]
+      );
+    } else {
+      const updated = await client.query(
+        `UPDATE affiliate_partners
+            SET public_name = $2,
+                terms_accepted_at = COALESCE(terms_accepted_at, NOW()),
+                updated_at = NOW()
+          WHERE id = $1
+          RETURNING *`,
+        [partner.id, publicName]
+      );
+      partner = updated.rows[0];
+    }
+    await client.query(
+      `INSERT INTO affiliate_events (partner_id, user_id, event_type, metadata)
+       VALUES ($1, $2, 'partner_activated', $3::jsonb)`,
+      [partner.id, req.user.id, safeJson({ payoutMethod })]
+    );
+    await client.query("COMMIT");
+    return res.status(201).json({ ok: true, ...(await getPartnerDashboard(req.user.id)) });
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    console.error("Affiliate activation failed", err);
+    return res.status(500).json({ ok: false, error: "Partner account could not be activated" });
+  } finally {
+    client.release();
+  }
+});
+
+app.post("/api/affiliate/payouts", requireAuth, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const amount = normalizeMoney(req.body?.amount);
+    await client.query("BEGIN");
+    await client.query(
+      `UPDATE affiliate_commissions
+          SET status = 'available', updated_at = NOW()
+        WHERE status = 'pending' AND available_at <= NOW()`
+    );
+    const partnerResult = await client.query(`SELECT * FROM affiliate_partners WHERE user_id = $1 FOR UPDATE`, [req.user.id]);
+    const partner = partnerResult.rows[0];
+    if (!partner || partner.status !== "active") {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ ok: false, error: "Active partner account required" });
+    }
+    if (!partner.payout_method || !partner.payout_destination) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ ok: false, error: "Payout information is incomplete" });
+    }
+    const settings = await getAffiliateSettings(client);
+    if (amount < settings.minimumWithdrawalAmount) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ ok: false, error: `Minimum withdrawal is ${settings.minimumWithdrawalAmount} ${settings.defaultCurrency}` });
+    }
+    const pendingPayout = await client.query(
+      `SELECT 1 FROM affiliate_payouts WHERE partner_id = $1 AND status IN ('requested', 'processing') LIMIT 1`,
+      [partner.id]
+    );
+    if (pendingPayout.rows[0]) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ ok: false, error: "A withdrawal request is already pending" });
+    }
+    const balance = await client.query(
+      `SELECT COALESCE(SUM(commission_amount), 0) AS available
+         FROM affiliate_commissions
+        WHERE partner_id = $1 AND status = 'available' AND payout_id IS NULL`,
+      [partner.id]
+    );
+    if (amount > Number(balance.rows[0]?.available || 0)) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ ok: false, error: "Withdrawal amount exceeds available balance" });
+    }
+    const payout = await client.query(
+      `INSERT INTO affiliate_payouts (partner_id, amount, currency, payout_method, payout_destination, status)
+       VALUES ($1, $2, $3, $4, $5, 'requested')
+       RETURNING *`,
+      [partner.id, amount, settings.defaultCurrency, partner.payout_method, partner.payout_destination]
+    );
+    await client.query(
+      `WITH ordered AS (
+         SELECT id,
+                SUM(commission_amount) OVER (ORDER BY available_at, created_at, id) AS running_total
+           FROM affiliate_commissions
+          WHERE partner_id = $2
+            AND status = 'available'
+            AND payout_id IS NULL
+       )
+       UPDATE affiliate_commissions c
+          SET payout_id = $1, updated_at = NOW()
+         FROM ordered
+        WHERE c.id = ordered.id
+          AND ordered.running_total <= $3`,
+      [payout.rows[0].id, partner.id, amount]
+    );
+    await client.query(
+      `INSERT INTO affiliate_events (partner_id, user_id, event_type, metadata)
+       VALUES ($1, $2, 'payout_requested', $3::jsonb)`,
+      [partner.id, req.user.id, safeJson({ payoutId: payout.rows[0].id, amount })]
+    );
+    await client.query("COMMIT");
+    return res.status(201).json({ ok: true, payout: payout.rows[0] });
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    console.error("Affiliate payout request failed", err);
+    return res.status(500).json({ ok: false, error: "Withdrawal request could not be created" });
+  } finally {
+    client.release();
+  }
+});
+
+app.get("/api/admin/affiliates", requireAdmin, async (_req, res) => {
+  try {
+    await pool.query(
+      `UPDATE affiliate_commissions SET status = 'available', updated_at = NOW()
+        WHERE status = 'pending' AND available_at <= NOW()`
+    );
+    const [settings, overview, partners, payouts, commissions] = await Promise.all([
+      getAffiliateSettings(),
+      pool.query(
+        `SELECT
+          COUNT(DISTINCT ap.id)::int AS total_partners,
+          COUNT(DISTINCT ap.id) FILTER (WHERE ap.status = 'active')::int AS active_partners,
+          COUNT(DISTINCT ar.id)::int AS registrations,
+          COUNT(DISTINCT ar.id) FILTER (WHERE ar.status = 'converted')::int AS paying_referrals,
+          COALESCE(SUM(acm.commission_amount) FILTER (WHERE acm.status = 'pending'), 0) AS pending_commission,
+          COALESCE(SUM(acm.commission_amount) FILTER (WHERE acm.status = 'available' AND acm.payout_id IS NULL), 0) AS available_commission,
+          COALESCE(SUM(acm.commission_amount) FILTER (WHERE acm.status = 'paid'), 0) AS paid_commission
+         FROM affiliate_partners ap
+         LEFT JOIN affiliate_referrals ar ON ar.partner_id = ap.id
+         LEFT JOIN affiliate_commissions acm ON acm.partner_id = ap.id`
+      ),
+      pool.query(
+        `SELECT ap.*, u.email, u.username,
+                COALESCE(json_agg(DISTINCT jsonb_build_object('id', ac.id, 'code', ac.code, 'isActive', ac.is_active, 'discountPercent', ac.discount_percent, 'commissionPercent', ac.commission_percent)) FILTER (WHERE ac.id IS NOT NULL), '[]') AS codes,
+                COUNT(DISTINCT ar.id)::int AS referrals,
+                COUNT(DISTINCT ar.id) FILTER (WHERE ar.status = 'converted')::int AS converted,
+                COALESCE(SUM(cm.commission_amount) FILTER (WHERE cm.status = 'available' AND cm.payout_id IS NULL), 0) AS available
+           FROM affiliate_partners ap
+           JOIN users u ON u.id = ap.user_id
+           LEFT JOIN affiliate_codes ac ON ac.partner_id = ap.id
+           LEFT JOIN affiliate_referrals ar ON ar.partner_id = ap.id
+           LEFT JOIN affiliate_commissions cm ON cm.partner_id = ap.id
+          GROUP BY ap.id, u.email, u.username
+          ORDER BY ap.created_at DESC
+          LIMIT 300`
+      ),
+      pool.query(
+        `SELECT p.*, ap.public_name, u.email
+           FROM affiliate_payouts p
+           JOIN affiliate_partners ap ON ap.id = p.partner_id
+           JOIN users u ON u.id = ap.user_id
+          ORDER BY p.requested_at DESC
+          LIMIT 100`
+      ),
+      pool.query(
+        `SELECT cm.*, ap.public_name, u.email
+           FROM affiliate_commissions cm
+           JOIN affiliate_partners ap ON ap.id = cm.partner_id
+           JOIN users u ON u.id = ap.user_id
+          ORDER BY cm.created_at DESC
+          LIMIT 120`
+      ),
+    ]);
+    const row = overview.rows[0] || {};
+    const registrations = Number(row.registrations || 0);
+    const paying = Number(row.paying_referrals || 0);
+    return res.json({
+      ok: true,
+      settings,
+      overview: {
+        totalPartners: Number(row.total_partners || 0),
+        activePartners: Number(row.active_partners || 0),
+        registrations,
+        payingReferrals: paying,
+        pendingCommission: Number(row.pending_commission || 0),
+        availableCommission: Number(row.available_commission || 0),
+        paidCommission: Number(row.paid_commission || 0),
+        conversionRate: registrations ? Math.round((paying / registrations) * 1000) / 10 : 0,
+      },
+      partners: partners.rows.map((row) => ({
+        ...mapAffiliatePartner(row),
+        email: row.email,
+        username: row.username,
+        codes: row.codes || [],
+        referrals: Number(row.referrals || 0),
+        converted: Number(row.converted || 0),
+        available: Number(row.available || 0),
+      })),
+      payouts: payouts.rows.map((row) => ({
+        id: row.id,
+        partnerId: row.partner_id,
+        publicName: row.public_name,
+        email: row.email,
+        amount: Number(row.amount),
+        currency: row.currency,
+        payoutMethod: row.payout_method,
+        payoutDestination: row.payout_destination,
+        status: row.status,
+        transactionReference: row.transaction_reference,
+        rejectionReason: row.rejection_reason,
+        requestedAt: row.requested_at,
+        processedAt: row.processed_at,
+      })),
+      commissions: commissions.rows.map((row) => ({
+        id: row.id,
+        partnerId: row.partner_id,
+        publicName: row.public_name,
+        email: row.email,
+        paymentId: row.payment_id,
+        baseAmount: Number(row.base_amount),
+        commissionRate: Number(row.commission_rate),
+        commissionAmount: Number(row.commission_amount),
+        currency: row.currency,
+        status: row.status,
+        availableAt: row.available_at,
+        cancellationReason: row.cancellation_reason,
+        payoutId: row.payout_id,
+        createdAt: row.created_at,
+      })),
+    });
+  } catch (err) {
+    console.error("Admin affiliate dashboard failed", err);
+    return res.status(500).json({ ok: false, error: "Affiliate programme could not be loaded" });
+  }
+});
+
+app.patch("/api/admin/affiliates/settings", requireAdmin, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const updated = await pool.query(
+      `UPDATE affiliate_settings
+          SET default_partner_commission_percent = $1,
+              first_purchase_discount_percent = $2,
+              commission_hold_days = $3,
+              minimum_withdrawal_amount = $4,
+              default_currency = $5,
+              attribution_cookie_days = $6,
+              programme_enabled = $7,
+              updated_by = $8,
+              updated_at = NOW()
+        WHERE id = TRUE
+        RETURNING *`,
+      [
+        normalizeMoney(body.defaultCommissionPercent),
+        normalizeMoney(body.firstPurchaseDiscountPercent),
+        Math.max(0, Math.round(Number(body.commissionHoldDays ?? 14))),
+        normalizeMoney(body.minimumWithdrawalAmount),
+        String(body.defaultCurrency || "XAF").trim().toUpperCase().slice(0, 8),
+        Math.max(1, Math.round(Number(body.attributionCookieDays ?? 30))),
+        body.programmeEnabled !== false,
+        req.user.id,
+      ]
+    );
+    await pool.query(
+      `INSERT INTO affiliate_admin_events (admin_id, action, details) VALUES ($1, 'settings_updated', $2::jsonb)`,
+      [req.user.id, safeJson(updated.rows[0])]
+    );
+    return res.json({ ok: true, settings: await getAffiliateSettings() });
+  } catch (err) {
+    console.error("Affiliate settings update failed", err);
+    return res.status(500).json({ ok: false, error: "Settings could not be saved" });
+  }
+});
+
+app.patch("/api/admin/affiliates/partners/:partnerId", requireAdmin, async (req, res) => {
+  try {
+    const status = String(req.body?.status || "").trim();
+    const commissionRate = normalizeMoney(req.body?.commissionRate);
+    if (!["active", "suspended", "pending_review"].includes(status)) {
+      return res.status(400).json({ ok: false, error: "Invalid partner status" });
+    }
+    const updated = await pool.query(
+      `UPDATE affiliate_partners
+          SET status = $2,
+              commission_rate = $3,
+              updated_at = NOW()
+        WHERE id = $1
+        RETURNING *`,
+      [req.params.partnerId, status, commissionRate]
+    );
+    if (!updated.rows[0]) return res.status(404).json({ ok: false, error: "Partner not found" });
+    await pool.query(
+      `INSERT INTO affiliate_admin_events (admin_id, partner_id, action, details)
+       VALUES ($1, $2, 'partner_updated', $3::jsonb)`,
+      [req.user.id, req.params.partnerId, safeJson({ status, commissionRate })]
+    );
+    return res.json({ ok: true, partner: mapAffiliatePartner(updated.rows[0]) });
+  } catch (err) {
+    console.error("Affiliate partner update failed", err);
+    return res.status(500).json({ ok: false, error: "Partner could not be updated" });
+  }
+});
+
+app.post("/api/admin/affiliates/partners/:partnerId/codes", requireAdmin, async (req, res) => {
+  try {
+    const code = normalizeAffiliateCode(req.body?.code);
+    if (!AFFILIATE_CODE_REGEX.test(code)) return res.status(400).json({ ok: false, error: "Invalid code" });
+    const settings = await getAffiliateSettings();
+    const inserted = await pool.query(
+      `INSERT INTO affiliate_codes (partner_id, code, discount_percent, commission_percent, is_active, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [
+        req.params.partnerId,
+        code,
+        normalizeMoney(req.body?.discountPercent ?? settings.firstPurchaseDiscountPercent),
+        req.body?.commissionPercent == null || req.body?.commissionPercent === "" ? null : normalizeMoney(req.body.commissionPercent),
+        req.body?.isActive !== false,
+        req.body?.expiresAt || null,
+      ]
+    );
+    await pool.query(
+      `INSERT INTO affiliate_admin_events (admin_id, partner_id, action, details)
+       VALUES ($1, $2, 'code_created', $3::jsonb)`,
+      [req.user.id, req.params.partnerId, safeJson({ code })]
+    );
+    return res.status(201).json({ ok: true, code: mapAffiliateCode(inserted.rows[0]) });
+  } catch (err) {
+    if (err.code === "23505") return res.status(409).json({ ok: false, error: "This code already exists" });
+    console.error("Affiliate code create failed", err);
+    return res.status(500).json({ ok: false, error: "Code could not be created" });
+  }
+});
+
+app.patch("/api/admin/affiliates/codes/:codeId", requireAdmin, async (req, res) => {
+  try {
+    const updated = await pool.query(
+      `UPDATE affiliate_codes
+          SET is_active = COALESCE($2, is_active),
+              discount_percent = COALESCE($3, discount_percent),
+              commission_percent = $4,
+              updated_at = NOW()
+        WHERE id = $1
+        RETURNING *`,
+      [
+        req.params.codeId,
+        typeof req.body?.isActive === "boolean" ? req.body.isActive : null,
+        req.body?.discountPercent == null ? null : normalizeMoney(req.body.discountPercent),
+        req.body?.commissionPercent == null || req.body?.commissionPercent === "" ? null : normalizeMoney(req.body.commissionPercent),
+      ]
+    );
+    if (!updated.rows[0]) return res.status(404).json({ ok: false, error: "Code not found" });
+    return res.json({ ok: true, code: mapAffiliateCode(updated.rows[0]) });
+  } catch (err) {
+    console.error("Affiliate code update failed", err);
+    return res.status(500).json({ ok: false, error: "Code could not be updated" });
+  }
+});
+
+app.patch("/api/admin/affiliates/commissions/:commissionId/cancel", requireAdmin, async (req, res) => {
+  try {
+    const reason = String(req.body?.reason || "").trim().slice(0, 500);
+    if (!reason) return res.status(400).json({ ok: false, error: "Cancellation reason is required" });
+    const updated = await pool.query(
+      `UPDATE affiliate_commissions
+          SET status = 'cancelled', cancellation_reason = $2, updated_at = NOW()
+        WHERE id = $1
+          AND status IN ('pending', 'available')
+        RETURNING *`,
+      [req.params.commissionId, reason]
+    );
+    if (!updated.rows[0]) return res.status(404).json({ ok: false, error: "Commission not found or already settled" });
+    await pool.query(
+      `INSERT INTO affiliate_admin_events (admin_id, partner_id, action, details)
+       VALUES ($1, $2, 'commission_cancelled', $3::jsonb)`,
+      [req.user.id, updated.rows[0].partner_id, safeJson({ commissionId: req.params.commissionId, reason })]
+    );
+    return res.json({ ok: true, commission: updated.rows[0] });
+  } catch (err) {
+    console.error("Affiliate commission cancel failed", err);
+    return res.status(500).json({ ok: false, error: "Commission could not be cancelled" });
+  }
+});
+
+app.patch("/api/admin/affiliates/payouts/:payoutId", requireAdmin, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const status = String(req.body?.status || "").trim();
+    if (!["processing", "paid", "rejected"].includes(status)) return res.status(400).json({ ok: false, error: "Invalid payout status" });
+    const transactionReference = String(req.body?.transactionReference || "").trim().slice(0, 120);
+    const rejectionReason = String(req.body?.rejectionReason || "").trim().slice(0, 500);
+    if (status === "paid" && !transactionReference) return res.status(400).json({ ok: false, error: "Transaction reference is required" });
+    if (status === "rejected" && !rejectionReason) return res.status(400).json({ ok: false, error: "Rejection reason is required" });
+    await client.query("BEGIN");
+    const payout = await client.query(`SELECT * FROM affiliate_payouts WHERE id = $1 FOR UPDATE`, [req.params.payoutId]);
+    const row = payout.rows[0];
+    if (!row) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ ok: false, error: "Payout not found" });
+    }
+    const updated = await client.query(
+      `UPDATE affiliate_payouts
+          SET status = $2,
+              transaction_reference = CASE WHEN $2 = 'paid' THEN $3 ELSE transaction_reference END,
+              rejection_reason = CASE WHEN $2 = 'rejected' THEN $4 ELSE NULL END,
+              processed_at = CASE WHEN $2 IN ('paid', 'rejected') THEN NOW() ELSE processed_at END,
+              updated_at = NOW()
+        WHERE id = $1
+        RETURNING *`,
+      [req.params.payoutId, status, transactionReference || null, rejectionReason || null]
+    );
+    if (status === "paid") {
+      await client.query(
+        `UPDATE affiliate_commissions
+            SET status = 'paid', updated_at = NOW()
+          WHERE payout_id = $1 AND status = 'available'`,
+        [req.params.payoutId]
+      );
+    }
+    if (status === "rejected") {
+      await client.query(
+        `UPDATE affiliate_commissions
+            SET payout_id = NULL, updated_at = NOW()
+          WHERE payout_id = $1 AND status = 'available'`,
+        [req.params.payoutId]
+      );
+    }
+    await client.query(
+      `INSERT INTO affiliate_admin_events (admin_id, partner_id, action, details)
+       VALUES ($1, $2, 'payout_updated', $3::jsonb)`,
+      [req.user.id, row.partner_id, safeJson({ payoutId: req.params.payoutId, status, transactionReference, rejectionReason })]
+    );
+    await client.query("COMMIT");
+    return res.json({ ok: true, payout: updated.rows[0] });
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    console.error("Affiliate payout update failed", err);
+    return res.status(500).json({ ok: false, error: "Payout could not be updated" });
+  } finally {
+    client.release();
+  }
+});
+
 app.get("/api/subscription-plans", async (req, res) => {
   try {
     const result = await pool.query(
@@ -5943,7 +7100,7 @@ app.post("/api/checkout/quote", requireAuth, async (req, res) => {
     if (offerKey) {
       const { offer, quote } = await getEnterpriseOfferAndQuote({ offerKey, country: req.body?.country });
       if (!offer || !quote) return res.status(404).json({ ok: false, error: "Offre entreprise introuvable." });
-      return res.json({ ok: true, quote });
+      return res.json({ ok: true, quote: await applyAffiliateDiscountForUser(req.user.id, quote) });
     }
     const level = normalizeSubscriptionLevel(req.body?.level);
     const planKey = normalizePlanKey(req.body?.planKey);
@@ -5965,7 +7122,7 @@ app.post("/api/checkout/quote", requireAuth, async (req, res) => {
       country: req.body?.country,
     });
     if (!plan) return res.status(404).json({ ok: false, error: "Plan introuvable." });
-    return res.json({ ok: true, quote });
+    return res.json({ ok: true, quote: await applyAffiliateDiscountForUser(req.user.id, quote) });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ ok: false, error: "La preparation du paiement a echoue." });
@@ -6017,7 +7174,8 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
           country: mobileMoneyValidation.country,
         });
     const plan = offerKey ? enterpriseQuoteResult?.billingPlan : normalQuoteResult?.plan;
-    const quote = offerKey ? enterpriseQuoteResult?.quote : normalQuoteResult?.quote;
+    const baseQuote = offerKey ? enterpriseQuoteResult?.quote : normalQuoteResult?.quote;
+    const quote = await applyAffiliateDiscountForUser(req.user.id, baseQuote);
     const selectedForTransaction = quote?.selectedCertifications || selectedCertifications;
     if (!plan) return res.status(404).json({ ok: false, error: "Pricing plan not found" });
     if (idempotencyKey) {
@@ -6313,6 +7471,7 @@ app.get("/api/checkout/session/:reference/status", optionalPaymentAuth, async (r
               WHERE id = $1`,
             [transaction.id, safeJson({ notchpayStatusCheck: payment, notchpayStatus: providerStatus, notchpayMessage: providerMessage })]
           );
+          await cancelAffiliateCommissionForPaymentReference(String(transaction.id), "Payment failed or reversed");
         } else {
           await pool.query(
             `UPDATE payment_transactions
@@ -6390,6 +7549,7 @@ app.get("/api/payments/notchpay/callback", async (req, res) => {
           WHERE provider = 'notchpay' AND provider_reference = $1`,
         [reference, safeJson({ notchpayCallback: payment, notchpayStatus: status })]
       );
+      await cancelAffiliateCommissionForPaymentReference(reference, "Payment failed, cancelled, expired or refunded");
       return res.redirect(`${redirectBase}?payment=failed`);
     }
     await pool.query(
@@ -6436,6 +7596,7 @@ app.post("/api/payments/notchpay/webhook", async (req, res) => {
           WHERE provider = 'notchpay' AND provider_reference = $1`,
         [reference, safeJson({ notchpayWebhook: event, notchpayStatus: status, eventType })]
       );
+      await cancelAffiliateCommissionForPaymentReference(reference, "Payment failed, cancelled, expired or refunded");
       return res.json({ ok: true, received: true, status: "failed" });
     }
 

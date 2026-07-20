@@ -222,4 +222,9 @@ export const hasPartialSeriesAccess = (series) => {
 export const canOpenSeries = (series) =>
   Boolean(series?.isFree) || hasPaidSeriesAccess(series) || hasPartialSeriesAccess(series);
 
+export const canOpenSeriesModule = (series, moduleId) => {
+  if (String(moduleId) !== "speak") return canOpenSeries(series);
+  return hasPaidSeriesAccess(series) || hasPartialSeriesAccess(series);
+};
+
 export const isVisitorSeriesAttempt = (series) => Boolean(series?.isFree) && !isLoggedIn();

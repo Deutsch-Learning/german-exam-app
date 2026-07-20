@@ -5,6 +5,7 @@ import logo from "../assets/images/logo.png";
 import API from "../services/api";
 import { useLanguage } from "../context/LanguageContext";
 import { storeAuthSession } from "../utils/access";
+import { claimStoredAffiliateAttribution } from "../utils/affiliateAttribution";
 import BackButton from "../components/BackButton";
 import GoogleAuthButton from "../components/GoogleAuthButton";
 
@@ -46,6 +47,7 @@ export default function LoginPage() {
       },
       true
     );
+    claimStoredAffiliateAttribution().catch(() => {});
     navigate(intendedPath || data.redirectTo || (data.user?.role === "admin" ? "/admin/dashboard" : "/dashboard"), { replace: true });
   };
 
@@ -90,6 +92,7 @@ export default function LoginPage() {
           },
           formData.rememberMe
         );
+        claimStoredAffiliateAttribution().catch(() => {});
         navigate(res.data.redirectTo ?? (res.data.user?.role === "admin" ? "/admin/dashboard" : "/dashboard"), { replace: true });
         return;
       }

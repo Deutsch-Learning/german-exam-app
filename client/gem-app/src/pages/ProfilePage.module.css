@@ -438,6 +438,124 @@
   background: #fffbeb;
 }
 
+.partnerCard {
+  grid-column: span 2;
+}
+
+.partnerForm,
+.partnerDashboard {
+  display: grid;
+  gap: 14px;
+}
+
+.partnerCodeBox,
+.partnerLinkBox,
+.partnerPayout {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.partnerCodeBox span,
+.partnerLinkBox span {
+  color: #64748b;
+  font-size: 0.76rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.partnerCodeBox strong {
+  color: #111827;
+  font-size: clamp(1.6rem, 4vw, 2.35rem);
+  letter-spacing: 0.04em;
+  overflow-wrap: anywhere;
+}
+
+.partnerCodeBox button,
+.partnerActions button,
+.partnerActions a {
+  min-height: 38px;
+  border: 1px solid #facc15;
+  border-radius: 10px;
+  background: #fffbeb;
+  color: #92400e;
+  padding: 8px 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font: inherit;
+  font-weight: 900;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.partnerLinkBox code {
+  display: block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: #334155;
+  font-size: 0.86rem;
+}
+
+.partnerActions,
+.partnerPayout div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.partnerPayout p {
+  margin: 0;
+  color: #334155;
+  font-weight: 850;
+  overflow-wrap: anywhere;
+}
+
+.partnerPayout .input {
+  flex: 1 1 180px;
+}
+
+.partnerMetrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.partnerMetrics span,
+.partnerTables p {
+  margin: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 10px;
+  color: #64748b;
+  display: grid;
+  gap: 4px;
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+.partnerMetrics strong,
+.partnerTables strong {
+  color: #111827;
+  font-size: 1rem;
+}
+
+.partnerTables {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.partnerTables h3 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
 .error,
 .success {
   margin: 16px 0 0;
@@ -532,6 +650,15 @@
   }
 
   .badgeGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .partnerCard {
+    grid-column: auto;
+  }
+
+  .partnerMetrics,
+  .partnerTables {
     grid-template-columns: 1fr;
   }
 }

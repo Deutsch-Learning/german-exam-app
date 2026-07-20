@@ -68,8 +68,8 @@ const parseNumber = (value) => {
 const normalizeDetectedProvider = (value) => {
   const normalized = slugify(
     String(value ?? "")
-      .replace(/Ã¶|Ã–|ã¶|ã–/g, "o")
-      .replace(/Ã¶sterreichisch|Ã–sterreichisch|ã¶sterreichisch|ã–sterreichisch/gi, "osterreichisch")
+      .replace(/\u00c3\u00b6|\u00c3\u2013|\u00e3\u00b6|\u00e3\u2013/g, "o")
+      .replace(/\u00c3\u00b6sterreichisch|\u00c3\u2013sterreichisch|\u00e3\u00b6sterreichisch|\u00e3\u2013sterreichisch/gi, "osterreichisch")
   );
   if (normalized.includes("goethe")) return "goethe";
   if (normalized.includes("osd") || normalized.includes("oesd")) return "osd";
@@ -87,7 +87,7 @@ const detectProvider = (text) => {
   const haystack = foldForSearch(text);
   const scores = [
     ["goethe", ["goethe-zertifikat", "goethe", "zertifikat b1"]],
-    ["osd", ["osd", "oesd", "ösd", "österreichisches sprachdiplom", "osterreichisches sprachdiplom", "Ã¶sd"]],
+    ["osd", ["osd", "oesd", "ösd", "österreichisches sprachdiplom", "osterreichisches sprachdiplom", "\u00c3\u00b6sd"]],
     ["telc", ["telc deutsch", "format telc", "telc"]],
     ["ecl", ["ecl"]],
     ["testdaf", ["testdaf"]],
@@ -1738,7 +1738,7 @@ const parseEclVoiceLine = (line) => {
 };
 
 const parseEclCastingRoleLine = (line) => {
-  const match = String(line ?? "").match(/R[ôo]le\s*:\s*([^—-]+)[—-]\s*Genre\s*:\s*([^·\n]+)(?:·\s*[ÂA]ge\s+approximatif\s*:\s*([^·\n]+))?(?:·\s*Caract[èe]re\s+vocal\s*:\s*([^·\n]+))?(?:·\s*d[ée]bit\s*([^\n]+))?/i);
+  const match = String(line ?? "").match(/R[ôo]le\s*:\s*([^—-]+)[—-]\s*Genre\s*:\s*([^·\n]+)(?:·\s*[\u00c2A]ge\s+approximatif\s*:\s*([^·\n]+))?(?:·\s*Caract[èe]re\s+vocal\s*:\s*([^·\n]+))?(?:·\s*d[ée]bit\s*([^\n]+))?/i);
   if (!match) return null;
   const style = compactText([match[4], match[5] ? `débit ${match[5]}` : ""].filter(Boolean).join(", "));
   return {
@@ -1759,7 +1759,7 @@ const extractEclAudioMetadata = ({ partText, transcript, header }) => {
   ]);
   if (!fiche) {
     fiche = getBetweenMarkers(partText, /FICHE\s+DE\s+CASTING/i, [
-      /(?:^|\n)SUJET\s+N[°Â°Âº]?\s*0?\d{1,2}\s*[-\u2010-\u2015â€“â€”]\s*TEIL\s+[12]\s*:/i,
+      /(?:^|\n)SUJET\s+N[°\u00c2°\u00c2º]?\s*0?\d{1,2}\s*[-\u2010-\u2015\u00e2\u20ac\u201c\u00e2\u20ac\u201d]\s*TEIL\s+[12]\s*:/i,
     ]);
   }
   const lines = fiche.split("\n").map((line) => line.trim()).filter(Boolean);
@@ -1834,7 +1834,7 @@ const extractEclAudioMetadata = ({ partText, transcript, header }) => {
 const parseEclListeningSeries = (text, metadata) => {
   const clean = stripPdfPageMarkers(text)
     .replace(/ECL\s+B1\s+Hörverstehen\s+[-–—]\s+20\s+Sujets[^\n]*Page\s+\d+/gi, "\n")
-    .replace(/ECL\s+B1\s+HÃ¶rverstehen\s+[-â€“â€”]\s+20\s+Sujets[^\n]*Page\s+\d+/gi, "\n");
+    .replace(/ECL\s+B1\s+H\u00c3\u00b6rverstehen\s+[-\u00e2\u20ac\u201c\u00e2\u20ac\u201d]\s+20\s+Sujets[^\n]*Page\s+\d+/gi, "\n");
   let correctionStart = findEclListeningCorrectionStart(clean);
   if (correctionStart < 0) {
     correctionStart = clean.search(/(?:^|\n)\s*n?\s*CORRECTIONS\s+[-\u2010-\u2015]\s+(?:ALLE|TOUS\s+LES)\s+20\s+SUJETS/i);
@@ -2159,7 +2159,36 @@ const parseSolutionAnswerMap = (solutionText) => {
   return answers;
 };
 
+const parseOsdMatchingOptions = (value) => {
+  const source = String(value || "");
+  const definitionArea = source.split(/ADMIN_ONLY_TRANSCRIPT|AUDIO SCRIPT|STUDENT_VISIBLE_QUESTIONS/i)[0] || source;
+  const options = [];
+  const addOption = (letter, label) => {
+    const value = String(letter || "").trim().toUpperCase();
+    const cleanedLabel = compactText(label);
+    if (!/^[A-Z]$/.test(value) || !cleanedLabel || options.some((option) => option.value === value)) return;
+    options.push({ value, label: `${value} - ${cleanedLabel}` });
+  };
+
+  [...definitionArea.matchAll(/^\s*(?:[^A-Za-z0-9\s]\s*)?([A-Z])\s*=\s*([^\n]+?)\s*$/gm)]
+    .forEach((match) => addOption(match[1], match[2]));
+  if (options.length >= 2) return options;
+
+  const inlineText = compactText(definitionArea);
+  [...inlineText.matchAll(/\b([A-Z])\s*=\s*([^,.;\n]+)/g)]
+    .forEach((match) => addOption(match[1], match[2]));
+  return options;
+};
+
+const cleanOsdMatchingPrompt = (value) =>
+  compactText(String(value || "")
+    .replace(/\bn\s+[A-Z]\b/gi, "")
+    .replace(/[^\S\r\n]*(?:\u00e2\u2013\u00a0|\u00e2\u2013\u00a1)\s*[A-Z]\b/gi, "")
+    .replace(/\bSprecher\s*\([^)]*\)/gi, "")
+    .replace(/^\s*(?:[^A-Za-z0-9\s]\s*)?[A-Z]\s*=\s*[^\n]+$/gm, ""));
+
 const parseOsdListeningQuestions = ({ body, answers, transcript, audio, seriesNumber, partNumber }) => {
+  const matchingOptions = parseOsdMatchingOptions(body);
   const questionBlocks = splitByMatches(body, /(?:^|\n)\s*Aufgabe\s+(\d{1,2})(?:\s*\(([^)]+)\))?\s*:\s*/gi);
   if (!questionBlocks.length) {
     return compactText(body)
@@ -2169,9 +2198,11 @@ const parseOsdListeningQuestions = ({ body, answers, transcript, audio, seriesNu
         if (!match) return null;
         const sourceNumber = Number(match[1]);
         const choices = [...line.matchAll(/\bn\s+([A-Z])\b/g)].map((choice) => choice[1]);
-        const options = choices.map((value) => ({ value, label: value }));
+        const options = matchingOptions.length >= 2
+          ? matchingOptions
+          : choices.map((value) => ({ value, label: value }));
         return buildMatchingListeningQuestion({
-          prompt: compactText(match[2]),
+          prompt: cleanOsdMatchingPrompt(match[2]),
           options,
           answer: answers.get(sourceNumber) || "",
           position: sourceNumber,
@@ -2208,14 +2239,11 @@ const parseOsdListeningQuestions = ({ body, answers, transcript, audio, seriesNu
       });
     }
     if (/zuordnen|aussagen/i.test(kind) || /\bn\s+M\s+n\s+A\s+n\s+K/i.test(questionText)) {
-      const options = [
-        { value: "M", label: "Moderator/in" },
-        { value: "A", label: "Andreas / Person A" },
-        { value: "K", label: "Katrin / Person K" },
-        { value: "E", label: "Experte / Person E" },
-        { value: "B", label: "Beide" },
-      ];
-      const prompt = compactText(questionText.replace(/\bn\s+[MAKEB]\b/gi, ""));
+      const choices = [...questionText.matchAll(/\bn\s+([A-Z])\b/g)].map((choice) => choice[1].toUpperCase());
+      const options = matchingOptions.length >= 2
+        ? matchingOptions
+        : choices.map((value) => ({ value, label: value }));
+      const prompt = cleanOsdMatchingPrompt(questionText);
       return buildMatchingListeningQuestion({
         prompt,
         options,
@@ -2241,7 +2269,7 @@ const parseOsdListeningQuestions = ({ body, answers, transcript, audio, seriesNu
 
 const parseOsdListeningSeries = (text, metadata) => {
   const clean = stripPdfPageMarkers(text);
-  const blocks = splitByMatches(clean, /(?:^|\n)(?:ÖSD|OeSD|Ã–SD)\s+Zertifikat\s+B1\s*[–-]\s*Hören\s+Prüfung\s+0?(\d{1,2})\s+Thema:\s*([^\n]+)/gi);
+  const blocks = splitByMatches(clean, /(?:^|\n)(?:ÖSD|OeSD|\u00c3\u2013SD)\s+Zertifikat\s+B1\s*[–-]\s*Hören\s+Prüfung\s+0?(\d{1,2})\s+Thema:\s*([^\n]+)/gi);
   return blocks.map((block) => {
     const seriesNumber = Number(block.match[1]);
     const title = compactText(block.match[2]);
@@ -3491,7 +3519,7 @@ const extractB2ListeningTranscript = (body) => {
     /(?:^|\n)\s*Transcription\s+du\s+document\s+sonore[^\n]*/i,
   ];
   const endMarkers = [
-    /(?:^|\n)\s*(?:QUESTIONS\s*\/\s*T(?:A|Â)CHES|QUESTIONS|AUFGABEN|Aufgaben)\b/i,
+    /(?:^|\n)\s*(?:QUESTIONS\s*\/\s*T(?:A|\u00c2)CHES|QUESTIONS|AUFGABEN|Aufgaben)\b/i,
     /(?:^|\n)\s*Aufgabe\s+\d{1,2}\s*:/i,
     /(?:^|\n)\s*(?:PLAN\s+DE\s+PRODUCTION|FICHE\s+DE\s+PRODUCTION|Corrig|L(?:o|\u00f6|oe)sungen|L(?:o|\u00f6|oe)sungsschl(?:u|\u00fc|ue)ssel)\b/i,
   ];

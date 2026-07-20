@@ -8,10 +8,17 @@ import CountryPhoneField from "../components/CountryPhoneField";
 import BackButton from "../components/BackButton";
 import GoogleAuthButton from "../components/GoogleAuthButton";
 import { storeAuthSession } from "../utils/access";
+import {
+  claimStoredAffiliateAttribution,
+  getStoredAffiliateAttribution,
+  normalizeAffiliateCode,
+  storeAffiliateAttribution,
+} from "../utils/affiliateAttribution";
 
 export default function RegisterPage() {
   const { t } = useLanguage();
   const navigate = useNavigate();
+  const storedAffiliateCode = getStoredAffiliateAttribution()?.code || "";
   const [formData, setFormData] = useState({
     username: "",
     firstName: "",
@@ -21,6 +28,7 @@ export default function RegisterPage() {
     phone: "",
     password: "",
     confirmPassword: "",
+    affiliateCode: storedAffiliateCode,
     marketingEmailsEnabled: false,
     acceptTerms: false,
   });
@@ -52,6 +60,7 @@ export default function RegisterPage() {
       },
       true
     );
+    claimStoredAffiliateAttribution().catch(() => {});
     navigate(data.redirectTo || (data.user?.role === "admin" ? "/admin/dashboard" : "/dashboard"), { replace: true });
   };
 
@@ -100,6 +109,8 @@ export default function RegisterPage() {
     if (!validateForm()) return;
     setIsLoading(true);
     try {
+      const affiliateCode = normalizeAffiliateCode(formData.affiliateCode);
+      if (affiliateCode) storeAffiliateAttribution(affiliateCode);
       const res = await API.post("/api/auth/register", {
         email: formData.email,
         password: formData.password,
@@ -108,6 +119,7 @@ export default function RegisterPage() {
         lastName: formData.lastName,
         country: formData.countryCode,
         phone: formData.phone.trim(),
+        affiliateCode,
         marketingEmailsEnabled: formData.marketingEmailsEnabled,
       });
       if (res.data?.ok) {
@@ -116,6 +128,7 @@ export default function RegisterPage() {
             email: formData.email,
             message: res.data.message,
             devVerificationUrl: res.data.devVerificationUrl,
+            affiliateCode,
           },
         });
         return;
@@ -247,6 +260,26 @@ export default function RegisterPage() {
                 setErrors((previous) => ({ ...previous, country: "", phone: "" }));
               }}
             />
+
+            <div className="form-group">
+              <label htmlFor="affiliateCode">{t.auth.affiliateCodeLabel}</label>
+              <input
+                id="affiliateCode"
+                name="affiliateCode"
+                type="text"
+                value={formData.affiliateCode}
+                onChange={(event) => {
+                  const value = normalizeAffiliateCode(event.target.value);
+                  setFormData((prev) => ({ ...prev, affiliateCode: value }));
+                  if (errors.affiliateCode) setErrors((prev) => ({ ...prev, affiliateCode: "" }));
+                }}
+                placeholder={t.auth.affiliateCodePlaceholder}
+                autoComplete="off"
+                className={errors.affiliateCode ? "input-error" : ""}
+              />
+              <small className="field-helper">{t.auth.affiliateCodeHelper}</small>
+              {errors.affiliateCode && <span className="error-text">{errors.affiliateCode}</span>}
+            </div>
 
             <div className="form-group">
               <label htmlFor="reg-password">{t.auth.password}</label>
