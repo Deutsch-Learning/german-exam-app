@@ -3574,29 +3574,59 @@ const buildWritingTask = (question, index) => {
   const metadata = asJsonObject(question.source_metadata);
   const scoring = asJsonObject(question.scoring);
   const correct = asJsonObject(question.correct_answer);
-  const wordTarget = Number(metadata.wordTarget) || (question.part_number === 3 ? 40 : 80);
-  const minWords = 80;
+  const goetheB2Teil2 = asJsonObject(metadata.goetheB2SchreibenTeil2);
+  const isGoetheB2Teil2 = Boolean(goetheB2Teil2.taskNumber);
+  const wordTarget = Number(metadata.wordTarget) || Number(goetheB2Teil2.targetWordCount) || (question.part_number === 3 ? 40 : 80);
+  const minWords = Number(metadata.minWordsGuidance) || (isGoetheB2Teil2 ? 60 : 80);
   const targetWords = Math.max(wordTarget, minWords);
   const points = Number(scoring.points) || Number(question.section_points) || 0;
   const durationMinutes = Number(scoring.durationMinutes) || Number(question.section_duration_minutes) || null;
+  const leitpunkte = Array.isArray(goetheB2Teil2.leitpunkte)
+    ? goetheB2Teil2.leitpunkte.map((item) => cleanPlainText(item)).filter(Boolean)
+    : [];
+  const visibleInstruction = cleanPlainText(goetheB2Teil2.instruction || "");
+  const visibleSituation = cleanPlainText(goetheB2Teil2.situation || "");
+  const visibleReminder = cleanPlainText(goetheB2Teil2.reminder || "");
+  const prompt = isGoetheB2Teil2
+    ? [
+        `Aufgabe ${String(goetheB2Teil2.taskNumber).padStart(2, "0")}: ${goetheB2Teil2.title || question.section_title || `Aufgabe ${index + 1}`}`,
+        "Situation",
+        visibleSituation,
+        "Aufgabe",
+        visibleInstruction,
+        ...leitpunkte.map((point) => `- ${point}`),
+        visibleReminder,
+      ].filter(Boolean).join("\n")
+    : clipText(question.prompt || question.section_instructions, 2200);
 
   return {
     id: `db-question-${question.id}`,
     level: question.level || "B1",
     typeLabel: question.section_title || `Schreiben Teil ${question.part_number || index + 1}`,
-    title: question.section_title || `Aufgabe ${index + 1}`,
-    register: question.part_number === 1 ? "informell" : question.part_number === 3 ? "halbformell" : "neutral",
+    title: isGoetheB2Teil2
+      ? `Aufgabe ${String(goetheB2Teil2.taskNumber).padStart(2, "0")}: ${goetheB2Teil2.title || question.section_title}`
+      : question.section_title || `Aufgabe ${index + 1}`,
+    register: isGoetheB2Teil2 ? "formell" : question.part_number === 1 ? "informell" : question.part_number === 3 ? "halbformell" : "neutral",
     minWords,
     targetWords,
+    wordCountStrict: isGoetheB2Teil2 ? false : undefined,
     maxWords: null,
     maxScore: points || null,
     taskWeight: points || null,
     durationMinutes,
-    prompt: clipText(question.prompt || question.section_instructions, 2200),
+    prompt: clipText(prompt, isGoetheB2Teil2 ? 5200 : 2200),
+    situation: visibleSituation || undefined,
+    writingInstruction: visibleInstruction || undefined,
+    leitpunkte,
+    reminder: visibleReminder || undefined,
+    targetWordLabel: isGoetheB2Teil2 ? `ca. ${targetWords} Wörter` : undefined,
+    recommendedTimeMinutes: isGoetheB2Teil2 ? durationMinutes : undefined,
     criteria: [
-      "Alle Inhaltspunkte behandeln",
+      isGoetheB2Teil2 ? "Alle vier Leitpunkte bearbeiten" : "Alle Inhaltspunkte behandeln",
+      isGoetheB2Teil2 ? "Formelle Anrede und passender Gruß" : null,
+      isGoetheB2Teil2 ? "Geeignetes formelles Register" : null,
       "Klare Struktur",
-      "Passender B1-Wortschatz",
+      isGoetheB2Teil2 ? "Passender B2-Wortschatz" : "Passender B1-Wortschatz",
       points ? `${points} Punkte` : null,
     ].filter(Boolean),
     scoring: {
