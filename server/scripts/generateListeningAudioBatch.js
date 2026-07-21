@@ -53,6 +53,26 @@ const isTemplateTranscript = (transcript) =>
   /\(not found in source|manual review required\)/i.test(transcript) ||
   /_{3,}/.test(transcript);
 
+const stripExerciseTail = (transcript) =>
+  String(transcript || "")
+    .replace(/\s+(?:Sprecher\s*:\s*)?A\s*=\s*[^]*$/i, " ")
+    .replace(/\s+\d+\.\s+Diese Person\b[^]*$/i, " ")
+    .replace(/\s+(?:Aufgabe|Frage)\s+\d+[^]*$/i, " ")
+    .replace(/\s+(?:Lösung|Loesung|Antwort(?:en)?)\s*:?\s*[^]*$/i, " ")
+    .trim();
+
+const hasUsableSpeechText = (transcript) =>
+  /:\s*(?!_+\b).{30,}/s.test(stripExerciseTail(transcript));
+
+const isOnlyTemplateTranscript = (transcript) => {
+  const cleaned = stripExerciseTail(transcript);
+  if (/\(not found in source|manual review required\)/i.test(cleaned)) return true;
+  if (/\bsprecher(?:in)?\s*:\s*_+/i.test(cleaned) || /_{3,}/.test(cleaned)) {
+    return !hasUsableSpeechText(cleaned);
+  }
+  return !cleaned;
+};
+
 const isProductionLine = (line) =>
   /^(?:(?:der|die|das)\s+[^:]+|sie|thema|das thema|aufgabe|aufgaben|frage|fragen|multiple-choice|richtig\/falsch|richtig falsch|loesung|lösung|antwort|skript|format|transkription|transcription|type de t[aâ]che|heute|und|dann|erstens|zweitens|drittens|au[ßs]erdem|überraschungen|ueberraschungen|kluft|weltbild|sprache|achtsamkeit|pakete|qualit[aä]tsfinanzierung|qualitaetsfinanzierung|vorteile|nachteile|optionen|zum abschluss)\s*:/i.test(line) ||
   /^\s*(?:n|■|-)?\s*\[?(?:anfang|ende|pause|sfx|audio script|zweite wiedergabe|wiederholung)\]?/i.test(line);
@@ -95,9 +115,9 @@ const findKnownSpeakerLabel = (label, speakerLabels) => {
 
 const prepareTranscriptForTts = (item) => {
   const rawTranscript = item.admin_transcript || "";
-  if (isTemplateTranscript(rawTranscript)) return "";
-  const transcript = stripProductionMarkers(rawTranscript);
-  if (!transcript || isTemplateTranscript(transcript)) return "";
+  if (isOnlyTemplateTranscript(rawTranscript)) return "";
+  const transcript = stripExerciseTail(stripProductionMarkers(rawTranscript));
+  if (!transcript || isOnlyTemplateTranscript(transcript)) return "";
   if (!/\b(?:radiointerview|radiogespr[aä]ch|radiogespraech|dialog|dialogue|interview|diskussion|discussion)\b/i.test(`${item.title || ""} ${JSON.stringify(item.audio_engine_settings || {})}`)) {
     return transcript;
   }
@@ -109,9 +129,6 @@ const prepareTranscriptForTts = (item) => {
   lines.forEach((rawLine) => {
     const line = rawLine.replace(/^\s*(?:format|transkription|transcription)\s*:\s*/i, "").trim();
     if (isProductionLine(line)) return;
-    if (/^\s*(?:n|■|-)?\s*(?:Moderator|Moderatorin|Gast|Reporter|Reporterin|Sprecher|Sprecherin)\b[^:\n]*:/i.test(line)) {
-      return;
-    }
     const labelMatch = line.match(/^\s*(?:n|■|-)?\s*([A-ZÄÖÜ][^:\n]{1,48})\s*:\s*(.*)$/u);
     if (labelMatch) {
       const knownLabel = findKnownSpeakerLabel(labelMatch[1], speakerLabels);

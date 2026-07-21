@@ -3668,8 +3668,8 @@ h4 {
   z-index: 0;
   background-repeat: no-repeat;
   background-color: #031329;
-  background-size: 100% 100%, 100% 100%, auto clamp(560px, 64vh, 650px);
-  background-position: center, center, right -48px top 0;
+  background-size: 100% 100%, 100% 100%, auto clamp(530px, 60vh, 610px);
+  background-position: center, center, right -20px top 0;
   filter: saturate(1.12) contrast(1.06) brightness(1.02);
 }
 
@@ -3855,8 +3855,8 @@ h4 {
 
 @media (min-width: 1501px) {
   .hero-redesign-bg::before {
-    background-size: 100% 100%, 100% 100%, auto clamp(585px, 66vh, 680px);
-    background-position: center, center, right -28px top 0;
+    background-size: 100% 100%, 100% 100%, auto clamp(545px, 60vh, 625px);
+    background-position: center, center, right 0 top 0;
   }
 
   .hero-foreground-people {
@@ -3898,8 +3898,8 @@ h4 {
       linear-gradient(90deg, rgba(3, 16, 34, 0.82) 0%, rgba(3, 16, 34, 0.56) 48%, rgba(3, 16, 34, 0.1) 100%),
       linear-gradient(180deg, rgba(3, 16, 34, 0) 0%, rgba(3, 16, 34, 0.08) 58%, #031329 100%),
       var(--hero-people-image);
-    background-size: 100% 100%, 100% 100%, auto clamp(470px, 55vw, 560px);
-    background-position: center, center, right -118px top 0;
+    background-size: 100% 100%, 100% 100%, auto clamp(430px, 50vw, 520px);
+    background-position: center, center, right -70px top 0;
   }
 
   .hero-foreground-people {
@@ -3935,8 +3935,8 @@ h4 {
       linear-gradient(90deg, rgba(3, 16, 34, 0.82) 0%, rgba(3, 16, 34, 0.5) 54%, rgba(3, 16, 34, 0.12) 100%),
       linear-gradient(180deg, rgba(3, 16, 34, 0.02) 0%, rgba(3, 16, 34, 0.12) 52%, #031329 100%),
       var(--hero-people-image);
-    background-size: 100% 100%, 100% 100%, auto clamp(345px, 96vw, 405px);
-    background-position: center, center, right -176px top 0;
+    background-size: 100% 100%, 100% 100%, auto clamp(318px, 88vw, 370px);
+    background-position: center, center, right -118px top 0;
   }
 
   .hero-foreground-people {
@@ -4018,5 +4018,186 @@ h4 {
 
   .exam-card-copy small {
     font-size: 0.6rem;
+  }
+}
+
+/* Reference crop pass: keep the supplied hero composition visible on desktop and mobile. */
+.hero-redesign {
+  min-height: calc(100vh - 88px);
+  padding-bottom: clamp(20px, 2vw, 28px);
+}
+
+.hero-redesign-bg::before {
+  background-image:
+    linear-gradient(90deg, rgba(3, 16, 34, 0.9) 0%, rgba(3, 16, 34, 0.58) 29%, rgba(3, 16, 34, 0.17) 58%, rgba(3, 16, 34, 0.02) 100%),
+    linear-gradient(180deg, rgba(3, 16, 34, 0) 0%, rgba(3, 16, 34, 0.04) 59%, #031329 100%),
+    var(--hero-people-image);
+  background-size: 100% 100%, 100% 100%, min(100vw, 1792px) auto;
+  background-position: center, center, right top;
+  filter: saturate(1.16) contrast(1.07) brightness(1.03);
+}
+
+.hero-redesign-container {
+  max-width: 1640px;
+  min-height: calc(100vh - 110px);
+  grid-template-columns: minmax(0, 760px) minmax(430px, 1fr);
+  grid-template-rows: minmax(420px, auto) auto auto;
+  align-content: start;
+  padding-top: clamp(94px, 9.8vh, 112px);
+}
+
+.hero-copy-panel {
+  align-self: start;
+  max-width: 690px;
+  width: 100%;
+}
+
+.hero-redesign .hero-title {
+  max-width: 700px;
+  min-height: 2.05em;
+  margin: 24px 0 16px;
+  font-size: clamp(3.2rem, 4.1vw, 4.35rem);
+  line-height: 1.02;
+}
+
+.hero-redesign .hero-subtitle {
+  max-width: 660px;
+  margin-bottom: 24px;
+  font-size: clamp(1.22rem, 1.55vw, 1.55rem);
+  line-height: 1.35;
+}
+
+.hero-benefits {
+  max-width: 690px;
+}
+
+.hero-benefits span {
+  font-size: clamp(1rem, 1.25vw, 1.22rem);
+  line-height: 1.14;
+}
+
+.exam-card-grid {
+  margin-top: 0;
+  gap: 12px;
+}
+
+.hero-success-strip {
+  margin-top: 26px;
+}
+
+@media (min-width: 1501px) {
+  .hero-redesign-bg::before {
+    background-size: 100% 100%, 100% 100%, min(100vw, 1792px) auto;
+    background-position: center, center, right top;
+  }
+
+  .exam-card-grid {
+    gap: 12px;
+  }
+}
+
+@media (max-width: 1360px) {
+  .hero-redesign-container {
+    grid-template-rows: minmax(390px, auto) auto auto;
+    grid-template-columns: minmax(0, 680px) minmax(340px, 1fr);
+  }
+
+  .hero-redesign .hero-title {
+    font-size: clamp(2.85rem, 4vw, 3.8rem);
+  }
+
+  .hero-redesign .hero-subtitle {
+    font-size: 1.15rem;
+  }
+}
+
+@media (max-width: 1120px) {
+  .hero-redesign-bg::before {
+    background-image:
+      linear-gradient(90deg, rgba(3, 16, 34, 0.84) 0%, rgba(3, 16, 34, 0.56) 46%, rgba(3, 16, 34, 0.1) 100%),
+      linear-gradient(180deg, rgba(3, 16, 34, 0) 0%, rgba(3, 16, 34, 0.08) 56%, #031329 100%),
+      var(--hero-people-image);
+    background-size: 100% 100%, 100% 100%, auto clamp(440px, 54vw, 560px);
+    background-position: center, center, right -76px top 0;
+  }
+
+  .hero-redesign-container {
+    grid-template-rows: auto auto auto;
+    padding-top: 62px;
+  }
+
+  .hero-redesign .hero-title {
+    max-width: 680px;
+  }
+}
+
+@media (max-width: 720px) {
+  .hero-redesign {
+    padding-bottom: 28px;
+  }
+
+  .hero-redesign-bg {
+    inset: 0;
+  }
+
+  .hero-redesign-bg::before {
+    background-image:
+      linear-gradient(90deg, rgba(3, 16, 34, 0.72) 0%, rgba(3, 16, 34, 0.38) 48%, rgba(3, 16, 34, 0.05) 100%),
+      linear-gradient(180deg, rgba(3, 16, 34, 0) 0%, rgba(3, 16, 34, 0.08) 34%, #031329 62%, #031329 100%),
+      var(--hero-people-image);
+    background-size: 100% 100%, 100% 100%, auto clamp(300px, 96vw, 390px);
+    background-position: center, center, right -104px top 0;
+  }
+
+  .hero-redesign-container {
+    padding-top: 28px;
+  }
+
+  .hero-copy-panel {
+    padding-top: 0;
+    max-width: 100%;
+  }
+
+  .hero-indicators {
+    max-width: 310px;
+  }
+
+  .hero-redesign .hero-title {
+    width: min(100%, 361px);
+    max-width: 361px;
+    min-height: 2.12em;
+    margin-top: clamp(190px, 54vw, 232px);
+    font-size: clamp(2.05rem, 8.7vw, 2.45rem);
+    text-wrap: normal;
+  }
+
+  .hero-redesign .hero-subtitle {
+    width: min(100%, 354px);
+    max-width: 354px;
+    font-size: 1.02rem;
+  }
+
+  .hero-benefits {
+    margin-top: 8px;
+  }
+
+  .exam-card-grid {
+    margin-top: 24px;
+    gap: 10px;
+  }
+
+  .hero-success-strip {
+    margin-top: 18px;
+  }
+}
+
+@media (max-width: 420px) {
+  .hero-redesign-bg::before {
+    background-size: 100% 100%, 100% 100%, auto clamp(292px, 99vw, 365px);
+    background-position: center, center, right -116px top 0;
+  }
+
+  .hero-redesign .hero-title {
+    margin-top: clamp(186px, 53vw, 218px);
   }
 }
