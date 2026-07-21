@@ -453,6 +453,46 @@ const buildTaskContexts = (simulation) => {
   });
 };
 
+const enrichTaskContextsWithPrivateCriteria = async (pool, tasks = []) => {
+  const questionIds = tasks
+    .map((task) => Number(task.taskId))
+    .filter((id) => Number.isInteger(id) && id > 0);
+  if (!questionIds.length) return tasks;
+
+  const result = await pool.query(
+    `SELECT id, correct_answer, source_metadata
+       FROM exam_questions
+      WHERE id = ANY($1::int[])`,
+    [questionIds]
+  );
+  const privateCriteriaById = new Map();
+  result.rows.forEach((row) => {
+    const correct = asObject(row.correct_answer);
+    const metadata = asObject(row.source_metadata);
+    const guidance = [
+      correct.expectedPerformance,
+      correct.evaluationGuidance,
+      correct.privateCorrectionText,
+      asObject(metadata.privateCorrection).evaluationGuidance,
+    ].filter(Boolean).join("\n\n");
+    if (guidance.trim()) privateCriteriaById.set(Number(row.id), guidance.trim());
+  });
+
+  if (!privateCriteriaById.size) return tasks;
+  return tasks.map((task) => {
+    const privateCriteria = privateCriteriaById.get(Number(task.taskId));
+    if (!privateCriteria) return task;
+    return {
+      ...task,
+      criteria: uniqueStrings([
+        ...normalizeArray(task.criteria, 20),
+        "Bewertungshinweise aus dem Lösungsschlüssel:",
+        privateCriteria,
+      ], 24),
+    };
+  });
+};
+
 const buildPrompt = (task) => {
   const context = {
     examType: task.examType,
@@ -1243,7 +1283,7 @@ const prepareCorrectionRow = async (pool, simulation, requestHash, taskCount, ma
 };
 
 const correctWritingSimulation = async (pool, simulation, options = {}) => {
-  const tasks = buildTaskContexts(simulation);
+  const tasks = await enrichTaskContextsWithPrivateCriteria(pool, buildTaskContexts(simulation));
   if (!tasks.length) return null;
 
   const model = cleanText(options.model || DEFAULT_MODEL, 120);

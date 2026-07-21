@@ -636,7 +636,9 @@ const writingTasks = [
 const WRITING_MIN_WORDS = 80;
 
 const getWritingMinimumWords = (task) =>
-  Math.max(WRITING_MIN_WORDS, Number(task?.minWords) || WRITING_MIN_WORDS);
+  task?.wordCountStrict === false || task?.targetWordLabel
+    ? Math.max(1, Number(task?.minWords) || Math.round((Number(task?.targetWords) || WRITING_MIN_WORDS) * 0.6))
+    : Math.max(WRITING_MIN_WORDS, Number(task?.minWords) || WRITING_MIN_WORDS);
 
 const withMinimumWritingWords = (tasks) =>
   tasks.map((task) => ({
@@ -1420,10 +1422,14 @@ const countWords = (text) => {
 };
 
 const formatWritingRequirementGerman = (task) =>
-  `Mindestens ${getWritingMinimumWords(task)} Wörter, keine Obergrenze`;
+  task?.targetWordLabel
+    ? `${task.targetWordLabel}, keine strenge Wortgrenze`
+    : `Mindestens ${getWritingMinimumWords(task)} Wörter, keine Obergrenze`;
 
 const formatWritingRequirementFrench = (task) =>
-  `Minimum ${getWritingMinimumWords(task)} mots, sans limite maximale`;
+  task?.targetWordLabel
+    ? `${task.targetWordLabel}, limite indicative`
+    : `Minimum ${getWritingMinimumWords(task)} mots, sans limite maximale`;
 
 const getEstimatedAudioDuration = (audio) => {
   const wordCount = countWords(audio?.transcript);
@@ -3410,6 +3416,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     if (audioPlaying) {
       pauseListeningAudio();
     }
+
     if (module.id === "write") {
       setResultStatus("Zeit abgelaufen. Ihre Schreiben-Pruefung wird automatisch abgegeben.");
       persistProgress(`Schreiben automatisch abgegeben um ${formatClock()}`);
@@ -4906,6 +4913,37 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     const text = String(currentAnswer ?? "");
     const words = countWords(text);
     const suggestions = getWritingSuggestions(currentTask, text);
+    const leitpunkte = Array.isArray(currentTask.leitpunkte) ? currentTask.leitpunkte.filter(Boolean) : [];
+    const hasStructuredWritingPrompt = Boolean(currentTask.situation || currentTask.writingInstruction || leitpunkte.length);
+    const renderWritingPrompt = () => hasStructuredWritingPrompt ? (
+      <div className={styles.structuredWritingPrompt} translate="no">
+        {currentTask.situation ? (
+          <section>
+            <h4>Situation</h4>
+            <p>{currentTask.situation}</p>
+          </section>
+        ) : null}
+        {currentTask.writingInstruction ? (
+          <section>
+            <h4>Aufgabe</h4>
+            <p>{currentTask.writingInstruction}</p>
+          </section>
+        ) : null}
+        {leitpunkte.length ? (
+          <section>
+            <h4>Leitpunkte</h4>
+            <ul>
+              {leitpunkte.map((point, pointIndex) => (
+                <li key={`${currentTask.id}-leitpunkt-${pointIndex}`}>{point}</li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+        {currentTask.reminder ? <p className={styles.writingReminder}>{currentTask.reminder}</p> : null}
+      </div>
+    ) : (
+      renderStructuredExamText(currentTask.prompt, `write-prompt-${currentTask.id}`)
+    );
     const insertGermanCharacter = (character) => {
       const textarea = writingTextareaRef.current;
       const start = textarea?.selectionStart ?? text.length;
@@ -4938,7 +4976,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
             {renderContentTitle(currentTask.title, `write-title-${currentTask.id}`)}
             <div className={`${styles.instructionText} ${styles.readableScrollArea}`} onWheel={handleReadableWheel}>
-              {renderStructuredExamText(currentTask.prompt, `write-prompt-${currentTask.id}`)}
+              {renderWritingPrompt()}
             </div>
             <div className={styles.promptMeta}>
               <span><FileText size={16} /> {formatWritingRequirementGerman(currentTask)}</span>
@@ -5020,7 +5058,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
           {renderContentTitle(currentTask.title, `write-title-${currentTask.id}`)}
           <div className={`${styles.instructionText} ${styles.readableScrollArea}`} onWheel={handleReadableWheel}>
-            {renderStructuredExamText(currentTask.prompt, `write-prompt-${currentTask.id}`)}
+            {renderWritingPrompt()}
           </div>
           <div className={styles.promptMeta}>
             <span><FileText size={16} /> {formatWritingRequirementFrench(currentTask)}</span>
