@@ -120,9 +120,45 @@ export default function LandingPage() {
   const heroHeadlineAccent = copy.heroHeadlineAccent ?? "";
   const heroHeadlineText = heroHeadlineAccent ? `${heroHeadlineMain} ${heroHeadlineAccent}` : heroHeadlineMain;
   const heroAccentStart = heroHeadlineAccent ? heroHeadlineText.length - heroHeadlineAccent.length : heroHeadlineText.length;
-  const heroTypedText = heroHeadlineText;
+  const [heroTypedLength, setHeroTypedLength] = useState(0);
+  const [heroDeleting, setHeroDeleting] = useState(false);
+  const heroTypedText = heroHeadlineText.slice(0, heroTypedLength);
   const heroTypedMain = heroTypedText.slice(0, Math.min(heroTypedText.length, heroAccentStart)).trimEnd();
   const heroTypedAccent = heroTypedText.length > heroAccentStart ? heroTypedText.slice(heroAccentStart).trimStart() : "";
+
+  useEffect(() => {
+    setHeroTypedLength(0);
+    setHeroDeleting(false);
+  }, [heroHeadlineText]);
+
+  useEffect(() => {
+    if (!heroHeadlineText) return undefined;
+    const prefersReducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+    if (prefersReducedMotion) {
+      setHeroTypedLength(heroHeadlineText.length);
+      return undefined;
+    }
+
+    const atEnd = heroTypedLength >= heroHeadlineText.length;
+    const atStart = heroTypedLength <= 0;
+    const delay = atEnd && !heroDeleting ? 1500 : atStart && heroDeleting ? 520 : heroDeleting ? 28 : 42;
+    const timer = window.setTimeout(() => {
+      if (!heroDeleting && atEnd) {
+        setHeroDeleting(true);
+        return;
+      }
+      if (heroDeleting && atStart) {
+        setHeroDeleting(false);
+        return;
+      }
+      setHeroTypedLength((value) => {
+        const next = value + (heroDeleting ? -1 : 1);
+        return Math.max(0, Math.min(heroHeadlineText.length, next));
+      });
+    }, delay);
+
+    return () => window.clearTimeout(timer);
+  }, [heroDeleting, heroHeadlineText, heroTypedLength]);
 
   useEffect(() => {
     let alive = true;

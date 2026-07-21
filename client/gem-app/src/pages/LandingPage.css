@@ -4021,113 +4021,277 @@ h4 {
   }
 }
 
-/* Reference crop pass: keep the supplied hero composition visible on desktop and mobile. */
+/* Reference alignment pass: hero-only crop, spacing, and exam-card proportions. */
 .hero-redesign {
   min-height: calc(100vh - 88px);
-  padding-bottom: clamp(20px, 2vw, 28px);
+  padding-bottom: clamp(18px, 1.8vw, 24px);
+  background: #031329;
 }
 
 .hero-redesign-bg::before {
   background-image:
-    linear-gradient(90deg, rgba(3, 16, 34, 0.9) 0%, rgba(3, 16, 34, 0.58) 29%, rgba(3, 16, 34, 0.17) 58%, rgba(3, 16, 34, 0.02) 100%),
-    linear-gradient(180deg, rgba(3, 16, 34, 0) 0%, rgba(3, 16, 34, 0.04) 59%, #031329 100%),
+    linear-gradient(90deg, rgba(3, 16, 34, 0.92) 0%, rgba(3, 16, 34, 0.67) 29%, rgba(3, 16, 34, 0.2) 58%, rgba(3, 16, 34, 0.04) 100%),
+    linear-gradient(180deg, rgba(3, 16, 34, 0) 0%, rgba(3, 16, 34, 0.02) 52%, rgba(3, 16, 34, 0.74) 78%, #031329 100%),
     var(--hero-people-image);
-  background-size: 100% 100%, 100% 100%, min(100vw, 1792px) auto;
+  background-size: 100% 100%, 100% 100%, clamp(1180px, 74vw, 1340px) auto;
   background-position: center, center, right top;
-  filter: saturate(1.16) contrast(1.07) brightness(1.03);
+  background-repeat: no-repeat;
+  filter: saturate(1.18) contrast(1.08) brightness(1.04);
+}
+
+.hero-redesign-bg::after,
+.hero-redesign-bg .berlin-skyline,
+.hero-redesign-bg .hero-flag-ribbon,
+.reference-image-spacer {
+  display: none;
 }
 
 .hero-redesign-container {
   max-width: 1640px;
   min-height: calc(100vh - 110px);
-  grid-template-columns: minmax(0, 760px) minmax(430px, 1fr);
-  grid-template-rows: minmax(420px, auto) auto auto;
+  grid-template-columns: minmax(0, 730px) minmax(470px, 1fr);
+  grid-template-rows: minmax(430px, auto) auto auto;
   align-content: start;
-  padding-top: clamp(94px, 9.8vh, 112px);
+  padding-top: clamp(86px, 8vh, 100px);
 }
 
 .hero-copy-panel {
   align-self: start;
-  max-width: 690px;
+  max-width: 675px;
   width: 100%;
 }
 
 .hero-redesign .hero-title {
-  max-width: 700px;
-  min-height: 2.05em;
+  max-width: 660px;
+  min-height: 2.04em;
   margin: 24px 0 16px;
-  font-size: clamp(3.2rem, 4.1vw, 4.35rem);
+  font-size: clamp(3rem, 3.45vw, 4rem);
   line-height: 1.02;
 }
 
+.hero-redesign .hero-typing-text {
+  display: inline;
+  max-width: none;
+  overflow: visible;
+  vertical-align: baseline;
+  white-space: normal;
+  animation: none;
+}
+
+.hero-redesign .hero-type-cursor {
+  display: inline-block;
+  width: 0.08em;
+  height: 0.92em;
+  margin-left: 0.08em;
+  vertical-align: -0.08em;
+  background: #f9c415;
+  animation: heroCursorBlink 0.82s steps(1, end) infinite;
+}
+
+@keyframes heroTypeDelete {
+  0%,
+  8% {
+    width: 0;
+  }
+
+  34%,
+  58% {
+    width: 100%;
+  }
+
+  84%,
+  100% {
+    width: 0;
+  }
+}
+
+@keyframes heroTypingWrap {
+  0%,
+  99% {
+    white-space: nowrap;
+  }
+
+  100% {
+    white-space: normal;
+  }
+}
+
+@keyframes heroCursorBlink {
+  0%,
+  48% {
+    opacity: 1;
+  }
+
+  49%,
+  100% {
+    opacity: 0;
+  }
+}
+
 .hero-redesign .hero-subtitle {
-  max-width: 660px;
+  max-width: 610px;
   margin-bottom: 24px;
-  font-size: clamp(1.22rem, 1.55vw, 1.55rem);
-  line-height: 1.35;
+  font-size: clamp(1.12rem, 1.25vw, 1.32rem);
+  line-height: 1.36;
+}
+
+.hero-indicators {
+  gap: 12px;
+}
+
+.hero-indicators span {
+  min-height: 48px;
+  padding: 0 18px;
+  border-radius: 10px;
 }
 
 .hero-benefits {
   max-width: 690px;
+  gap: 20px;
 }
 
 .hero-benefits span {
-  font-size: clamp(1rem, 1.25vw, 1.22rem);
-  line-height: 1.14;
+  grid-template-columns: 50px minmax(0, 1fr);
+  gap: 12px;
+  max-width: 205px;
+  font-size: clamp(1rem, 1.18vw, 1.18rem);
+  line-height: 1.15;
+}
+
+.hero-benefits svg {
+  width: 50px;
+  height: 50px;
+  padding: 12px;
 }
 
 .exam-card-grid {
   margin-top: 0;
+  gap: 10px;
+}
+
+.exam-card {
+  min-height: 92px;
+  grid-template-columns: 78px minmax(0, 1fr) 46px 20px;
   gap: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+}
+
+.exam-book {
+  width: 62px;
+  height: 72px;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
+.exam-book::before,
+.exam-book-spine,
+.exam-book-label {
+  display: none;
+}
+
+.exam-book img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(8px 12px 12px rgba(0, 0, 0, 0.26));
+}
+
+.exam-card-copy {
+  gap: 6px;
+}
+
+.exam-card-copy strong {
+  font-size: clamp(0.94rem, 1vw, 1.08rem);
+  line-height: 1.14;
+}
+
+.exam-card-copy small {
+  font-size: clamp(0.72rem, 0.78vw, 0.84rem);
+  line-height: 1.35;
+}
+
+.exam-level-badge {
+  width: 42px;
+  height: 42px;
+  border-radius: 8px;
+  font-size: 1.18rem;
+}
+
+.exam-card-arrow {
+  width: 22px;
+  height: 22px;
 }
 
 .hero-success-strip {
-  margin-top: 26px;
+  margin-top: 24px;
 }
 
-@media (min-width: 1501px) {
+@media (max-width: 1500px) {
   .hero-redesign-bg::before {
-    background-size: 100% 100%, 100% 100%, min(100vw, 1792px) auto;
+    background-size: 100% 100%, 100% 100%, clamp(1040px, 78vw, 1220px) auto;
     background-position: center, center, right top;
   }
 
-  .exam-card-grid {
-    gap: 12px;
-  }
-}
-
-@media (max-width: 1360px) {
   .hero-redesign-container {
+    grid-template-columns: minmax(0, 670px) minmax(390px, 1fr);
     grid-template-rows: minmax(390px, auto) auto auto;
-    grid-template-columns: minmax(0, 680px) minmax(340px, 1fr);
+    padding-top: clamp(76px, 8.2vh, 94px);
   }
 
   .hero-redesign .hero-title {
-    font-size: clamp(2.85rem, 4vw, 3.8rem);
+    font-size: clamp(2.8rem, 3.8vw, 3.75rem);
   }
 
   .hero-redesign .hero-subtitle {
-    font-size: 1.15rem;
+    max-width: 610px;
+    font-size: 1.12rem;
+  }
+
+  .exam-card {
+    min-height: 88px;
+    grid-template-columns: 74px minmax(0, 1fr) 40px 18px;
+    gap: 10px;
+    padding: 10px 12px;
+  }
+
+  .exam-book {
+    width: 58px;
+    height: 66px;
   }
 }
 
 @media (max-width: 1120px) {
+  .hero-redesign {
+    min-height: auto;
+  }
+
   .hero-redesign-bg::before {
     background-image:
-      linear-gradient(90deg, rgba(3, 16, 34, 0.84) 0%, rgba(3, 16, 34, 0.56) 46%, rgba(3, 16, 34, 0.1) 100%),
-      linear-gradient(180deg, rgba(3, 16, 34, 0) 0%, rgba(3, 16, 34, 0.08) 56%, #031329 100%),
+      linear-gradient(90deg, rgba(3, 16, 34, 0.82) 0%, rgba(3, 16, 34, 0.48) 47%, rgba(3, 16, 34, 0.06) 100%),
+      linear-gradient(180deg, rgba(3, 16, 34, 0) 0%, rgba(3, 16, 34, 0.04) 55%, rgba(3, 16, 34, 0.88) 86%, #031329 100%),
       var(--hero-people-image);
-    background-size: 100% 100%, 100% 100%, auto clamp(440px, 54vw, 560px);
+    background-size: 100% 100%, 100% 100%, auto clamp(560px, 64vw, 690px);
     background-position: center, center, right -76px top 0;
   }
 
   .hero-redesign-container {
+    min-height: auto;
+    grid-template-columns: 1fr;
     grid-template-rows: auto auto auto;
-    padding-top: 62px;
+    padding-top: clamp(54px, 7vw, 76px);
   }
 
-  .hero-redesign .hero-title {
-    max-width: 680px;
+  .hero-copy-panel {
+    max-width: min(680px, 70vw);
+  }
+
+  .exam-card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-top: 28px;
   }
 }
 
@@ -4142,62 +4306,270 @@ h4 {
 
   .hero-redesign-bg::before {
     background-image:
-      linear-gradient(90deg, rgba(3, 16, 34, 0.72) 0%, rgba(3, 16, 34, 0.38) 48%, rgba(3, 16, 34, 0.05) 100%),
-      linear-gradient(180deg, rgba(3, 16, 34, 0) 0%, rgba(3, 16, 34, 0.08) 34%, #031329 62%, #031329 100%),
-      var(--hero-people-image);
-    background-size: 100% 100%, 100% 100%, auto clamp(300px, 96vw, 390px);
-    background-position: center, center, right -104px top 0;
+      linear-gradient(90deg, rgba(3, 16, 34, 0.38) 0%, rgba(3, 16, 34, 0.16) 48%, rgba(3, 16, 34, 0.02) 100%),
+      linear-gradient(180deg, rgba(3, 16, 34, 0) 0%, rgba(3, 16, 34, 0.04) 48%, rgba(3, 16, 34, 0.88) 76%, #031329 95%, #031329 100%),
+      var(--hero-reference-image);
+    background-size: 100% 100%, 100% 100%, 100% auto;
+    background-position: center, center, center top;
   }
 
   .hero-redesign-container {
-    padding-top: 28px;
+    width: min(100%, 900px);
+    padding: clamp(200px, 51vw, 270px) 24px 0;
   }
 
   .hero-copy-panel {
-    padding-top: 0;
     max-width: 100%;
+    padding-top: 0;
   }
 
   .hero-indicators {
-    max-width: 310px;
+    display: flex;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    gap: 8px;
+    max-width: 100%;
+    overflow: visible;
+  }
+
+  .hero-indicators span {
+    min-height: 44px;
+    padding: 0 10px;
+    border-radius: 10px;
+    font-size: clamp(0.66rem, 2.45vw, 0.86rem);
+    white-space: nowrap;
+  }
+
+  .hero-indicators svg {
+    width: 16px;
+    height: 16px;
   }
 
   .hero-redesign .hero-title {
-    width: min(100%, 361px);
-    max-width: 361px;
+    width: min(100%, 380px);
+    max-width: 380px;
     min-height: 2.12em;
-    margin-top: clamp(190px, 54vw, 232px);
-    font-size: clamp(2.05rem, 8.7vw, 2.45rem);
+    margin-top: 28px;
+    margin-bottom: 16px;
+    font-size: clamp(2.05rem, 8.35vw, 2.58rem);
     text-wrap: normal;
   }
 
   .hero-redesign .hero-subtitle {
-    width: min(100%, 354px);
-    max-width: 354px;
-    font-size: 1.02rem;
+    width: min(100%, 372px);
+    max-width: 372px;
+    margin-bottom: 22px;
+    font-size: clamp(1rem, 4.35vw, 1.2rem);
+    line-height: 1.36;
   }
 
   .hero-benefits {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
     margin-top: 8px;
   }
 
+  .hero-benefits span {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    gap: 6px;
+    max-width: none;
+    font-size: clamp(0.72rem, 3.15vw, 0.92rem);
+    text-align: center;
+  }
+
+  .hero-benefits svg {
+    width: 42px;
+    height: 42px;
+    padding: 10px;
+  }
+
   .exam-card-grid {
-    margin-top: 24px;
+    grid-template-columns: 1fr;
+    margin-top: 28px;
     gap: 10px;
   }
 
+  .exam-card {
+    min-height: 118px;
+    grid-template-columns: 86px minmax(0, 1fr) 54px 24px;
+    gap: 12px;
+    padding: 0 14px 0 0;
+    border-radius: 14px;
+  }
+
+  .exam-book {
+    width: 86px;
+    height: 118px;
+    display: grid;
+    place-items: center;
+    border-radius: 14px 0 0 14px;
+    background: rgba(255, 255, 255, 0.93);
+  }
+
+  .exam-card-goethe .exam-book {
+    background: #f8fafc;
+  }
+
+  .exam-card-telc .exam-book {
+    background: rgba(4, 82, 104, 0.66);
+  }
+
+  .exam-card-ecl .exam-book {
+    background: rgba(155, 28, 28, 0.62);
+  }
+
+  .exam-book img {
+    width: 66px;
+    height: 86px;
+  }
+
+  .exam-card-copy {
+    gap: 7px;
+  }
+
+  .exam-card-copy strong {
+    font-size: clamp(1.16rem, 5.35vw, 1.72rem);
+    line-height: 1.12;
+  }
+
+  .exam-card-copy small {
+    font-size: clamp(0.88rem, 3.85vw, 1.16rem);
+    line-height: 1.28;
+  }
+
+  .exam-level-badge {
+    width: 54px;
+    height: 54px;
+    border-radius: 10px;
+    font-size: 1.85rem;
+  }
+
+  .exam-card-arrow {
+    width: 26px;
+    height: 26px;
+  }
+
   .hero-success-strip {
-    margin-top: 18px;
+    margin-top: 24px;
+    min-height: 82px;
+    padding: 0 18px;
+    border-radius: 999px;
   }
 }
 
-@media (max-width: 420px) {
+@media (max-width: 480px) {
   .hero-redesign-bg::before {
-    background-size: 100% 100%, 100% 100%, auto clamp(292px, 99vw, 365px);
-    background-position: center, center, right -116px top 0;
+    background-size: 100% 100%, 100% 100%, 100% auto;
+    background-position: center, center, center top;
+  }
+
+  .hero-redesign-container {
+    padding-top: clamp(190px, 50vw, 225px);
+    padding-inline: 22px;
+  }
+
+  .hero-indicators {
+    gap: 6px;
+  }
+
+  .hero-indicators span {
+    min-height: 40px;
+    padding: 0 8px;
+    font-size: clamp(0.62rem, 2.55vw, 0.74rem);
   }
 
   .hero-redesign .hero-title {
-    margin-top: clamp(186px, 53vw, 218px);
+    margin-top: 28px;
+    font-size: clamp(1.92rem, 8vw, 2.25rem);
+  }
+
+  .hero-redesign .hero-subtitle {
+    font-size: 1rem;
+  }
+
+  .hero-benefits {
+    gap: 8px;
+  }
+
+  .hero-benefits span {
+    grid-template-columns: 38px minmax(0, 1fr);
+    font-size: clamp(0.74rem, 3.2vw, 0.9rem);
+  }
+
+  .hero-benefits svg {
+    width: 38px;
+    height: 38px;
+    padding: 9px;
+  }
+
+  .exam-card {
+    min-height: 114px;
+    grid-template-columns: 70px minmax(0, 1fr) 46px 18px;
+    gap: 10px;
+    border-radius: 12px;
+  }
+
+  .exam-book {
+    width: 70px;
+    height: 114px;
+    border-radius: 12px 0 0 12px;
+  }
+
+  .exam-book img {
+    width: 56px;
+    height: 74px;
+  }
+
+  .exam-card-copy strong {
+    font-size: clamp(0.98rem, 5vw, 1.28rem);
+  }
+
+  .exam-card-copy small {
+    font-size: clamp(0.74rem, 3.55vw, 0.94rem);
+  }
+
+  .exam-level-badge {
+    width: 44px;
+    height: 44px;
+    font-size: 1.38rem;
+  }
+}
+
+@media (max-width: 380px) {
+  .hero-redesign-bg::before {
+    background-size: 100% 100%, 100% 100%, 100% auto;
+    background-position: center, center, center top;
+  }
+
+  .hero-redesign-container {
+    padding-top: 180px;
+    padding-inline: 18px;
+  }
+
+  .hero-indicators span {
+    padding: 0 6px;
+    font-size: 0.58rem;
+  }
+
+  .hero-redesign .hero-title {
+    max-width: 330px;
+  }
+
+  .exam-card {
+    grid-template-columns: 62px minmax(0, 1fr) 40px 16px;
+    gap: 8px;
+    min-height: 104px;
+  }
+
+  .exam-book {
+    width: 62px;
+    height: 104px;
+  }
+
+  .exam-book img {
+    width: 50px;
+    height: 66px;
   }
 }
