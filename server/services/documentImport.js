@@ -28,6 +28,7 @@ const removeImportedInstructionArtifacts = (value) =>
     .split("\n")
     .map((line) => line
       .replace(/(^|[\s([{])n{3,}(?=$|[\s.,;:!?)}\]])/gi, "$1")
+      .replace(/(^|[\s([{>])(?:n\s+){1,}n(?=$|[\s.,;:!?)}\]<])/gi, "$1")
       .replace(/\b(?:n\s+){2,}n\b/gi, "")
       .replace(/[ \t]{2,}/g, " ")
       .trim())

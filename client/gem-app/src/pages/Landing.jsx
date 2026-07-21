@@ -115,51 +115,14 @@ export default function LandingPage() {
   const [testimonialStatus, setTestimonialStatus] = useState("");
   const [testimonialError, setTestimonialError] = useState("");
   const [statsAnimationKey, setStatsAnimationKey] = useState(0);
-  const [heroTypedLength, setHeroTypedLength] = useState(0);
-  const [heroTypingDirection, setHeroTypingDirection] = useState("typing");
   const restartStats = useCallback(() => setStatsAnimationKey((value) => value + 1), []);
   const heroHeadlineMain = copy.heroHeadlineMain ?? copy.heroHeadline ?? "";
   const heroHeadlineAccent = copy.heroHeadlineAccent ?? "";
   const heroHeadlineText = heroHeadlineAccent ? `${heroHeadlineMain} ${heroHeadlineAccent}` : heroHeadlineMain;
   const heroAccentStart = heroHeadlineAccent ? heroHeadlineText.length - heroHeadlineAccent.length : heroHeadlineText.length;
-  const heroTypedText = heroHeadlineText.slice(0, heroTypedLength);
+  const heroTypedText = heroHeadlineText;
   const heroTypedMain = heroTypedText.slice(0, Math.min(heroTypedText.length, heroAccentStart)).trimEnd();
   const heroTypedAccent = heroTypedText.length > heroAccentStart ? heroTypedText.slice(heroAccentStart).trimStart() : "";
-
-  useEffect(() => {
-    const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
-    setHeroTypedLength(reduceMotion ? heroHeadlineText.length : 0);
-    setHeroTypingDirection("typing");
-  }, [heroHeadlineText]);
-
-  useEffect(() => {
-    if (!heroHeadlineText) return undefined;
-    const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
-    if (reduceMotion) {
-      setHeroTypedLength(heroHeadlineText.length);
-      return undefined;
-    }
-
-    const fullLength = heroHeadlineText.length;
-    const isTyping = heroTypingDirection === "typing";
-    const isComplete = isTyping && heroTypedLength >= fullLength;
-    const isEmpty = !isTyping && heroTypedLength <= 0;
-    const delay = isComplete ? 1500 : isEmpty ? 450 : isTyping ? 62 : 34;
-
-    const timer = window.setTimeout(() => {
-      if (isComplete) {
-        setHeroTypingDirection("deleting");
-        return;
-      }
-      if (isEmpty) {
-        setHeroTypingDirection("typing");
-        return;
-      }
-      setHeroTypedLength((value) => Math.max(0, Math.min(fullLength, value + (isTyping ? 1 : -1))));
-    }, delay);
-
-    return () => window.clearTimeout(timer);
-  }, [heroHeadlineText, heroTypedLength, heroTypingDirection]);
 
   useEffect(() => {
     let alive = true;
