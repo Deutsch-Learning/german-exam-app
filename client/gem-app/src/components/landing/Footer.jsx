@@ -5,7 +5,7 @@ const socialLinks = [
   {
     id: "facebook",
     label: "Facebook",
-    href: "https://www.facebook.com/share/1aep7PYUru",
+    href: "https://www.facebook.com/share/1EZcpm5WNh/",
     path: "M22 12.06C22 6.5 17.52 2 12 2S2 6.5 2 12.06C2 17.08 5.66 21.24 10.44 22v-7.03H7.9v-2.91h2.54V9.84c0-2.52 1.5-3.91 3.78-3.91 1.1 0 2.24.2 2.24.2v2.47h-1.26c-1.24 0-1.63.77-1.63 1.56v1.9h2.78l-.44 2.91h-2.34V22C18.34 21.24 22 17.08 22 12.06Z",
   },
   {
