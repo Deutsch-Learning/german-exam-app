@@ -1958,17 +1958,23 @@ const sendWelcomeEmailOnce = async (user) => {
   const row = claimed.rows[0];
   if (!row) return false;
   const email = renderWelcomeEmail({ user: row });
-  await sendEmail({
-    pool,
-    userId: row.id,
-    to: row.email,
-    type: "welcome",
-    subject: email.subject,
-    text: email.text,
-    html: email.html,
-    idempotencyKey: `welcome-${row.id}`,
-  });
-  return true;
+  try {
+    await sendEmail({
+      pool,
+      userId: row.id,
+      to: row.email,
+      type: "welcome",
+      subject: email.subject,
+      text: email.text,
+      html: email.html,
+      idempotencyKey: `welcome-${row.id}`,
+    });
+    return true;
+  } catch (emailErr) {
+    await pool.query(`UPDATE users SET welcome_email_sent_at = NULL WHERE id = $1`, [row.id]).catch(() => {});
+    console.error("Welcome email delivery failed", emailErr);
+    return false;
+  }
 };
 
 const sendPasswordChangedNoticeEmail = async (user) => {

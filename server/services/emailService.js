@@ -6,6 +6,11 @@ const OFFICIAL_APP_BASE_URL = "https://xn--n-deutschprfungen-d3b.com";
 const OFFICIAL_DOMAIN_PATTERN = /n-deutschpr(?:\u00fc|\u00c3\u00bc|%c3%bc|%fc|\?|\ufffd)fungen(?:\.com)?/gi;
 
 const trimTrailingSlash = (value) => String(value || "").trim().replace(/\/+$/, "");
+const readEnv = (name) => {
+  const value = String(process.env[name] ?? "").trim();
+  if (!value || /^(undefined|null|false|0)$/i.test(value)) return "";
+  return value;
+};
 
 const normalizePublicUrl = (value) => {
   const repaired = String(value || "").replace(OFFICIAL_DOMAIN_PATTERN, "xn--n-deutschprfungen-d3b.com");
@@ -31,12 +36,12 @@ const MAILBOX_FROM_NAME = "Deutschprüfungen";
 const getEmailFromName = () => process.env.EMAIL_FROM_NAME || MAILBOX_FROM_NAME;
 
 const getSupportEmail = () =>
-  process.env.SUPPORT_EMAIL ||
-  process.env.EMAIL_REPLY_TO ||
+  readEnv("SUPPORT_EMAIL") ||
+  readEnv("EMAIL_REPLY_TO") ||
   "support@xn--n-deutschprfungen-d3b.com";
 
 const getEmailFromAddress = () => {
-  const configured = process.env.EMAIL_FROM || process.env.EMAIL_FROM_ADDRESS || "";
+  const configured = readEnv("EMAIL_FROM") || readEnv("EMAIL_FROM_ADDRESS") || "";
   const addressMatch = configured.match(/<([^>]+)>/);
   if (addressMatch?.[1]) return addressMatch[1].trim();
   return configured || "no-reply@xn--n-deutschprfungen-d3b.com";
@@ -62,17 +67,17 @@ const escapeHtml = (value = "") =>
     .replace(/"/g, "&quot;");
 
 const getMailer = () => {
-  const host = process.env.EMAIL_SMTP_HOST || process.env.SMTP_HOST;
-  const port = Number(process.env.EMAIL_SMTP_PORT || process.env.SMTP_PORT || 587);
+  const host = readEnv("EMAIL_SMTP_HOST") || readEnv("SMTP_HOST");
+  const port = Number(readEnv("EMAIL_SMTP_PORT") || readEnv("SMTP_PORT") || 587);
   const user =
-    process.env.EMAIL_SMTP_USER ||
-    process.env.SMTP_USER ||
-    process.env.CONTACT_SMTP_USER ||
-    (process.env.RESEND_API_KEY ? "resend" : "");
+    readEnv("EMAIL_SMTP_USER") ||
+    readEnv("SMTP_USER") ||
+    readEnv("CONTACT_SMTP_USER") ||
+    (readEnv("RESEND_API_KEY") ? "resend" : "");
   const pass =
-    process.env.EMAIL_SMTP_PASS ||
-    process.env.SMTP_PASS ||
-    process.env.CONTACT_SMTP_PASS ||
+    readEnv("EMAIL_SMTP_PASS") ||
+    readEnv("SMTP_PASS") ||
+    readEnv("CONTACT_SMTP_PASS") ||
     "";
 
   if (host && user && pass) {
@@ -121,10 +126,11 @@ const logEmailEvent = async (pool, event) => {
 };
 
 const sendWithResend = async ({ from, to, subject, html, text, replyTo, idempotencyKey }) => {
+  const apiKey = readEnv("RESEND_API_KEY");
   const response = await fetch(RESEND_API_URL, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+      Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
       ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
     },
@@ -149,7 +155,7 @@ const sendEmail = async ({ pool, userId, to, subject, text, html, type, metadata
   const from = getFormattedFrom();
   const replyTo = getSupportEmail();
 
-  if (process.env.RESEND_API_KEY) {
+  if (readEnv("RESEND_API_KEY")) {
     try {
       const result = await sendWithResend({ from, to, subject, html, text, replyTo, idempotencyKey });
       await logEmailEvent(pool, {
@@ -193,17 +199,19 @@ const sendEmail = async ({ pool, userId, to, subject, text, html, type, metadata
     return { sent: true, provider: "smtp" };
   }
 
-  console.log(`[email disabled] ${subject} -> ${to}\n${text}`);
+  const errorMessage = "Email delivery is not configured. Add RESEND_API_KEY or SMTP credentials in Vercel.";
+  console.error(`[email disabled] ${subject} -> ${to}: ${errorMessage}`);
   await logEmailEvent(pool, {
     userId,
     type,
     to,
     subject,
     provider: "disabled",
-    status: "logged",
+    status: "failed",
+    errorMessage,
     metadata,
   });
-  return { sent: false, provider: "disabled" };
+  throw new Error(errorMessage);
 };
 
 const renderLayout = ({ preview, title, body, buttonHref, buttonText, note }) => {
