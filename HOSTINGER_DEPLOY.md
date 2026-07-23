@@ -10,7 +10,7 @@ This app deploys as one Hostinger Node.js web app:
 
 Use the GitHub deployment flow in hPanel.
 
-- Repository: `Deutsch-Learning/german-exam-app`
+- Repository: `Deutsch Prüfungen/german-exam-app`
 - Branch: `feature/ui-improvements` until it is merged to `main`
 - Framework type: `Other` or `Express.js`
 - Node.js version: `20.x` or `22.x`

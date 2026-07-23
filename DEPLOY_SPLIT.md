@@ -11,7 +11,7 @@ This is the recommended production setup:
 
 Create a Railway service from the GitHub repository.
 
-- Repository: `Deutsch-Learning/german-exam-app`
+- Repository: `Deutsch Prüfungen/german-exam-app`
 - Branch: `feature/ui-improvements`
 - Build command: handled by `railway.json`
 - Start command: handled by `railway.json`
