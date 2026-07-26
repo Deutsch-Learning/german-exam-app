@@ -1551,7 +1551,8 @@ const buildExamParts = (module) => {
     if (!part.points && task.partPoints) part.points = task.partPoints;
     if (
       (!part.sourceMetadata?.goetheB2Lesen && task.partSourceMetadata?.goetheB2Lesen) ||
-      (!part.sourceMetadata?.structuredB2Lesen && task.partSourceMetadata?.structuredB2Lesen)
+      (!part.sourceMetadata?.structuredB2Lesen && task.partSourceMetadata?.structuredB2Lesen) ||
+      (!part.sourceMetadata?.structuredB1Lesen && task.partSourceMetadata?.structuredB1Lesen)
     ) {
       part.sourceMetadata = task.partSourceMetadata;
     }
@@ -2211,6 +2212,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const [recordError, setRecordError] = useState("");
   const [restoredKey, setRestoredKey] = useState("");
   const [exitConfirmationOpen, setExitConfirmationOpen] = useState(false);
+  const [submitConfirmationOpen, setSubmitConfirmationOpen] = useState(false);
+  const [readingReferenceOpen, setReadingReferenceOpen] = useState(false);
 
   const mediaRecorderRef = useRef(null);
   const mediaStreamRef = useRef(null);
@@ -2310,7 +2313,11 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const isStructuredB2LesenCurrentPart =
     module.id === "read" &&
     Boolean(currentPart?.sourceMetadata?.structuredB2Lesen?.partType || currentTask?.sourceMetadata?.structuredB2Lesen);
-  const usesFullPartNavigation = module.id === "sprach" || isGoetheB2LesenCurrentPart || isStructuredB2LesenCurrentPart;
+  const isStructuredB1LesenCurrentPart =
+    module.id === "read" &&
+    Boolean(currentPart?.sourceMetadata?.structuredB1Lesen?.partType || currentTask?.sourceMetadata?.structuredB1Lesen);
+  const usesFullPartNavigation =
+    module.id === "sprach" || isGoetheB2LesenCurrentPart || isStructuredB2LesenCurrentPart || isStructuredB1LesenCurrentPart;
   const moduleItemSingular = isTopicModule(module.id) ? "Thema" : "Frage";
   const moduleItemPlural = getModuleCountLabel(module.id);
   const currentTaskDuration = getTaskDuration(module, currentTask);
@@ -2345,6 +2352,19 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     previousScrollTargetRef.current = { partId: "", taskId: "" };
     visitedScrollTargetsRef.current = new Set();
   }, [module.id, progressScopeId]);
+
+  useEffect(() => {
+    setReadingReferenceOpen(false);
+  }, [currentPart?.id]);
+
+  useEffect(() => {
+    if (!readingReferenceOpen) return undefined;
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setReadingReferenceOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [readingReferenceOpen]);
 
   useEffect(() => {
     listeningAmbienceRef.current?.dispose();
@@ -2762,6 +2782,10 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     void saveResultToBackend(score);
   }, [saveResultToBackend, score, stopListeningAmbience]);
 
+  const requestFinalSubmission = useCallback(() => {
+    setSubmitConfirmationOpen(true);
+  }, []);
+
   const buildProgressSnapshot = useCallback(
     () => ({
       moduleId: progressScopeId,
@@ -2947,6 +2971,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     armExamTimer(totalExamDuration, { running: false });
     setSimulationMode(true);
     setCompleted(false);
+    setSubmitConfirmationOpen(false);
     setPartIntroVisible(true);
     setPartTransition(null);
     partTransitionActiveRef.current = false;
@@ -4272,7 +4297,10 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     Boolean(currentPart?.sourceMetadata?.goetheB2Lesen?.partType || currentTask?.sourceMetadata?.goetheB2Lesen);
 
   const getGoethePartMeta = () =>
-    currentPart?.sourceMetadata?.goetheB2Lesen || currentPart?.sourceMetadata?.structuredB2Lesen || {};
+    currentPart?.sourceMetadata?.goetheB2Lesen ||
+    currentPart?.sourceMetadata?.structuredB2Lesen ||
+    currentPart?.sourceMetadata?.structuredB1Lesen ||
+    {};
 
   const setGoetheAnswer = (taskIndex, value) => {
     const meta = getGoethePartMeta();
@@ -4388,6 +4416,194 @@ export default function SimulationModulePage({ moduleIdOverride }) {
         ))}
       </div>
     ) : null;
+
+  const isStructuredB1LesenModule =
+    module.id === "read" &&
+    Boolean(currentPart?.sourceMetadata?.structuredB1Lesen?.partType || currentTask?.sourceMetadata?.structuredB1Lesen);
+
+  const getStructuredB1Meta = () => currentPart?.sourceMetadata?.structuredB1Lesen || {};
+
+  const renderB1ReferenceContent = (meta) => {
+    const sourceMaterials = Array.isArray(meta.sourceMaterials) ? meta.sourceMaterials : [];
+    const bank = meta.headings || meta.advertisements || [];
+    if (sourceMaterials.length) {
+      return (
+        <div className={styles.b1SourceStack}>
+          {sourceMaterials.map((material, index) => (
+            <article key={`${material.label}-${index}`} className={styles.b1SourceCard}>
+              <h3 translate="no">{material.label}</h3>
+              <div translate="no">{renderGoetheTextBlocks(material.text, `b1-source-${index}`)}</div>
+            </article>
+          ))}
+        </div>
+      );
+    }
+    return renderGoetheBank(
+      bank,
+      meta.partType === "heading_text_match" ? "Überschriften A-G" : `Anzeigen A-${bank.at(-1)?.value || "J"}`
+    );
+  };
+
+  const renderB1ReferenceDialog = (meta, label) => readingReferenceOpen ? createPortal((
+    <div className={styles.b1ReferenceOverlay} role="presentation" onMouseDown={() => setReadingReferenceOpen(false)}>
+      <section
+        className={styles.b1ReferenceDialog}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="b1-reference-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header>
+          <h2 id="b1-reference-title">{label}</h2>
+          <button type="button" onClick={() => setReadingReferenceOpen(false)} aria-label={`${label} schließen`}>
+            <X size={20} />
+          </button>
+        </header>
+        <div className={styles.b1ReferenceDialogBody}>{renderB1ReferenceContent(meta)}</div>
+      </section>
+    </div>
+  ), document.body) : null;
+
+  const renderB1ReferenceButton = (label) => (
+    <button
+      type="button"
+      className={styles.b1MobileReferenceButton}
+      onClick={() => setReadingReferenceOpen(true)}
+      aria-haspopup="dialog"
+      aria-expanded={readingReferenceOpen}
+    >
+      <BookOpen size={18} />
+      {label}
+    </button>
+  );
+
+  const renderB1ChoiceQuestion = ({ taskIndex, task }, partType) => {
+    const selectedValue = answers[taskIndex] ?? "";
+    const compactChoices = [
+      "reading_true_false_not_in_text",
+      "reading_true_false",
+      "opinion_for_against",
+    ].includes(partType);
+    return (
+      <fieldset key={task.id} className={styles.b1QuestionCard} onFocus={() => setCurrentIndex(taskIndex)}>
+        <legend translate="no">
+          <span>{task.sourceQuestionNumber}</span>
+          {task.question}
+        </legend>
+        <div className={compactChoices ? styles.b1CompactChoices : styles.b1ChoiceList}>
+          {(task.options || []).map((option) => {
+            const selected = selectedValue === option.value;
+            const code = String(option.value).toUpperCase();
+            const label = getProtectedChoiceLabel(task, option);
+            return (
+              <button
+                key={option.value}
+                type="button"
+                className={selected ? styles.b1ChoiceSelected : styles.b1ChoiceButton}
+                onClick={() => setGoetheAnswer(taskIndex, option.value)}
+                aria-pressed={selected}
+              >
+                <span>{code}</span>
+                {label.toLocaleUpperCase("de-DE") !== code ? <strong translate="no">{label}</strong> : null}
+              </button>
+            );
+          })}
+        </div>
+      </fieldset>
+    );
+  };
+
+  const renderB1MatchingQuestion = ({ taskIndex, task }, tasks, partType) => {
+    const selectedValue = answers[taskIndex] ?? "";
+    const selectedOption = (task.options || []).find((option) => option.value === selectedValue);
+    const itemLabel = task.sourceMetadata?.itemLabel || (partType === "heading_text_match" ? `Text ${task.sourceQuestionNumber}` : `Situation ${task.sourceQuestionNumber}`);
+    return (
+      <article key={task.id} className={styles.b1MatchingCard} onFocus={() => setCurrentIndex(taskIndex)}>
+        <div className={styles.b1MatchingPrompt}>
+          <strong>{itemLabel}</strong>
+          <p translate="no">{task.question}</p>
+        </div>
+        <label className={styles.b1MatchingSelect}>
+          <span>{partType === "heading_text_match" ? "Überschrift" : "Anzeige"}</span>
+          <select
+            value={selectedValue}
+            onChange={(event) => setGoetheAnswer(taskIndex, event.target.value)}
+            aria-label={`${itemLabel}: ${partType === "heading_text_match" ? "Überschrift" : "Anzeige"} auswählen`}
+          >
+            <option value="">Bitte wählen</option>
+            {(task.options || []).map((option) => {
+              const usedElsewhere = tasks.some(({ taskIndex: otherIndex }) => otherIndex !== taskIndex && answers[otherIndex] === option.value);
+              return (
+                <option key={option.value} value={option.value} translate="no">
+                  {option.value} - {getProtectedChoiceLabel(task, option)}{usedElsewhere ? " (bereits verwendet)" : ""}
+                </option>
+              );
+            })}
+          </select>
+        </label>
+        {selectedOption ? (
+          <p className={styles.b1SelectedReference} translate="no">
+            <strong>{selectedOption.value}</strong> {getProtectedChoiceLabel(task, selectedOption)}
+          </p>
+        ) : null}
+      </article>
+    );
+  };
+
+  const renderStructuredB1Lesen = () => {
+    const meta = getStructuredB1Meta();
+    const tasks = getCurrentPartTasks();
+    const provider = String(meta.provider || selectedSeries?.provider || selectedSeries?.accessExamId || "").toUpperCase();
+    const answeredInPart = tasks.filter(({ taskIndex, task }) => getTaskAnswered(module, task, answers[taskIndex])).length;
+    const isMatching = ["heading_text_match", "situation_ad_match"].includes(meta.partType);
+    const hasReference = Boolean((meta.sourceMaterials || []).length || (meta.headings || []).length || (meta.advertisements || []).length);
+    const referenceLabel = meta.partType === "heading_text_match"
+      ? "Überschriften anzeigen"
+      : meta.partType === "situation_ad_match" ? "Anzeigen anzeigen" : "Text anzeigen";
+    const header = (
+      <div className={styles.goethePartHeader}>
+        <div>
+          <div className={styles.sectionLabel}><BookOpen size={18} />{provider} B1 Lesen</div>
+          <h2 translate="no">{currentPart?.displayTitle ?? "Lesen"}</h2>
+          <p className={styles.b1Instruction} translate="no">{meta.instruction}</p>
+        </div>
+        <span>{answeredInPart}/{tasks.length} beantwortet</span>
+      </div>
+    );
+    const questions = (
+      <div className={styles.b1QuestionColumn}>
+        {hasReference ? renderB1ReferenceButton(referenceLabel) : null}
+        {meta.theme ? (
+          <article className={styles.b1ThemeCard}>
+            <span>Thema</span>
+            <p translate="no">{meta.theme.replace(/^Thema:\s*/i, "")}</p>
+          </article>
+        ) : null}
+        <div className={styles.b1QuestionList}>
+          {tasks.map((taskData) => isMatching
+            ? renderB1MatchingQuestion(taskData, tasks, meta.partType)
+            : renderB1ChoiceQuestion(taskData, meta.partType))}
+        </div>
+      </div>
+    );
+    return (
+      <div className={styles.goetheExamLayout}>
+        <section className={styles.goetheExamPane} onWheel={handleReadableWheel}>
+          {header}
+          {hasReference ? (
+            <div className={`${styles.b1PartGrid} ${meta.partType === "situation_ad_match" ? styles.b1ReferenceRight : ""}`}>
+              <aside className={`${styles.b1ReferencePanel} ${isMatching ? styles.b1BankReference : ""}`}>
+                {renderB1ReferenceContent(meta)}
+              </aside>
+              {questions}
+            </div>
+          ) : questions}
+          {renderGoetheFeedback(tasks)}
+        </section>
+        {hasReference ? renderB1ReferenceDialog(meta, referenceLabel) : null}
+      </div>
+    );
+  };
 
   const renderGoetheB2Lesen = () => {
     const meta = getGoethePartMeta();
@@ -4719,6 +4935,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   };
 
   const renderReading = () => (
+    isStructuredB1LesenModule ? renderStructuredB1Lesen() :
     isGoetheB2LesenModule ? renderGoetheB2Lesen() :
     isStructuredB2LesenModule ? renderStructuredB2Lesen() :
     isTelcSprachbausteineModule ? renderTelcSprachbausteine() :
@@ -5852,6 +6069,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       const resultSummary = buildResultSummary(module, answers);
       const isWritingResult = module.id === "write";
       const isSpeakingResult = module.id === "speak";
+      const isStructuredB1Result = module.id === "read" && examParts.some((part) => part.sourceMetadata?.structuredB1Lesen);
       const correctionScoreReady =
         isWritingResult &&
         !writingCorrectionLoading &&
@@ -5929,6 +6147,23 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             </div>
             {renderWritingCorrectionPanel()}
             {renderSpeakingCorrectionPanel()}
+            {isStructuredB1Result ? (
+              <section className={styles.b1ResultSources} aria-label="Lesetexte und Referenzmaterial">
+                <h2>Lesetexte und Referenzmaterial</h2>
+                {examParts.map((part) => {
+                  const meta = part.sourceMetadata?.structuredB1Lesen;
+                  if (!meta) return null;
+                  return (
+                    <details key={part.id}>
+                      <summary translate="no">{part.displayTitle}</summary>
+                      <p className={styles.b1Instruction} translate="no">{meta.instruction}</p>
+                      {meta.theme ? <p className={styles.b1ResultTheme} translate="no">{meta.theme}</p> : null}
+                      {(meta.sourceMaterials || meta.headings || meta.advertisements) ? renderB1ReferenceContent(meta) : null}
+                    </details>
+                  );
+                })}
+              </section>
+            ) : null}
             <div className={styles.finalReviewList}>
               {resultSummary.rows.map((row) => {
                 const reviewState = isWritingResult || isSpeakingResult ? "neutral" : row.isCorrect ? "true" : "false";
@@ -5941,8 +6176,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
                     </div>
                     <h3>{row.title}</h3>
                     <p><b>Ihre Antwort:</b> {row.userAnswer}</p>
-                    {!isWritingResult && !module.isImported ? <p><b>Erwartete Antwort:</b> <span translate="no">{row.correctAnswer}</span></p> : null}
-                    {!isWritingResult && !module.isImported && row.explanation ? <p className={styles.finalExplanation}>{row.explanation}</p> : null}
+                    {!isWritingResult && (!module.isImported || isStructuredB1Result) ? <p><b>Erwartete Antwort:</b> <span translate="no">{row.correctAnswer}</span></p> : null}
+                    {!isWritingResult && (!module.isImported || isStructuredB1Result) && row.explanation ? <p className={styles.finalExplanation}>{row.explanation}</p> : null}
                   </article>
                 );
               })}
@@ -6047,6 +6282,34 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           </section>
         </div>
       ), document.body) : null}
+      {submitConfirmationOpen ? createPortal((
+        <div className={styles.exitDialogOverlay} role="presentation">
+          <section className={styles.exitDialog} role="dialog" aria-modal="true" aria-labelledby="submit-simulation-title">
+            <ClipboardCheck size={30} />
+            <h2 id="submit-simulation-title">Simulation abgeben?</h2>
+            <p>
+              {remainingCount > 0
+                ? `${remainingCount} Aufgabe${remainingCount === 1 ? " ist" : "n sind"} noch unbeantwortet.`
+                : "Alle Aufgaben sind beantwortet."}
+            </p>
+            <div>
+              <button type="button" className={styles.secondaryButton} onClick={() => setSubmitConfirmationOpen(false)}>
+                Antworten prüfen
+              </button>
+              <button
+                type="button"
+                className={styles.primaryButton}
+                onClick={() => {
+                  setSubmitConfirmationOpen(false);
+                  finishModule();
+                }}
+              >
+                Jetzt abgeben
+              </button>
+            </div>
+          </section>
+        </div>
+      ), document.body) : null}
       <nav className={styles.nav}>
         <div className={styles.logoButton}>
           <img src={logo} alt="Deutsch Prüfungen" />
@@ -6143,7 +6406,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             <button
               type="button"
               className={`${styles.primaryButton} ${styles.mobileNavButton}`}
-              onClick={isLastNavigationStep ? finishModule : goToNext}
+              onClick={isLastNavigationStep ? requestFinalSubmission : goToNext}
               disabled={isRecording}
             >
               {isLastNavigationStep ? t.common.submit : t.common.next}

@@ -5,6 +5,7 @@ const path = require("path");
 const { execFile } = require("child_process");
 const { promisify } = require("util");
 const mammoth = require("mammoth");
+const { parseB1StructuredLesenSeries } = require("./b1StructuredLesenParser");
 const { parseGoetheB2LesenSeries } = require("./goetheB2LesenParser");
 const { parseB2StructuredLesenSeries } = require("./b2StructuredLesenParser");
 
@@ -4185,6 +4186,17 @@ const parseStructuredContent = (text, metadata) => {
   }
   if (provider === "goethe" && metadata.level === "B2" && metadata.sectionType === "read" && /DOCUMENT_USAGE_CONTRACT|IMPORT SCHEMA REFERENCE/i.test(text)) {
     const series = parseGoetheB2LesenSeries(text, metadata);
+    if (series.length) return series;
+  }
+  if (
+    ["ecl", "telc", "osd"].includes(provider) &&
+    metadata.level === "B1" &&
+    metadata.sectionType === "read" &&
+    /VERSION RESTRUCTUR\p{L}*E POUR CODEX/iu.test(text) &&
+    /INSTRUCTION \p{L}*TUDIANT/iu.test(text) &&
+    /CORRECTION[^\n]*CONSERVER CACH\p{L}*E AVANT LA SOUMISSION/iu.test(text)
+  ) {
+    const series = parseB1StructuredLesenSeries(text, metadata);
     if (series.length) return series;
   }
   if (

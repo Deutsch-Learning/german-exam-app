@@ -1,0 +1,370 @@
+MASTER PROMPT FOR CODEX - IMPLEMENT THE RESTRUCTURED B1 LESEN EXAMS
+
+You are working inside my existing German exam-preparation application. Implement the B1 Lesen/Leseverstehen content from the three uploaded restructured documents:
+
+1. TELC_B1_Lesen_20_Serien_RESTRUCTURED.docx
+2. ECL_B1_Leseverstehen_20_Serien_RESTRUCTURED.docx
+3. OESD_B1_Lesen_20_Modellsaetze_RESTRUCTURED.docx
+
+These documents are the content source of truth. Read every document completely before changing code. Study the current project structure and existing exam UI first. Then implement the content and interactions exactly as specified below.
+
+======================================================================
+1. NON-NEGOTIABLE SCOPE
+======================================================================
+
+- Work only on the B1 Lesen/Leseverstehen lessons/exams for TELC, ECL and ÖSD.
+- Do not modify Hören, Schreiben, Sprechen, authentication, payments, subscriptions, profiles, admin functions or unrelated exams.
+- Keep the existing visual identity and examination UI: the current colours, typography, cards, buttons, headers, progress elements, spacing conventions, routes and navigation style.
+- Do not redesign the whole examination interface. Reuse the project's existing components and design tokens wherever possible.
+- Replace the currently incorrect or incomplete Lesen content and task rendering only where necessary.
+- Do not break existing database connections, session persistence, scoring, corrections, routing or responsive behaviour.
+
+======================================================================
+2. CONTENT INTEGRITY
+======================================================================
+
+- Preserve every source-document word exactly: headings, instructions, source texts, questions, options, names, numbers, punctuation, currencies, advertisements and corrections.
+- Do not paraphrase, translate, improve, shorten, summarise or invent examination content.
+- Do not reorder questions or answer options.
+- Do not correct apparent language mistakes or unusual characters found in the documents.
+- The structural labels added in the restructured documents are implementation guidance, not student examination content. Do not display labels such as "INSTRUCTION ÉTUDIANT", "QUESTIONS ET OPTIONS", "CORRECTION - CACHÉE" or similar helper labels to students.
+- Correct answers must be stored separately from student-visible content and must never appear before submission.
+- When a cover-page summary conflicts with the actual series content, use the actual content and correction section inside each series. In particular, ECL Aufgabe 2 contains five a/b/c questions in the provided series even though the introductory page mentions two tasks of ten items. Implement the actual five questions and their supplied corrections.
+
+======================================================================
+3. GLOBAL NAVIGATION RULE
+======================================================================
+
+Use one complete Teil/Aufgabe per route, step or exam screen.
+
+- Do not place the entire exam series on one long page.
+- Do not create one route/page per individual question.
+- All source material and all questions belonging to the same Teil/Aufgabe must remain accessible within that Teil/Aufgabe screen.
+- The screen may scroll when content is long.
+- "Weiter" opens the next Teil/Aufgabe.
+- "Zurück" returns to the previous Teil/Aufgabe when the existing simulation rules allow it.
+- Preserve answers when navigating backward and forward.
+- Before final submission, students may change answers.
+- After final submission, lock the attempt according to the existing application behaviour and show the correction/result view.
+
+Required flow examples:
+
+TELC B1 -> Series 01 -> Lesen -> Teil 1 -> Teil 2 -> Teil 3 -> Submit -> Correction
+ECL B1 -> Series 01 -> Leseverstehen -> Aufgabe 1 -> Aufgabe 2 -> Submit -> Correction
+ÖSD B1 -> Modellsatz 1 -> Lesen -> Teil 1 -> Teil 2 -> Teil 3 -> Teil 4 -> Teil 5 -> Submit -> Correction
+
+======================================================================
+4. REUSABLE TASK RENDERERS
+======================================================================
+
+Do not force every task into one generic multiple-choice renderer. Build or reuse task-type components driven by structured data, for example:
+
+- heading_text_match
+- reading_mcq
+- reading_true_false_not_in_text
+- reading_true_false
+- situation_ad_match
+- opinion_for_against
+
+Use the exact component naming conventions already present in the project when suitable. The key requirement is separate rendering logic for each interaction type.
+
+A recommended normalized task model is:
+
+examType, level, seriesNumber, theme, section, taskType, title, instruction, sourceMaterials, questions, options, correctAnswers, points, duration
+
+Do not rewrite the whole data architecture if the existing model can represent these fields safely.
+
+======================================================================
+5. TELC B1 - EXACT STRUCTURE
+======================================================================
+
+Every one of the 20 TELC series contains three Teile.
+
+TELC TEIL 1 - GLOBALVERSTEHEN
+
+Content:
+- One shared bank of seven headings labelled A-G.
+- Five short texts labelled Text 1-Text 5.
+- The student assigns one heading to each text.
+- Five answers are submitted; two headings remain unused.
+
+Desktop/laptop:
+- Keep the exact Teil title and italic instruction at the top.
+- Use a two-area layout where practical:
+  - a sticky/shared heading bank on the left;
+  - the five text cards with selectors on the right.
+- Every text card must show the full text and one answer selector.
+- The student must be able to compare all seven headings while answering all five texts.
+
+Mobile:
+- Use a stacked layout.
+- Keep a persistent or easily accessible "Überschriften anzeigen" control.
+- Open the heading bank in an accordion, bottom sheet, drawer or modal without navigating away and without losing answers.
+- Do not use a narrow two-column layout that causes overflow.
+
+Interaction rules:
+- A heading may be assigned to only one text.
+- Selecting a used heading should either move it safely after confirmation or show that it is already used.
+- Changing an answer must release the previous heading.
+- Display answered progress such as "3/5 beantwortet".
+- Do not reveal whether a choice is correct before submission.
+
+Expected content validation per series:
+- 7 headings
+- 5 texts
+- 5 student answers
+
+TELC TEIL 2 - DETAILVERSTEHEN
+
+Content:
+- One reading text.
+- Five questions.
+- Options a, b and c for each question.
+
+Desktop/laptop:
+- Source text on the left and questions on the right.
+- Keep the source panel visible/sticky while the question panel scrolls when the existing layout permits.
+
+Mobile:
+- Show the source text first, then question cards.
+- After the student scrolls beyond the source, provide a "Text anzeigen" or equivalent control that opens the exact source text in a drawer/modal/accordion.
+
+Expected content validation per series:
+- 1 source text
+- 5 questions
+- exactly 3 options per question
+
+TELC TEIL 3 - SELEKTIVES VERSTEHEN
+
+Content:
+- Ten situations.
+- Twenty advertisements labelled A-T.
+- One advertisement is selected for each situation.
+- Some advertisements remain unused.
+
+Desktop/laptop:
+- Situations and answer selectors in one panel.
+- A visible/sticky advertisements bank in the other panel.
+- Advertisement labels and texts must remain readable while answering.
+
+Mobile:
+- Use situation cards with a "Anzeige auswählen" control.
+- Display the advertisement bank in a full-width drawer, modal, bottom sheet or expandable section.
+- Allow previewing the full advertisement before confirming.
+
+Interaction rules:
+- Each advertisement is used at most once.
+- Clearly mark advertisements already used.
+- Do not rely exclusively on drag-and-drop. Dropdown/button selection must work with touch, mouse and keyboard.
+- Display progress such as "7/10 beantwortet".
+
+Expected content validation per series:
+- 10 situations
+- 20 advertisements
+- 10 student answers
+
+======================================================================
+6. ECL B1 - EXACT STRUCTURE
+======================================================================
+
+Every one of the 20 ECL series contains two Aufgaben.
+
+ECL AUFGABE 1 - RICHTIG / FALSCH / STEHT NICHT IM TEXT
+
+Content:
+- One reading text.
+- Ten statements.
+- Each statement has exactly three choices: R, F and NT.
+
+Desktop/laptop:
+- Reading text on the left.
+- Ten statement rows/cards with R/F/NT controls on the right.
+
+Mobile:
+- Source text followed by the statement cards.
+- Provide a persistent "Text anzeigen" control after the source leaves the viewport.
+
+Expected validation per series:
+- 1 source text
+- 10 statements
+- 3 choices per statement
+
+ECL AUFGABE 2 - RICHTIGE ANTWORT WÄHLEN
+
+Content:
+- One forum post, email, notice, advertisement, information text or other source material exactly as provided.
+- Five questions in the supplied series.
+- Options a, b and c.
+
+Desktop/laptop:
+- Source text on the left and the five questions on the right.
+
+Mobile:
+- Stacked source and question cards with a "Text anzeigen" control.
+
+Expected validation per series:
+- 1 source material block
+- 5 questions
+- 3 options per question
+
+======================================================================
+7. ÖSD B1 - EXACT STRUCTURE
+======================================================================
+
+Every one of the 20 ÖSD Modellsätze contains five Teile.
+
+ÖSD TEIL 1
+- One longer reading text.
+- Six Richtig/Falsch statements.
+- Desktop: source left, six statements right.
+- Mobile: source first, statement cards after it, with a source-view control.
+
+Expected validation: 6 statements and 2 choices per statement.
+
+ÖSD TEIL 2
+- Two source texts, normally Text A and Text B.
+- Six a/b/c questions.
+- Desktop: source area left; questions right. Text A and Text B may use tabs or stacked cards, but both must remain accessible.
+- Mobile: use tabs/accordion/drawer for Text A and Text B without losing answers.
+- Do not invent labels connecting questions to a source text unless the document itself provides them.
+
+Expected validation: 2 source texts, 6 questions, 3 options each.
+
+ÖSD TEIL 3
+- Seven situations.
+- Ten advertisements labelled A-J.
+- Match one advertisement to every situation.
+- Reuse the robust situation-advertisement matching component used for TELC, configured for seven situations and ten advertisements.
+- Enforce unique advertisement use.
+
+Expected validation: 7 situations, 10 advertisements, 7 answers.
+
+ÖSD TEIL 4
+- One common theme.
+- Seven reader letters/opinions.
+- Each item is classified as Dafür or Dagegen.
+- Show each complete opinion in its own readable card/row with two answer controls.
+- Keep all seven in the same Teil screen.
+
+Expected validation: 7 opinions, 2 choices each.
+
+ÖSD TEIL 5
+- One rule, notice, instruction, regulation or similar source text.
+- Four a/b/c questions.
+- Desktop: source left, questions right.
+- Mobile: stacked layout with source-view control.
+
+Expected validation: 1 source text, 4 questions, 3 options each.
+
+======================================================================
+8. RESPONSIVE UI REQUIREMENTS
+======================================================================
+
+Desktop/laptop:
+- Use the existing maximum content width and design system.
+- Prefer two-panel layouts only where consultation of source material while answering is necessary.
+- Make the source panel sticky within the content container where practical; do not cover headers, navigation or footer actions.
+- Allow independent scrolling only if it remains natural and accessible.
+
+Mobile/tablet:
+- Do not squeeze desktop columns onto small screens.
+- Stack content vertically.
+- Use full-width cards and large touch targets.
+- Prevent horizontal overflow from long words, tables, advertisements, email addresses and German compound words.
+- Use overflow-wrap/word-break only where necessary and without damaging normal text readability.
+- Make source/headings/advertisement controls easy to reopen from the student's current viewport.
+- Modals, drawers or bottom sheets must be closable, scrollable and keyboard accessible.
+- Maintain safe spacing above any fixed/floating action bar.
+
+Across all screens:
+- Keep the exact heading prominent and bold.
+- Place the exact instruction immediately below the heading in italic styling.
+- Separate source material visually from questions without changing the existing app theme.
+- Use the app's current radio buttons, selectors, cards and buttons rather than introducing an unrelated visual style.
+
+======================================================================
+9. ANSWER STATE, PROGRESS AND SUBMISSION
+======================================================================
+
+- Autosave every selection using the application's current persistence approach.
+- Restore answers after refresh or navigation when the existing attempt/session rules support it.
+- Show answered progress for every Teil/Aufgabe.
+- Before moving forward, follow the current app policy for incomplete tasks. If no policy exists, allow navigation but show a clear non-blocking incomplete warning.
+- Before final submission, show a confirmation indicating unanswered items.
+- Never mark answers green/red while the attempt is active.
+- After submission, show the student's answer, the correct answer and the existing correction feedback style.
+- Keep source text available on the correction page.
+- Compute points according to the corrections and points in the documents and the existing application scoring conventions.
+
+======================================================================
+10. ACCESSIBILITY AND INPUT SUPPORT
+======================================================================
+
+- All answer controls must work with mouse, touch and keyboard.
+- Use semantic labels and fieldsets where applicable.
+- Every radio group/select must have a programmatic label containing the question/item number.
+- Preserve visible focus states.
+- Do not use colour alone to show selected, used, correct or incorrect states.
+- Ensure adequate contrast using the existing design system.
+- Do not use drag-and-drop as the only way to answer matching tasks.
+
+======================================================================
+11. IMPLEMENTATION PROCESS
+======================================================================
+
+Before coding:
+1. Inspect the current Lesen routes, components, data files, schemas, scoring and correction logic.
+2. Identify which existing components can be reused safely.
+3. Identify the current source of TELC, ECL and ÖSD B1 Lesen content.
+4. Make the smallest coherent architectural change that supports all required task types.
+
+During coding:
+1. Import/map all 20 series for each certification.
+2. Keep content data separate from rendering logic.
+3. Use stable identifiers such as telc-b1-series-01-teil-1.
+4. Preserve the current UI classes/design tokens.
+5. Do not leave old and new Lesen data competing at runtime.
+6. Do not use hard-coded correct answers inside UI components; load them from structured correction data.
+7. Do not silently skip malformed items. Fail validation with a clear development error.
+
+Recommended validations to run in development:
+- TELC: 20 series x (7 headings, 5 texts, 5 MCQ, 10 situations, 20 ads).
+- ECL: 20 series x (10 R/F/NT statements, 5 MCQ).
+- ÖSD: 20 series x (6 R/F, 6 MCQ, 7 situations, 10 ads, 7 opinions, 4 MCQ).
+- Every question has the required options.
+- Every correct-answer reference points to an existing option/item.
+- Matching answers reference existing heading/advertisement labels.
+- Series and Teil navigation reaches every task exactly once.
+
+======================================================================
+12. REGRESSION TESTS
+======================================================================
+
+Test at least:
+- Desktop width.
+- Tablet width.
+- Small Android/mobile width.
+- Long source text and long advertisement text.
+- Refresh after answering several items.
+- Back/forward navigation without losing answers.
+- Incomplete Teil navigation.
+- Duplicate heading/advertisement prevention.
+- Final submission and correction display.
+- Reopening completed series according to existing rules.
+- No impact on Hören, Schreiben, Sprechen, authentication or payment pages.
+- No console errors, broken routes, hydration errors or horizontal page overflow.
+
+======================================================================
+13. FINAL RESPONSE REQUIRED FROM CODEX
+======================================================================
+
+After implementation, provide a concise technical report containing:
+- files changed;
+- components created or reused;
+- content/data mapping approach;
+- responsive behaviour implemented;
+- validation/tests run and their results;
+- any source-document anomaly preserved intentionally;
+- confirmation that unrelated modules were not changed.
+
+Do not claim completion until all 60 TELC Teile, 40 ECL Aufgaben and 100 ÖSD Teile are mapped, reachable and validated.
