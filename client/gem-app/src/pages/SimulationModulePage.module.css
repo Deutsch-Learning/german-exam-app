@@ -3987,6 +3987,7 @@
   }
 
   .examNavPanel {
+    display: none;
     position: fixed;
     top: 0;
     right: 0;
@@ -3997,12 +3998,11 @@
     overflow: auto;
     background: #f5f5f5;
     box-shadow: -18px 0 42px rgba(16, 24, 40, 0.22);
-    transform: translateX(105%);
-    transition: transform 0.26s ease;
+    transform: none;
   }
 
   .examNavPanelOpen {
-    transform: translateX(0);
+    display: grid;
   }
 
   .examNavPanelHeader {
@@ -4040,11 +4040,11 @@
     border-radius: 20px 20px 0 0;
     padding: 18px 16px calc(22px + env(safe-area-inset-bottom, 0px));
     box-shadow: 0 -18px 42px rgba(16, 24, 40, 0.22);
-    transform: translateY(105%);
+    transform: none;
   }
 
   .examNavPanelOpen {
-    transform: translateY(0);
+    display: grid;
   }
 
   .navMetricGrid,

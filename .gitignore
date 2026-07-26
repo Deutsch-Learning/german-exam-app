@@ -19,6 +19,8 @@
 **/build/
 **/.next/
 **/.cache/
+**/test-results/
+**/playwright-report/
 
 # local tooling
 **/.DS_Store
