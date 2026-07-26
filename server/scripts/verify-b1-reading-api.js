@@ -2,6 +2,12 @@ const assert = require("node:assert/strict");
 
 const baseUrl = String(process.argv[2] || "https://gem-app-delta.vercel.app").replace(/\/$/, "");
 const expected = {
+  "goethe-b1": {
+    provider: "goethe",
+    duration: 60,
+    partTypes: ["reading_true_false", "reading_mcq", "situation_ad_match", "opinion_yes_no", "reading_mcq"],
+    questionCounts: [6, 6, 7, 7, 4],
+  },
   "telc-b1": {
     provider: "telc",
     duration: 60,

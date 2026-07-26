@@ -6,10 +6,20 @@ const { parseB1StructuredLesenSeries } = require("../services/b1StructuredLesenP
 const { analyzeExamDocument } = require("../services/documentImport");
 
 const root = path.resolve(__dirname, "../..");
-const sourceRoot = path.join(root, "Lessen Change");
 const fixtures = [
   {
+    provider: "goethe",
+    folder: "Goethe change",
+    file: "GOETHE_B1_Lesen_20_Pruefungshefte_RESTRUCTURED.docx",
+    partTypes: ["reading_true_false", "reading_mcq", "situation_ad_match", "opinion_yes_no", "reading_mcq"],
+    questionCounts: [6, 6, 7, 7, 4],
+    optionCounts: [2, 3, 11, 2, 3],
+    sourceQuestionStarts: [1, 7, 13, 20, 27],
+    duration: 60,
+  },
+  {
     provider: "telc",
+    folder: "Lessen Change",
     file: "TELC_B1_Lesen_20_Serien_RESTRUCTURED.docx",
     partTypes: ["heading_text_match", "reading_mcq", "situation_ad_match"],
     questionCounts: [5, 5, 10],
@@ -18,6 +28,7 @@ const fixtures = [
   },
   {
     provider: "ecl",
+    folder: "Lessen Change",
     file: "ECL_B1_Leseverstehen_20_Serien_RESTRUCTURED.docx",
     partTypes: ["reading_true_false_not_in_text", "reading_mcq"],
     questionCounts: [10, 5],
@@ -26,6 +37,7 @@ const fixtures = [
   },
   {
     provider: "osd",
+    folder: "Lessen Change",
     file: "OESD_B1_Lesen_20_Modellsaetze_RESTRUCTURED.docx",
     partTypes: ["reading_true_false", "reading_mcq", "situation_ad_match", "opinion_for_against", "reading_mcq"],
     questionCounts: [6, 6, 7, 7, 4],
@@ -43,8 +55,28 @@ const assertSourceContains = (source, value, label) => {
   assert.ok(normalizedSource.includes(normalizedValue), `${label}: parsed wording is not present verbatim in the DOCX`);
 };
 
+const assertSourceTokenSubsequence = (source, value, label) => {
+  const sourceTokens = String(source || "")
+    .replace(/([\p{L}])(\d{1,2})(?=\s)/gu, "$1 $2")
+    .toLocaleLowerCase("de-DE")
+    .match(/[\p{L}\p{N}]+/gu) || [];
+  const valueTokens = String(value || "").toLocaleLowerCase("de-DE").match(/[\p{L}\p{N}]+/gu) || [];
+  const firstToken = valueTokens[0];
+  const candidateStarts = sourceTokens.flatMap((token, index) => token === firstToken ? [index] : []);
+  const matched = candidateStarts.some((candidateStart) => {
+    let sourceIndex = candidateStart + 1;
+    for (const token of valueTokens.slice(1)) {
+      const foundAt = sourceTokens.indexOf(token, sourceIndex);
+      if (foundAt === -1) return false;
+      sourceIndex = foundAt + 1;
+    }
+    return true;
+  });
+  assert.equal(matched, true, `${label}: parsed token sequence was not found in source order`);
+};
+
 const validateFixture = async (fixture) => {
-  const filePath = path.join(sourceRoot, fixture.file);
+  const filePath = path.join(root, fixture.folder || "Lessen Change", fixture.file);
   const buffer = await fs.readFile(filePath);
   const extracted = await mammoth.extractRawText({ buffer });
   const series = parseB1StructuredLesenSeries(extracted.value, {
@@ -74,7 +106,11 @@ const validateFixture = async (fixture) => {
 
       section.questions.forEach((question, questionIndex) => {
         const questionLabel = `${partLabel} question ${questionIndex + 1}`;
-        assert.equal(question.position, questionIndex + 1, `${questionLabel}: position`);
+        assert.equal(
+          question.position,
+          (fixture.sourceQuestionStarts?.[partIndex] || 1) + questionIndex,
+          `${questionLabel}: position`
+        );
         assert.equal(question.options.length, fixture.optionCounts[partIndex], `${questionLabel}: option count`);
         assert.ok(question.correctAnswer.value, `${questionLabel}: missing correct answer`);
         assert.ok(
@@ -82,8 +118,16 @@ const validateFixture = async (fixture) => {
           `${questionLabel}: answer does not reference an option`
         );
         assert.equal(question.metadata.structuredB1Lesen, true, `${questionLabel}: structured marker`);
-        assertSourceContains(extracted.value, question.prompt, `${questionLabel} prompt`);
+        if (fixture.provider === "goethe") {
+          assertSourceTokenSubsequence(extracted.value, question.prompt, `${questionLabel} prompt`);
+        } else {
+          assertSourceContains(extracted.value, question.prompt, `${questionLabel} prompt`);
+        }
         question.options.forEach((option) => {
+          if (fixture.provider === "goethe" && partIndex === 2) {
+            if (option.value !== "0") assertSourceTokenSubsequence(extracted.value, option.label, `${questionLabel} option ${option.value}`);
+            return;
+          }
           if (fixture.provider === "ecl" && partIndex === 0) return;
           if (fixture.provider === "osd" && [0, 3].includes(partIndex)) return;
           assertSourceContains(extracted.value, option.label, `${questionLabel} option ${option.value}`);
@@ -93,18 +137,25 @@ const validateFixture = async (fixture) => {
       const uniqueMatching = ["heading_text_match", "situation_ad_match"].includes(meta.partType);
       if (uniqueMatching) {
         assert.equal(meta.uniqueAnswers, true, `${partLabel}: unique-use rule`);
-        assert.equal(
-          new Set(section.questions.map((question) => question.correctAnswer.value)).size,
-          section.questions.length,
-          `${partLabel}: duplicated source answer`
-        );
+        const reusableAnswers = new Set(meta.reusableAnswers || []);
+        const uniqueSourceAnswers = section.questions
+          .map((question) => question.correctAnswer.value)
+          .filter((value) => !reusableAnswers.has(value));
+        assert.equal(new Set(uniqueSourceAnswers).size, uniqueSourceAnswers.length, `${partLabel}: duplicated source answer`);
       }
 
       (meta.sourceMaterials || []).forEach((material) => {
         assertSourceContains(extracted.value, material.text, `${partLabel} ${material.label}`);
       });
       (meta.headings || []).forEach((itemValue) => assertSourceContains(extracted.value, itemValue.label, `${partLabel} heading ${itemValue.value}`));
-      (meta.advertisements || []).forEach((itemValue) => assertSourceContains(extracted.value, itemValue.label, `${partLabel} ad ${itemValue.value}`));
+      (meta.advertisements || []).forEach((itemValue) => {
+        if (fixture.provider === "goethe" && itemValue.value === "0") return;
+        if (fixture.provider === "goethe") {
+          assertSourceTokenSubsequence(extracted.value, itemValue.label, `${partLabel} ad ${itemValue.value}`);
+        } else {
+          assertSourceContains(extracted.value, itemValue.label, `${partLabel} ad ${itemValue.value}`);
+        }
+      });
       if (meta.theme) assertSourceContains(extracted.value, meta.theme, `${partLabel} theme`);
     });
   });

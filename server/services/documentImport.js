@@ -4189,6 +4189,17 @@ const parseStructuredContent = (text, metadata) => {
     if (series.length) return series;
   }
   if (
+    provider === "goethe" &&
+    metadata.level === "B1" &&
+    metadata.sectionType === "read" &&
+    /(?:^|\n)PRÜFUNGSHEFT\s+\d{2}\s*\|\s*Thema\s*:/i.test(text) &&
+    /STUDENT-VISIBLE CONTENT/i.test(text) &&
+    /HIDDEN CORRECTION\s*-\s*PRÜFUNGSHEFT/i.test(text)
+  ) {
+    const series = parseB1StructuredLesenSeries(text, metadata);
+    if (series.length) return series;
+  }
+  if (
     ["ecl", "telc", "osd"].includes(provider) &&
     metadata.level === "B1" &&
     metadata.sectionType === "read" &&
@@ -4496,6 +4507,19 @@ const analyzeExamDocument = async ({ buffer, filename, mimetype }) => {
     title,
     language: "de",
   };
+  if (
+    provider === "goethe" &&
+    level === "B1" &&
+    sectionType === "read" &&
+    (getFileExtension(filename) === "docx" || String(mimetype || "").toLowerCase().includes("wordprocessingml")) &&
+    /HIDDEN CORRECTION\s*-\s*PRÜFUNGSHEFT/i.test(text)
+  ) {
+    const htmlResult = await mammoth.convertToHtml({ buffer });
+    Object.defineProperty(metadata, "structuredSourceHtml", {
+      value: htmlResult.value || "",
+      enumerable: false,
+    });
+  }
   const series = parseStructuredContent(text, metadata).map((item, index) => ({
     ...item,
     seriesNumber: Number.isFinite(item.seriesNumber) ? item.seriesNumber : index + 1,

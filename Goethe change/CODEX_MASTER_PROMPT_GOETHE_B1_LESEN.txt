@@ -1,0 +1,138 @@
+Please locate the Goethe B1 Lesen implementation package in the project and read every file completely before modifying the application. The package contains the restructured Goethe B1 Lesen document with Prüfungsheft 01-20. Implement Goethe B1 Lesen with the same architecture, visual quality and responsive behavior already used for TELC B1, ECL B1 and ÖSD B1.
+
+PRIMARY SOURCE OF TRUTH
+- Use `GOETHE_B1_Lesen_20_Pruefungshefte_RESTRUCTURED.docx` as the exact content and answer source.
+- The source cover says 19 Prüfungshefte, but the document actually contains Prüfungsheft 01 through 20 and corrections for all twenty. Implement all 20.
+- Preserve every original German word, title, instruction, text, question, option, number, advertisement, opinion and correct answer.
+- Do not paraphrase, translate, “correct”, shorten or invent examination content.
+
+SCOPE
+- Replace or complete only the Goethe B1 Lesen data and its required task renderers.
+- Keep the current exam UI, design system, colors, typography, unified question cards, selected states, routing, autosave, scoring, global timer, scroll behavior and responsive patterns.
+- Do not break TELC, ECL, ÖSD, Hören, Schreiben, Sprechen, authentication, payment, dashboard, admin or any unrelated functionality.
+
+SERIES STRUCTURE
+Create Goethe B1 Lesen Prüfungsheft 01-20. Every Prüfungsheft has five Teile and 30 questions in total:
+
+1. TEIL 1 - RICHTIG / FALSCH
+- One narrative reading text.
+- Six statements, Aufgaben 1-6.
+- One answer per statement: Richtig or Falsch.
+- Desktop: source text in the left reading panel and all six question cards in the right panel.
+- Mobile: source text first, then all question cards, with an accessible sticky or expandable “Text anzeigen” control after the student scrolls past the text.
+
+2. TEIL 2 - TWO ARTICLES + A/B/C
+- Two newspaper-style articles.
+- Six multiple-choice questions, Aufgaben 7-12.
+- Keep each article and its questions correctly associated; normally 7-9 belong to the first article and 10-12 to the second, as structured in the document.
+- Desktop: source article panel on the left and questions on the right. Provide clear Text A/Text B switching or stacked source cards without losing answers.
+- Mobile: clear article switcher/drawer and vertically stacked question cards.
+- Do not merge the two articles into one undifferentiated text.
+
+3. TEIL 3 - SITUATIONS + ADVERTISEMENTS
+- Seven situations, Aufgaben 13-19.
+- Ten advertisements, a-j.
+- The student matches an advertisement to each situation.
+- For three situations there is no matching advertisement; the student must choose `0` exactly as instructed.
+- Display all situations and the shared advertisement bank within the same Teil.
+- Desktop: situations with selectors on one side and a sticky/independently scrollable advertisement bank on the other.
+- Mobile: situation cards with an “Anzeigen ansehen” drawer, modal or bottom sheet.
+- Do not use drag-and-drop as the only interaction. Dropdown/select-card interaction must work with mouse, keyboard and touch.
+- Prevent accidental duplicate advertisement assignment when the task requires unique use, while still allowing the learner to change an answer. `0` may be selected wherever no advertisement fits.
+
+4. TEIL 4 - LESERBRIEFE, JA / NEIN
+- Seven reader letters/opinions, Aufgaben 20-26.
+- The student decides whether each person would participate/support the proposal: Ja or Nein.
+- Show the theme, each complete opinion and its Ja/Nein controls.
+- Keep all seven opinions in one Teil; do not create one page per opinion.
+
+5. TEIL 5 - RULES/INSTRUCTIONS + A/B/C
+- One instruction, house rule, regulation or information text.
+- Four multiple-choice questions, Aufgaben 27-30.
+- Desktop: source text left, questions right.
+- Mobile: source text first plus persistent “Text anzeigen” access while answering.
+
+ONE TEIL PER STEP
+- One complete Teil is one route/page/step.
+- All source material and all questions belonging to that Teil remain accessible on that step.
+- The page may scroll; do not force content into one viewport height.
+- Do not show one question per route.
+- “Weiter” opens the next Teil.
+- Students may return to previous Teile and edit answers before final submission, subject to the existing simulation navigation rules.
+
+EXACT INSTRUCTION PRESENTATION
+For every Teil:
+1. Show the Teil heading prominently.
+2. Show the exact original German instruction directly below it, visually separated and italicized.
+3. Show the source text/material.
+4. Show the student questions and answer controls.
+5. Keep corrections completely separate and hidden until submission.
+
+CURRENT UI MUST BE PRESERVED
+- Reuse the same polished unified question-card system already used in the other B1 Lesen certifications.
+- Each question must remain one coherent card: number badge + question text + integrated answer area.
+- Preserve refined selected states, responsive text fitting and current red accent system.
+- Do not reintroduce awkward floating headers, detached answer boxes, broken words or excessive empty space.
+- Keep Richtig/Falsch and Ja/Nein labels on one line whenever possible.
+- Long labels must wrap naturally without breaking individual words.
+
+RESPONSIVE DESIGN
+Desktop/tablet:
+- Use the established multi-panel exam layout where source material must remain visible while answering.
+- Allow panels to scroll independently.
+- Keep sticky navigation/status elements working.
+
+Mobile:
+- Avoid compressed side-by-side columns.
+- Stack content cleanly.
+- Use drawers, bottom sheets, accordions or sticky source buttons for long texts/advertisement banks.
+- No horizontal overflow.
+- Maintain comfortable tap targets and readable wrapping.
+
+SCROLLING
+Preserve the existing nested-scroll behavior:
+- The panel under the mouse pointer/touch gesture scrolls first.
+- The main page only continues after the active panel reaches its top or bottom boundary.
+- Do not make two panels scroll simultaneously.
+- Do not interfere with mouse wheel, touchpad, touch, keyboard scrolling or scrollbar dragging.
+
+GLOBAL TIMER
+Use the application's existing single global 60-minute timer for each complete Goethe B1 Lesen simulation:
+- Do not use the per-Teil source labels (10/20/10/15/10 minutes) as separate countdowns.
+- The source time labels may be retained as informational metadata only if the UI already displays source information, but they must never control navigation or timing.
+- The learner allocates the 60 minutes freely across all five Teile.
+- The timer must continue across Teil changes, refreshes and permitted navigation without resetting.
+- At 00:00, automatically save and submit the entire active simulation, lock answers and show the timeout message.
+
+ANSWERS, VALIDATION AND SCORING
+- Store the `HIDDEN CORRECTION` data separately from student-visible content.
+- Never expose answer keys in the client UI, initial page payload, DOM, accessible labels or obvious front-end state before submission when avoidable.
+- Validate each answer using the exact correction supplied for that Prüfungsheft.
+- Total score: 30 points, following the source structure: Teil 1 = 6, Teil 2 = 6, Teil 3 = 7, Teil 4 = 7, Teil 5 = 4.
+- Preserve unanswered state, answer changes, autosave, final submission and correction review.
+- On the correction page, clearly show the student's answer, correct answer and existing explanation pattern without altering the original exam text.
+
+DATA AND ARCHITECTURE
+- Follow the same data schema and reusable rendering components used for TELC/ECL/ÖSD where compatible.
+- Add a Goethe-specific adapter only where the task semantics differ.
+- Do not hardcode one Prüfungsheft into the UI component.
+- Ensure the application maps all 20 Prüfungshefte, all 5 Teile and all 30 questions per Prüfungsheft correctly.
+- Keep stable IDs for certification, level, series, Teil, question, source text and options.
+- Preserve database compatibility and migrations safely.
+
+QUALITY AND TESTING
+Before finishing, verify every Prüfungsheft 01-20:
+- five Teile are present;
+- questions 1-30 are present and ordered correctly;
+- both Teil 2 articles are mapped correctly;
+- Teil 3 has seven situations, ten advertisements and the `0` option;
+- Teil 4 has seven opinions with Ja/Nein;
+- Teil 5 has four a/b/c questions;
+- answer keys and scores are correct;
+- no answer is visible before submission;
+- global 60-minute timer persists and auto-submits correctly;
+- desktop and mobile layouts have no clipping, word splitting, overlap or horizontal overflow;
+- nested scrolling, navigation, autosave, refresh recovery and correction screens work;
+- TELC, ECL and ÖSD remain unaffected.
+
+Do not stop after importing the content. Run the relevant tests/build, inspect the implemented screens, fix all mapping and responsive defects, and provide a concise summary of changed files, tests run and any migrations made.

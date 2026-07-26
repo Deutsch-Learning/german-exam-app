@@ -2,6 +2,11 @@ const assert = require("node:assert/strict");
 const pool = require("../db");
 
 const expected = {
+  goethe: {
+    partTypes: ["reading_true_false", "reading_mcq", "situation_ad_match", "opinion_yes_no", "reading_mcq"],
+    questionCounts: [6, 6, 7, 7, 4],
+    sourceQuestionStarts: [1, 7, 13, 20, 27],
+  },
   telc: {
     partTypes: ["heading_text_match", "reading_mcq", "situation_ad_match"],
     questionCounts: [5, 5, 10],
@@ -86,18 +91,22 @@ const verifyProvider = async (provider, contract) => {
       assert.equal(metadata.partType, contract.partTypes[partIndex], `${partLabel}: task type`);
       assert.equal(section.questions.length, contract.questionCounts[partIndex], `${partLabel}: question count`);
       section.questions.forEach((question, questionIndex) => {
-        assert.equal(question.position, questionIndex + 1, `${partLabel}: question position`);
+        assert.equal(
+          question.position,
+          (contract.sourceQuestionStarts?.[partIndex] || 1) + questionIndex,
+          `${partLabel}: question position`
+        );
         const options = Array.isArray(question.options) ? question.options : [];
         const correctValue = String(question.correctAnswer.value || "");
         assert.ok(correctValue, `${partLabel}: missing answer key`);
         assert.ok(options.some((option) => String(option.value) === correctValue), `${partLabel}: answer key not in options`);
       });
       if (metadata.uniqueAnswers) {
-        assert.equal(
-          new Set(section.questions.map((question) => String(question.correctAnswer.value))).size,
-          section.questions.length,
-          `${partLabel}: duplicate unique-use answer`
-        );
+        const reusableAnswers = new Set(metadata.reusableAnswers || []);
+        const uniqueAnswers = section.questions
+          .map((question) => String(question.correctAnswer.value))
+          .filter((value) => !reusableAnswers.has(value));
+        assert.equal(new Set(uniqueAnswers).size, uniqueAnswers.length, `${partLabel}: duplicate unique-use answer`);
       }
     });
   });
