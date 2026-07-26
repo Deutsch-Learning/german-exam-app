@@ -61,6 +61,7 @@ const {
 } = require("./services/ttsService");
 const goetheB1HoerenQuestionFixes = require("./data/goetheB1HoerenQuestionFixes.json");
 const osdB1HoerenPart4Options = require("./data/osdB1HoerenPart4Options.json");
+const osdB2HoerenTeil2Fixes = require("./data/osdB2HoerenTeil2Fixes.json");
 const {
   getAppBaseUrl,
   normalizePublicUrl,
@@ -3403,6 +3404,9 @@ const buildListeningTask = (question, index = 0, listeningAudioMap = new Map(), 
   const sourceFix = sourceFixes?.[`${partNumber}:${sourceQuestionNumber}`] || null;
   const questionType = String(sourceFix?.questionType || question.question_type || "").toLowerCase();
   const correctValue = sourceFix?.correctAnswer?.value || extractCorrectValue(question.correct_answer);
+  const sourceAcceptedAnswers = Array.isArray(sourceFix?.correctAnswer?.acceptedAnswers)
+    ? sourceFix.correctAnswer.acceptedAnswers.map((value) => cleanPlainText(value)).filter(Boolean)
+    : [];
   const options = normalizeChoiceOptions(sourceFix?.options || question.options)
     .map((option) => ({ ...option, label: cleanListeningOptionLabel(option.label) }))
     .filter((option) => option.label);
@@ -3414,9 +3418,14 @@ const buildListeningTask = (question, index = 0, listeningAudioMap = new Map(), 
     hint: "Hören Sie den Audiotext aufmerksam und beantworten Sie die Aufgaben.",
     explanation: sourceFix?.explanation || question.explanation || "Antwort aus dem importierten Hörverstehen-Modul.",
     sourceQuestionId: question.id,
+    points: Number.isFinite(Number(sourceFix?.points)) ? Number(sourceFix.points) : undefined,
     audio: resolveListeningAudioForQuestion(question, listeningAudioMap),
     contentStyle: asJsonObject(metadata.contentStyle),
     ...buildTaskPartMeta(question, index),
+    sourceMetadata: {
+      ...buildTaskPartMeta(question, index).sourceMetadata,
+      ...stripStudentHiddenMetadata(sourceFix?.sourceMetadata || {}),
+    },
     partInstructions: LISTENING_STUDENT_INSTRUCTION,
   };
 
@@ -3451,7 +3460,10 @@ const buildListeningTask = (question, index = 0, listeningAudioMap = new Map(), 
     ...base,
     type: "blank",
     correct: correctValue,
-    alternatives: correctValue ? [correctValue.toLowerCase(), correctValue.toUpperCase()] : [],
+    alternatives: Array.from(new Set([
+      ...sourceAcceptedAnswers,
+      ...(correctValue ? [correctValue.toLowerCase(), correctValue.toUpperCase()] : []),
+    ])),
   };
 };
 
@@ -3898,6 +3910,69 @@ const getOsdB1HoerenQuestionFixesForExam = (exam) => {
   );
 };
 
+const buildOsdB2AnswerAlternatives = (answer, prompt = "") => {
+  const value = cleanPlainText(answer);
+  if (!value) return [];
+  const alternatives = new Set();
+  const withoutParenthetical = value.replace(/\s*\([^)]*\)\s*/g, " ").replace(/\s+/g, " ").trim();
+  if (withoutParenthetical && withoutParenthetical !== value) alternatives.add(withoutParenthetical);
+
+  for (const candidate of [value, withoutParenthetical]) {
+    if (!candidate) continue;
+    const withoutArticle = candidate.replace(/^(?:der|die|das|den|dem|ein|eine|einen|einem|einer)\s+/i, "").trim();
+    if (withoutArticle && withoutArticle !== candidate) alternatives.add(withoutArticle);
+    const withoutUnit = candidate.replace(
+      /\s+(?:Prozent|Euro|Franken|Kilometer|km|Minuten|Stunden|Punkte|Monate|Jahre|Tage|Stellen|Mitglieder|Personen|Betriebe|Gaeste|Naechte|Mangelberufe|Kernmassnahmen|Massnahmen|Strategien|Forderungen|Gruppen|Kategorien|EU-Staaten)$/i,
+      ""
+    ).trim();
+    if (withoutUnit && withoutUnit !== candidate) alternatives.add(withoutUnit);
+  }
+
+  const blankCount = (String(prompt).match(/___/g) || []).length;
+  if (blankCount <= 1) {
+    value.split("/").map((part) => part.trim()).filter(Boolean).forEach((part) => alternatives.add(part));
+  }
+  alternatives.delete(value);
+  return Array.from(alternatives);
+};
+
+const getOsdB2HoerenTeil2DefinitionForExam = (exam) => {
+  const provider = normalizeProviderId(exam?.provider || exam?.exam_type || "");
+  const level = String(exam?.level || "").toUpperCase();
+  const sectionType = String(exam?.section_type || "").toLowerCase();
+  const seriesNumber = String(Number(exam?.series_number) || "");
+  if (provider !== "osd" || level !== "B2" || sectionType !== "listen" || !seriesNumber) return null;
+  return osdB2HoerenTeil2Fixes.series?.[seriesNumber] || null;
+};
+
+const getOsdB2HoerenQuestionFixesForExam = (exam) => {
+  const definition = getOsdB2HoerenTeil2DefinitionForExam(exam);
+  if (!definition?.items?.length) return null;
+
+  const fixes = {};
+  for (let sourceQuestionNumber = 1; sourceQuestionNumber <= 10; sourceQuestionNumber += 1) {
+    fixes[`1:${sourceQuestionNumber}`] = { points: 1 };
+  }
+  for (const item of definition.items) {
+    fixes[`2:${item.number}`] = {
+      questionType: "fill_blank",
+      prompt: item.prompt,
+      correctAnswer: {
+        value: item.answer,
+        acceptedAnswers: buildOsdB2AnswerAlternatives(item.answer, item.prompt),
+      },
+      explanation: `Loesung laut Loesungsschluessel: ${item.answer}.`,
+      points: 1 / 3,
+      sourceMetadata: {
+        osdB2HoerenTeil2: true,
+        detailItemNumber: item.number,
+        layout: definition.layout,
+      },
+    };
+  }
+  return fixes;
+};
+
 const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {}, listeningAudioItems = [] }) => {
   const moduleId = exam.section_type;
   const moduleMeta = PUBLIC_MODULE_META[moduleId] ?? PUBLIC_MODULE_META.read;
@@ -3908,21 +3983,39 @@ const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {},
   );
   const title = applyExamAlias(metadata.title || sourceLabel || exam.name, routeMeta);
   const examType = routeMeta.publicExamType || exam.exam_type || "Goethe-Zertifikat";
-  const sectionSummaries = sections.map((section) => ({
+  const osdB2HoerenTeil2 = getOsdB2HoerenTeil2DefinitionForExam(exam);
+  const sectionSummaries = sections.map((section) => {
+    const partNumber = Number(section.part_number) || Number(section.position) || null;
+    const isOsdB2Teil2 = moduleId === "listen" && partNumber === 2 && Boolean(osdB2HoerenTeil2);
+    return {
     id: `part-${section.part_number || section.position}`,
     label: `Teil ${section.part_number || section.position}`,
-    number: Number(section.part_number) || Number(section.position) || null,
-    heading: applyExamAlias(section.title, routeMeta),
+    number: partNumber,
+    heading: isOsdB2Teil2
+      ? `Aufgabe 2: ${osdB2HoerenTeil2.title}`
+      : applyExamAlias(section.title, routeMeta),
     text: moduleId === "listen"
-      ? LISTENING_STUDENT_INSTRUCTION
+      ? (isOsdB2Teil2 ? osdB2HoerenTeil2.instructions : LISTENING_STUDENT_INSTRUCTION)
       : clipText(applyExamAlias(section.instructions || section.title, routeMeta), moduleId === "speak" ? 12000 : 2600),
     instructions: moduleId === "listen"
-      ? LISTENING_STUDENT_INSTRUCTION
+      ? (isOsdB2Teil2 ? osdB2HoerenTeil2.instructions : LISTENING_STUDENT_INSTRUCTION)
       : clipText(applyExamAlias(section.instructions || section.title, routeMeta), moduleId === "speak" ? 12000 : 5200),
     durationMinutes: Number(section.duration_minutes) || null,
-    points: Number(section.points) || null,
-    sourceMetadata: stripStudentHiddenMetadata(asJsonObject(section.metadata)),
-  }));
+    points: isOsdB2Teil2 ? Number(osdB2HoerenTeil2.points) : Number(section.points) || null,
+    sourceMetadata: {
+      ...stripStudentHiddenMetadata(asJsonObject(section.metadata)),
+      ...(isOsdB2Teil2 ? {
+        osdB2HoerenTeil2: {
+          title: osdB2HoerenTeil2.title,
+          layout: osdB2HoerenTeil2.layout,
+          itemCount: osdB2HoerenTeil2.items.length,
+          preparationSeconds: osdB2HoerenTeil2.preparationSeconds,
+          listeningPasses: osdB2HoerenTeil2.listeningPasses,
+        },
+      } : {}),
+    },
+    };
+  });
 
   let tasks;
   const listeningAudioMap = new Map(
@@ -3961,7 +4054,9 @@ const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {},
   } else if (moduleId === "speak") {
     tasks = questions.map((question, index) => buildSpeakingTask(question, index));
   } else if (moduleId === "listen") {
-    const sourceFixes = getGoetheB1HoerenQuestionFixesForExam(exam) || getOsdB1HoerenQuestionFixesForExam(exam);
+    const sourceFixes = getGoetheB1HoerenQuestionFixesForExam(exam)
+      || getOsdB1HoerenQuestionFixesForExam(exam)
+      || getOsdB2HoerenQuestionFixesForExam(exam);
     tasks = questions.map((question, index) => buildListeningTask(question, index, listeningAudioMap, sourceFixes));
   } else {
     tasks = questions.map((question, index) => buildReadingTask(question, index));

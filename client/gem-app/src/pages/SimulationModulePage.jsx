@@ -2302,8 +2302,15 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const isStructuredB1LesenCurrentPart =
     module.id === "read" &&
     Boolean(currentPart?.sourceMetadata?.structuredB1Lesen?.partType || currentTask?.sourceMetadata?.structuredB1Lesen);
+  const isOsdB2HoerenTeil2CurrentPart =
+    module.id === "listen" &&
+    Boolean(currentPart?.sourceMetadata?.osdB2HoerenTeil2 || currentTask?.sourceMetadata?.osdB2HoerenTeil2);
   const usesFullPartNavigation =
-    module.id === "sprach" || isGoetheB2LesenCurrentPart || isStructuredB2LesenCurrentPart || isStructuredB1LesenCurrentPart;
+    module.id === "sprach"
+    || isGoetheB2LesenCurrentPart
+    || isStructuredB2LesenCurrentPart
+    || isStructuredB1LesenCurrentPart
+    || isOsdB2HoerenTeil2CurrentPart;
   const moduleItemSingular = isTopicModule(module.id) ? "Thema" : "Frage";
   const moduleItemPlural = getModuleCountLabel(module.id);
   const currentTaskDuration = getTaskDuration(module, currentTask);
@@ -4890,6 +4897,15 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     );
 
     if (module.id === "listen") {
+      const detailTasks = isOsdB2HoerenTeil2CurrentPart
+        ? (currentPart?.taskIndexes || [])
+          .map((taskIndex) => ({ taskIndex, task: module.tasks[taskIndex] }))
+          .filter(({ task }) => task)
+        : [];
+      const answeredDetailCount = detailTasks.filter(({ taskIndex, task }) =>
+        getTaskAnswered(module, task, answers[taskIndex])
+      ).length;
+
       return (
         <div className={styles.listeningLayout}>
           <section className={styles.audioPanel} ref={listeningPlayerAnchorRef}>
@@ -4941,21 +4957,60 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             ) : null}
           </section>
 
-          <section className={styles.questionPane}>
-            <div className={styles.questionTopline}>
-              <span className={styles.questionStep}>Frage {currentIndex + 1} von {totalTasks}</span>
-              <span>{level}</span>
-            </div>
-            <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
-            {renderQuestionHeading(currentTask.question, `listen-question-${currentTask.id}`)}
-            {renderQuestionControl(currentTask, currentAnswer)}
-            {!simulationMode ? (
-              <>
-                {!currentAnswered ? <p className={styles.hintLine}><WandSparkles size={16} /> {currentTask.hint}</p> : null}
-                <FeedbackBox task={currentTask} answer={currentAnswer} />
-              </>
-            ) : null}
-          </section>
+          {isOsdB2HoerenTeil2CurrentPart ? (
+            <section className={`${styles.questionPane} ${styles.osdB2DetailPane}`}>
+              <div className={styles.osdB2DetailHeader}>
+                <div>
+                  <p className={styles.partMiniLabel}>Aufgabe 2</p>
+                  <h2 translate="no">
+                    {currentPart?.sourceMetadata?.osdB2HoerenTeil2?.title || "Detailinformationen"}
+                  </h2>
+                  <p translate="no">Ergaenzen Sie das Informationsblatt.</p>
+                </div>
+                <span>{answeredDetailCount}/{detailTasks.length} beantwortet</span>
+              </div>
+
+              <div className={styles.osdB2DetailList}>
+                {detailTasks.map(({ taskIndex, task }) => {
+                  const answer = answers[taskIndex] ?? "";
+                  return (
+                    <article className={styles.osdB2DetailRow} key={task.id}>
+                      <span className={styles.osdB2DetailNumber} aria-hidden="true">
+                        {task.sourceQuestionNumber || taskIndex + 1}
+                      </span>
+                      <label className={styles.osdB2DetailField}>
+                        <span translate="no">{task.question}</span>
+                        <input
+                          className={styles.textInput}
+                          value={answer}
+                          onChange={(event) => setAnswerForIndex(taskIndex, event.target.value)}
+                          placeholder="Antwort eintragen"
+                          aria-label={`Antwort zu Detailinformation ${task.sourceQuestionNumber || taskIndex + 1}`}
+                        />
+                      </label>
+                      {!simulationMode && answer ? <FeedbackBox task={task} answer={answer} /> : null}
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+          ) : (
+            <section className={styles.questionPane}>
+              <div className={styles.questionTopline}>
+                <span className={styles.questionStep}>Frage {currentIndex + 1} von {totalTasks}</span>
+                <span>{level}</span>
+              </div>
+              <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
+              {renderQuestionHeading(currentTask.question, `listen-question-${currentTask.id}`)}
+              {renderQuestionControl(currentTask, currentAnswer)}
+              {!simulationMode ? (
+                <>
+                  {!currentAnswered ? <p className={styles.hintLine}><WandSparkles size={16} /> {currentTask.hint}</p> : null}
+                  <FeedbackBox task={currentTask} answer={currentAnswer} />
+                </>
+              ) : null}
+            </section>
+          )}
         </div>
       );
     }

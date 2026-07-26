@@ -1,0 +1,1337 @@
+{
+  "source": "OSD_B2_Hoeren_20_Modellpruefungen.pdf",
+  "sourceCompleteness": "The PDF contains complete tasks and keys for series 1-7 only; series 8-20 are structural placeholders.",
+  "taskType": "Aufgabe 2 - Detailinformationen / Informationsblatt",
+  "series": {
+    "1": {
+      "title": "Homeoffice und die Zukunft der Arbeit",
+      "instructions": "Sie hoeren nun ein Oe1-Interview mit Dr. Karin Froehlich, Arbeitsmarktexpertin der Arbeiterkammer Wien. Sie hoeren das Interview zweimal. Lesen Sie zuerst die Aufgaben. Sie haben 90 Sekunden Zeit.",
+      "points": 10,
+      "listeningPasses": 2,
+      "preparationSeconds": 90,
+      "layout": "information-sheet",
+      "items": [
+        {
+          "number": 1,
+          "prompt": "Dr. Froehlich arbeitet fuer die Institution: ___",
+          "answer": "Arbeiterkammer Wien",
+          "explanation": "Institution mentionnee en introduction."
+        },
+        {
+          "number": 2,
+          "prompt": "Sie forscht zum Thema Homeoffice seit dem Jahr: ___",
+          "answer": "2018",
+          "explanation": "Date precise, avant la pandemie."
+        },
+        {
+          "number": 3,
+          "prompt": "Laut der Erhebung arbeiten rund ___ Oesterreicher im Homeoffice.",
+          "answer": "1,4 Millionen",
+          "explanation": "Chiffre exact."
+        },
+        {
+          "number": 4,
+          "prompt": "Dieser Anteil entspricht etwa ___ % aller Angestellten.",
+          "answer": "34 Prozent",
+          "explanation": "Proportion precise."
+        },
+        {
+          "number": 5,
+          "prompt": "Wiener Beschaeftigte sparen taeglich durchschnittlich ___ Minuten Pendelzeit.",
+          "answer": "47 Minuten",
+          "explanation": "Chiffre exact."
+        },
+        {
+          "number": 6,
+          "prompt": "___ % der Befragten berichten von gesteigerter Produktivitaet.",
+          "answer": "71 Prozent",
+          "explanation": "Statistique clee."
+        },
+        {
+          "number": 7,
+          "prompt": "Produktivitaet steigt vor allem bei Taetigkeiten wie Textverfassen und: ___",
+          "answer": "Programmieren",
+          "explanation": "Deux exemples cites."
+        },
+        {
+          "number": 8,
+          "prompt": "___ % vermissen den persoenlichen Kontakt zu Kolleginnen.",
+          "answer": "58 Prozent",
+          "explanation": "Chiffre exact."
+        },
+        {
+          "number": 9,
+          "prompt": "Im Homeoffice leisten Beschaeftigte durchschnittlich ___ Ueberstunden mehr pro Woche.",
+          "answer": "2,3 Ueberstunden",
+          "explanation": "Chiffre precis."
+        },
+        {
+          "number": 10,
+          "prompt": "Branchen mit ueber 80% Homeoffice-Anteil: IT und ___",
+          "answer": "Finanzdienstleistungen",
+          "explanation": "Deux branches citees avec ce taux."
+        },
+        {
+          "number": 11,
+          "prompt": "Im ___ und Handel ist Homeoffice kaum moeglich.",
+          "answer": "Gesundheitswesen",
+          "explanation": "Deux secteurs peu compatibles."
+        },
+        {
+          "number": 12,
+          "prompt": "Das oesterreichische Homeoffice-Gesetz wurde im Jahr ___ verabschiedet.",
+          "answer": "2021",
+          "explanation": "Date legislative precise."
+        },
+        {
+          "number": 13,
+          "prompt": "Beschaeftigte koennen bis zu ___ Euro jaehrlich steuerlich absetzen.",
+          "answer": "300 Euro",
+          "explanation": "Montant exact."
+        },
+        {
+          "number": 14,
+          "prompt": "Voraussetzung fuer Homeoffice ist eine ___, der der Betriebsrat zustimmen muss.",
+          "answer": "Betriebsvereinbarung",
+          "explanation": "Condition legale."
+        },
+        {
+          "number": 15,
+          "prompt": "Dr. Froehlich empfiehlt das sogenannte ___-Modell.",
+          "answer": "3-2-Modell",
+          "explanation": "Nom exact du modele recommande."
+        },
+        {
+          "number": 16,
+          "prompt": "In diesem Modell: ___ Tage Buero, ___ Tage Homeoffice.",
+          "answer": "3 Tage Buero / 2 Tage Homeoffice",
+          "explanation": "Structure exacte du modele."
+        },
+        {
+          "number": 17,
+          "prompt": "Firmen mit diesem Modell verzeichnen ___ % weniger Krankenstaende.",
+          "answer": "23 Prozent",
+          "explanation": "Chiffre de reduction."
+        },
+        {
+          "number": 18,
+          "prompt": "Mitarbeiterzufriedenheit: durchschnittlich ___ von 5 Punkten.",
+          "answer": "4,1 Punkte",
+          "explanation": "Score exact."
+        },
+        {
+          "number": 19,
+          "prompt": "Den Leitfaden fuer KMU plant die AK im ___ herauszugeben.",
+          "answer": "Feber",
+          "explanation": "Vocabulaire autrichien 'Feber' = fevrier. Piege lexical important."
+        },
+        {
+          "number": 20,
+          "prompt": "Das Hauptproblem des Homeoffice laut Dr. Froehlich: ___",
+          "answer": "soziale Isolation",
+          "explanation": "Formule comme 'Hauptproblem'."
+        },
+        {
+          "number": 21,
+          "prompt": "Die 'Always-on'-Kultur bedeutet, dass viele sich abends nicht ___ koennen.",
+          "answer": "abschalten",
+          "explanation": "Verbe exact utilise dans le texte."
+        },
+        {
+          "number": 22,
+          "prompt": "Die Studie wurde veroeffentlicht im Monat: ___",
+          "answer": "Jaenner",
+          "explanation": "Vocabulaire autrichien 'Jaenner' = janvier."
+        },
+        {
+          "number": 23,
+          "prompt": "Der IT-Bereich hat mehr als ___ % Homeoffice-Anteil.",
+          "answer": "80 Prozent",
+          "explanation": "Indique pour IT et Finanzdienstleistungen."
+        },
+        {
+          "number": 24,
+          "prompt": "Das Homeoffice-Gesetz regelt die steuerliche ___ von Arbeitsmitteln.",
+          "answer": "Absetzbarkeit",
+          "explanation": "Terme juridique precis."
+        },
+        {
+          "number": 25,
+          "prompt": "Homeoffice foerdert die Produktivitaet besonders bei ___ Taetigkeiten.",
+          "answer": "konzentrierten",
+          "explanation": "Adjectif exact utilise."
+        },
+        {
+          "number": 26,
+          "prompt": "Welches Gremium muss Homeoffice im Unternehmen zustimmen?",
+          "answer": "der Betriebsrat",
+          "explanation": "Information legale."
+        },
+        {
+          "number": 27,
+          "prompt": "Wie hoch ist das Lohnniveau im Homeoffice? Erstens: ___ Minuten Pendelzeit gespart.",
+          "answer": "47 Minuten",
+          "explanation": "Premier avantage cite — consolidation."
+        },
+        {
+          "number": 28,
+          "prompt": "Die Erhebung stammt aus dem Monat Jaenner. Was entspricht 'Jaenner' auf Hochdeutsch?",
+          "answer": "Januar",
+          "explanation": "Item de vocabulaire autrichien B2."
+        },
+        {
+          "number": 29,
+          "prompt": "Welches ist der zweite genannte Vorteil des Homeoffice?",
+          "answer": "gesteigerte Produktivitaet (71%)",
+          "explanation": "'erstens' = Pendelzeit, 'zweitens' = Produktivitaet."
+        },
+        {
+          "number": 30,
+          "prompt": "Welche Losung schlaegt Dr. Froehlich fuer die Zukunft vor?",
+          "answer": "das 3-2-Modell (3 Tage Buero, 2 Tage Homeoffice)",
+          "explanation": "Recommandation principale conclusive."
+        }
+      ]
+    },
+    "2": {
+      "title": "Energiewende - Chancen fuer die Alpenregion",
+      "instructions": "Sie hoeren ein SRF Wissen-Feature mit Prof. Thomas Maurer, Energieforscher an der ETH Zuerich. Lesen Sie die Aufgaben. 90 Sekunden.",
+      "points": 10,
+      "listeningPasses": 2,
+      "preparationSeconds": 90,
+      "layout": "information-sheet",
+      "items": [
+        {
+          "number": 1,
+          "prompt": "Prof. Maurer arbeitet an der: ___",
+          "answer": "ETH Zuerich",
+          "explanation": "Institution mentionnee."
+        },
+        {
+          "number": 2,
+          "prompt": "Der Anteil der Wasserkraft am Schweizer Strom: ___ %",
+          "answer": "56 Prozent",
+          "explanation": "Chiffre precis."
+        },
+        {
+          "number": 3,
+          "prompt": "Die Schweiz investiert jaehrlich ___ Milliarden Franken in erneuerbare Energien.",
+          "answer": "8,2 Milliarden Franken",
+          "explanation": "Chiffre exact."
+        },
+        {
+          "number": 4,
+          "prompt": "___ % des oesterreichischen Stroms stammt aus erneuerbaren Quellen.",
+          "answer": "81 Prozent",
+          "explanation": "Chiffre actuel."
+        },
+        {
+          "number": 5,
+          "prompt": "Oesterreich will 100% erneuerbare Energie bis: ___",
+          "answer": "2030",
+          "explanation": "Objectif national."
+        },
+        {
+          "number": 6,
+          "prompt": "Groesste Herausforderung der Energiewende laut Prof. Maurer: ___",
+          "answer": "die Speicherung ueberschuessiger Energie",
+          "explanation": "Formule comme 'groesste Herausforderung'."
+        },
+        {
+          "number": 7,
+          "prompt": "Wirkungsgrad von Pumpspeicherkraftwerken: ca. ___ %",
+          "answer": "80 Prozent",
+          "explanation": "Donnee technique."
+        },
+        {
+          "number": 8,
+          "prompt": "Laenge der Tiroler Wasserstoffpipeline: ___ km",
+          "answer": "47 Kilometer",
+          "explanation": "Mesure precise."
+        },
+        {
+          "number": 9,
+          "prompt": "Die Pipeline soll bis ___ fertiggestellt sein.",
+          "answer": "2026",
+          "explanation": "Annee d'achevement."
+        },
+        {
+          "number": 10,
+          "prompt": "Kosten der Wasserstoffpipeline: ___",
+          "answer": "380 Millionen Euro",
+          "explanation": "Cout exact."
+        },
+        {
+          "number": 11,
+          "prompt": "Bis 2030 entstehen in Oesterreich ca. ___ neue Stellen in erneuerbaren Energien.",
+          "answer": "45.000 Stellen",
+          "explanation": "Estimation chiffree."
+        },
+        {
+          "number": 12,
+          "prompt": "Energiegemeinschaften sind moeglich seit dem Gesetz von: ___",
+          "answer": "2021",
+          "explanation": "Annee de la loi."
+        },
+        {
+          "number": 13,
+          "prompt": "Wie viele Energiegemeinschaften sind aktiv? ___",
+          "answer": "1.200",
+          "explanation": "Chiffre actuel."
+        },
+        {
+          "number": 14,
+          "prompt": "Durchschnittliche Mitgliederzahl pro Gemeinschaft: ___",
+          "answer": "34 Mitglieder",
+          "explanation": "Moyenne precise."
+        },
+        {
+          "number": 15,
+          "prompt": "Genehmigungsverfahren dauern derzeit ___ bis ___ Jahre.",
+          "answer": "drei bis fuenf Jahre",
+          "explanation": "Duree actuelle."
+        },
+        {
+          "number": 16,
+          "prompt": "Aktuell fliessen ___ % des BIP in Energieforschung.",
+          "answer": "0,4 Prozent",
+          "explanation": "Chiffre actuel."
+        },
+        {
+          "number": 17,
+          "prompt": "Laut Prof. Maurer waeren ___ % des BIP noetig.",
+          "answer": "0,8 Prozent",
+          "explanation": "Chiffre requis."
+        },
+        {
+          "number": 18,
+          "prompt": "Zweite politische Massnahme: hoehere Investitionen in: ___",
+          "answer": "Netzausbau",
+          "explanation": "Deuxieme mesure citee."
+        },
+        {
+          "number": 19,
+          "prompt": "Englischer Begriff fuer 'gerechte Transformation': ___",
+          "answer": "Just Transition",
+          "explanation": "Terme anglais utilise explicitement."
+        },
+        {
+          "number": 20,
+          "prompt": "Ersten Faktor der Alpenregion: ___ Bedingungen (Wasserkraft).",
+          "answer": "geographische",
+          "explanation": "Premier facteur cite."
+        },
+        {
+          "number": 21,
+          "prompt": "Dritten Faktor: hohes ___",
+          "answer": "Investitionsvolumen",
+          "explanation": "Troisieme facteur."
+        },
+        {
+          "number": 22,
+          "prompt": "Pumpspeicherkraftwerke sind die ___ Speichermethode.",
+          "answer": "effizienteste (= 80%)",
+          "explanation": "Superlatif implique."
+        },
+        {
+          "number": 23,
+          "prompt": "Welche Industrie ist von der Energiewende betroffen?",
+          "answer": "die Kohleindustrie",
+          "explanation": "Branche traditionnelle citee."
+        },
+        {
+          "number": 24,
+          "prompt": "Was sind Energiegemeinschaften? Rechtliche Zusammenschluesse von Privatpersonen und: ___",
+          "answer": "Betrieben",
+          "explanation": "Definition du terme."
+        },
+        {
+          "number": 25,
+          "prompt": "SRF-Format dieses Beitrags: SRF ___",
+          "answer": "Wissen",
+          "explanation": "Mentionne dans le jingle."
+        },
+        {
+          "number": 26,
+          "prompt": "Zweiter Faktor der Alpenregion: ___",
+          "answer": "starke politische Unterstuetzung",
+          "explanation": "Deuxieme element de l'enumeration."
+        },
+        {
+          "number": 27,
+          "prompt": "Wie viele politische Massnahmen empfiehlt Prof. Maurer?",
+          "answer": "drei Massnahmen",
+          "explanation": "Chiffre annonce."
+        },
+        {
+          "number": 28,
+          "prompt": "Erste politische Massnahme: Vereinfachung der: ___",
+          "answer": "Genehmigungsverfahren",
+          "explanation": "Premiere mesure."
+        },
+        {
+          "number": 29,
+          "prompt": "Wasserstoff gewinnt an: ___",
+          "answer": "Bedeutung",
+          "explanation": "Formulation exacte."
+        },
+        {
+          "number": 30,
+          "prompt": "Wie viele Faktoren machen die Alpenregion zum Pionier?",
+          "answer": "drei Faktoren",
+          "explanation": "Chiffre annonce en debut."
+        }
+      ]
+    },
+    "3": {
+      "title": "Pflegeberuf in der Schweiz - Attraktivitaet und Zukunft",
+      "instructions": "Sie hoeren ein SRF Ratgeber-Interview mit Markus Rueegg, Direktor des SBK in Bern. Lesen Sie die Aufgaben. 90 Sekunden.",
+      "points": 10,
+      "listeningPasses": 2,
+      "preparationSeconds": 90,
+      "layout": "information-sheet",
+      "items": [
+        {
+          "number": 1,
+          "prompt": "Markus Rueegg leitet den SBK mit Sitz in: ___",
+          "answer": "Bern",
+          "explanation": "Lieu mentionne."
+        },
+        {
+          "number": 2,
+          "prompt": "Wie viele Pflegestellen sind derzeit offen? ___",
+          "answer": "12.400",
+          "explanation": "Chiffre precis."
+        },
+        {
+          "number": 3,
+          "prompt": "___ % der diplomierten Pflegenden verlassen den Beruf in den ersten 5 Jahren.",
+          "answer": "43 Prozent",
+          "explanation": "Statistique clee."
+        },
+        {
+          "number": 4,
+          "prompt": "Eine Pflegefachfrau verdient durchschnittlich ___ Franken brutto pro Monat.",
+          "answer": "6.800 Franken",
+          "explanation": "Salaire moyen."
+        },
+        {
+          "number": 5,
+          "prompt": "Eine Ingenieurin mit gleichwertiger Ausbildung verdient ___ Franken.",
+          "answer": "8.400 Franken",
+          "explanation": "Comparaison salariale."
+        },
+        {
+          "number": 6,
+          "prompt": "Der SBK kooperiert mit ___ Fachhochschulen.",
+          "answer": "24 Fachhochschulen",
+          "explanation": "Chiffre exact."
+        },
+        {
+          "number": 7,
+          "prompt": "Das SBK-Programm fuer Wiedereinsteiger heisst: '___'",
+          "answer": "Pflege kehrt zurueck",
+          "explanation": "Nom exact du programme."
+        },
+        {
+          "number": 8,
+          "prompt": "Wie viele Personen wurden durch dieses Programm reaktiviert? ___",
+          "answer": "2.300 Personen",
+          "explanation": "Bilan du programme."
+        },
+        {
+          "number": 9,
+          "prompt": "___ % aller Pflegenden in der Schweiz stammen aus dem EU-Ausland.",
+          "answer": "28 Prozent",
+          "explanation": "Chiffre de recrutement international."
+        },
+        {
+          "number": 10,
+          "prompt": "Aus welchen drei Laendern rekrutiert die Schweiz am staerksten? ___",
+          "answer": "Deutschland, Portugal und Rumaenien",
+          "explanation": "Trois pays explicitement cites."
+        },
+        {
+          "number": 11,
+          "prompt": "1. Forderung: Lohnerhoehung von mindestens ___ % bis 2027.",
+          "answer": "15 Prozent",
+          "explanation": "Chiffre de la revendication."
+        },
+        {
+          "number": 12,
+          "prompt": "2. Forderung: gesetzliche Verankerung von ___ auf Stationsebene.",
+          "answer": "Mindestpersonalschluesseln",
+          "explanation": "Terme technique."
+        },
+        {
+          "number": 13,
+          "prompt": "3. Forderung: ___ neue Studienplaetze pro Jahr.",
+          "answer": "3.000",
+          "explanation": "Chiffre de la 3e revendication."
+        },
+        {
+          "number": 14,
+          "prompt": "4. Forderung: steuerliche Entlastungen fuer: ___",
+          "answer": "Schichtarbeitende",
+          "explanation": "Groupe cible."
+        },
+        {
+          "number": 15,
+          "prompt": "SBK steht fuer: ___",
+          "answer": "Schweizer Berufsverband der Pflege",
+          "explanation": "Sigle developpe."
+        },
+        {
+          "number": 16,
+          "prompt": "Wie viele Strategien verfolgt der SBK?",
+          "answer": "drei Strategien",
+          "explanation": "Chiffre annonce."
+        },
+        {
+          "number": 17,
+          "prompt": "Warum ist internationale Rekrutierung keine nachhaltige Loesung?",
+          "answer": "Es loest unser Problem, indem es das anderer Laender vergroessert.",
+          "explanation": "Argument ethique explicite."
+        },
+        {
+          "number": 18,
+          "prompt": "Hauptgruende fuer den Berufsausstieg: Arbeitsbedingungen und: ___",
+          "answer": "das Lohnniveau",
+          "explanation": "Deux facteurs principaux."
+        },
+        {
+          "number": 19,
+          "prompt": "Welche Arbeitszeiten sind besonders belastend?",
+          "answer": "Schichtarbeit, Wochenend- und Feiertagsdienst",
+          "explanation": "Types d'horaires cites."
+        },
+        {
+          "number": 20,
+          "prompt": "Das Programm zielt auf den ___ von ausgebildeten Pflegenden.",
+          "answer": "Wiedereinstieg",
+          "explanation": "Objectif du programme."
+        },
+        {
+          "number": 21,
+          "prompt": "1. Strategie des SBK: Kooperation mit 24 FH zur ___ der Ausbildungsqualitaet.",
+          "answer": "Standardisierung",
+          "explanation": "Terme exact."
+        },
+        {
+          "number": 22,
+          "prompt": "Die Zahl der Abgehenden ___ jene der Neueinsteigerinnen.",
+          "answer": "ueberstieg",
+          "explanation": "Verbe exact."
+        },
+        {
+          "number": 23,
+          "prompt": "Das Lohnniveau von 6.800 CHF ist im Schweizer Vergleich: ___",
+          "answer": "eher tief",
+          "explanation": "Jugement de valeur precise."
+        },
+        {
+          "number": 24,
+          "prompt": "Wie viele Forderungen stellt der SBK?",
+          "answer": "vier Forderungen",
+          "explanation": "Chiffre annonce."
+        },
+        {
+          "number": 25,
+          "prompt": "SRF-Sendeformat: SRF ___",
+          "answer": "Ratgeber",
+          "explanation": "Mentionne en introduction."
+        },
+        {
+          "number": 26,
+          "prompt": "3. Strategie: Foerderung von ___ durch flexible Dienstplaene.",
+          "answer": "Teilzeitarbeit",
+          "explanation": "Troisieme strategie."
+        },
+        {
+          "number": 27,
+          "prompt": "Koerperliche und ___ Belastung sind Hauptgruende fuer Berufsausstieg.",
+          "answer": "psychische",
+          "explanation": "Deux types de charge."
+        },
+        {
+          "number": 28,
+          "prompt": "Was ist KEINE nachhaltige Loesung laut Rueegg?",
+          "answer": "internationale Rekrutierung",
+          "explanation": "Qualifie de 'nicht nachhaltig'."
+        },
+        {
+          "number": 29,
+          "prompt": "Wie viele Berufsjahre gelten als kritische Phase?",
+          "answer": "die ersten fuenf Berufsjahre",
+          "explanation": "Periode precise."
+        },
+        {
+          "number": 30,
+          "prompt": "Was verdient eine Ingenieurin mehr als eine Pflegefachfrau pro Monat?",
+          "answer": "1.600 Franken (8.400 - 6.800)",
+          "explanation": "Calcul d'inference B2: difference salariale."
+        }
+      ]
+    },
+    "4": {
+      "title": "Digitale Schule - Chancen und Herausforderungen",
+      "instructions": "Sie hoeren ein Oe1-Gespraech mit Prof. Maria Huber, Bildungsforscherin an der Universitaet Wien. Lesen Sie die Aufgaben. 90 Sekunden.",
+      "points": 10,
+      "listeningPasses": 2,
+      "preparationSeconds": 90,
+      "layout": "information-sheet",
+      "items": [
+        {
+          "number": 1,
+          "prompt": "Oesterreich belegt im EU-Ranking Platz: ___",
+          "answer": "12 von 27",
+          "explanation": "Classement europeen."
+        },
+        {
+          "number": 2,
+          "prompt": "DESI-Index-Bewertung: ___ von 100 Punkten.",
+          "answer": "53 Punkten",
+          "explanation": "Score exact."
+        },
+        {
+          "number": 3,
+          "prompt": "___ % der oesterreichischen Schulen haben Breitband.",
+          "answer": "94 Prozent",
+          "explanation": "Chiffre d'infrastructure."
+        },
+        {
+          "number": 4,
+          "prompt": "Nur ___ % der Lehrerinnen fuehlen sich gut ausgebildet.",
+          "answer": "38 Prozent",
+          "explanation": "Statistique clee."
+        },
+        {
+          "number": 5,
+          "prompt": "Digitale Kompetenzen sollen laut Lehrplan ___ unterrichtet werden.",
+          "answer": "faecheruebergreifend",
+          "explanation": "Terme exact."
+        },
+        {
+          "number": 6,
+          "prompt": "In Pilotschulen stieg Lesekompetenz durch 1:1-Modell um ___ %.",
+          "answer": "14 Prozent",
+          "explanation": "Chiffre precis."
+        },
+        {
+          "number": 7,
+          "prompt": "Mathematikergebnisse verbesserten sich um ___ %.",
+          "answer": "9 Prozent",
+          "explanation": "Chiffre precis."
+        },
+        {
+          "number": 8,
+          "prompt": "Das 1:1-Modell laeuft in Wien und ___ seit 2020.",
+          "answer": "Graz",
+          "explanation": "Deux villes citees."
+        },
+        {
+          "number": 9,
+          "prompt": "Das Pilotprogramm startete: ___",
+          "answer": "2020",
+          "explanation": "Date de lancement."
+        },
+        {
+          "number": 10,
+          "prompt": "___ % einkommensschwacher Kinder haben schnelles Internet.",
+          "answer": "61 Prozent",
+          "explanation": "Statistique sociale."
+        },
+        {
+          "number": 11,
+          "prompt": "___ % der Hocheinkommenshaushalte haben schnelles Internet.",
+          "answer": "97 Prozent",
+          "explanation": "Comparaison sociale."
+        },
+        {
+          "number": 12,
+          "prompt": "Das Tablet-Programm kostet ___ Millionen Euro.",
+          "answer": "180 Millionen Euro",
+          "explanation": "Cout total."
+        },
+        {
+          "number": 13,
+          "prompt": "1. Massnahme: Pflichtfach 'Digitale ___'.",
+          "answer": "Grundbildung",
+          "explanation": "Nom exact."
+        },
+        {
+          "number": 14,
+          "prompt": "Dieses Fach gibt es in ___ seit 2012.",
+          "answer": "Estland",
+          "explanation": "Exemple europeen."
+        },
+        {
+          "number": 15,
+          "prompt": "2. Massnahme: ___ Stunden Fortbildung bis 2026.",
+          "answer": "120 Stunden",
+          "explanation": "Nombre d'heures."
+        },
+        {
+          "number": 16,
+          "prompt": "3. Massnahme: Gutschein fuer Haushalte unter ___ Euro Jahreseinkommen.",
+          "answer": "30.000 Euro",
+          "explanation": "Seuil de revenu."
+        },
+        {
+          "number": 17,
+          "prompt": "4. Massnahme: Forschungsstelle mit ___ Millionen Euro Jahresbudget.",
+          "answer": "5 Millionen Euro",
+          "explanation": "Budget annuel."
+        },
+        {
+          "number": 18,
+          "prompt": "Wie viele Massnahmen schlaegt Prof. Huber vor?",
+          "answer": "vier Massnahmen",
+          "explanation": "Chiffre annonce."
+        },
+        {
+          "number": 19,
+          "prompt": "Haupthindernis Nr. 1: ___",
+          "answer": "Lehrkraeftemangel und unzureichende Fortbildung",
+          "explanation": "Premier obstacle."
+        },
+        {
+          "number": 20,
+          "prompt": "Haupthindernis Nr. 2: ___",
+          "answer": "fehlende Lehrplaene fuer Digitalkompetenz",
+          "explanation": "Deuxieme obstacle."
+        },
+        {
+          "number": 21,
+          "prompt": "Was ist in Oesterreich besonders stark? ___",
+          "answer": "Infrastruktur / Breitband (94%)",
+          "explanation": "Point fort."
+        },
+        {
+          "number": 22,
+          "prompt": "Was ist in Oesterreich schwach? ___",
+          "answer": "paedagogische Integration digitaler Medien",
+          "explanation": "Point faible."
+        },
+        {
+          "number": 23,
+          "prompt": "1:1-Modell bedeutet: jede Schuelerin hat ein eigenes: ___",
+          "answer": "Geraet",
+          "explanation": "Definition du modele."
+        },
+        {
+          "number": 24,
+          "prompt": "Prof. Hubers Institution: ___",
+          "answer": "Universitaet Wien",
+          "explanation": "Institution."
+        },
+        {
+          "number": 25,
+          "prompt": "Die digitale Kluft ___ bestehende Ungleichheiten.",
+          "answer": "verstaerkt",
+          "explanation": "Verbe exact — B2."
+        },
+        {
+          "number": 26,
+          "prompt": "'Faecheruebergreifend' bedeutet in mehreren ___ gleichzeitig.",
+          "answer": "Faechern",
+          "explanation": "Comprehension terme."
+        },
+        {
+          "number": 27,
+          "prompt": "Pilotschulen gestartet im Jahr: ___",
+          "answer": "2020",
+          "explanation": "Date precise."
+        },
+        {
+          "number": 28,
+          "prompt": "Estland hat das Pflichtfach Digitalkompetenz seit: ___",
+          "answer": "2012",
+          "explanation": "Reference internationale."
+        },
+        {
+          "number": 29,
+          "prompt": "Neben Technik braucht das 1:1-Modell: paedagogische ___ durch Lehrkraefte.",
+          "answer": "Begleitung",
+          "explanation": "'von Paedagoginnen begleitet werden'."
+        },
+        {
+          "number": 30,
+          "prompt": "Wie viele EU-Staaten werden im Ranking bewertet?",
+          "answer": "27 EU-Staaten",
+          "explanation": "'12 von 27'."
+        }
+      ]
+    },
+    "5": {
+      "title": "Nachhaltiger Tourismus - Bilanz und Ausblick",
+      "instructions": "Sie hoeren ein ORF Tirol Interview mit Dr. Susanne Kofler, Direktorin von Tirol Werbung. Lesen Sie die Aufgaben. 90 Sekunden.",
+      "points": 10,
+      "listeningPasses": 2,
+      "preparationSeconds": 90,
+      "layout": "information-sheet",
+      "items": [
+        {
+          "number": 1,
+          "prompt": "Tirol: ___ Millionen Naechtigungen im vergangenen Jahr.",
+          "answer": "49,3 Millionen",
+          "explanation": "Record absolu."
+        },
+        {
+          "number": 2,
+          "prompt": "___ % der Tiroler Gaeste kommen aus Deutschland.",
+          "answer": "60 Prozent",
+          "explanation": "Principal marche."
+        },
+        {
+          "number": 3,
+          "prompt": "CO2-Fussabdruck: ___ Millionen Tonnen jaehrlich.",
+          "answer": "3,2 Millionen Tonnen",
+          "explanation": "Chiffre precis."
+        },
+        {
+          "number": 4,
+          "prompt": "___ % des CO2-Fussabdrucks entfallen auf die Anreise.",
+          "answer": "74 Prozent",
+          "explanation": "Part de l'empreinte."
+        },
+        {
+          "number": 5,
+          "prompt": "Klimaneutrale Anreisen: von 22 auf ___ % bis 2030.",
+          "answer": "45 Prozent",
+          "explanation": "Objectif chiffre."
+        },
+        {
+          "number": 6,
+          "prompt": "NachtZug-Subvention: ___ Euro pro Person.",
+          "answer": "40 Euro",
+          "explanation": "Montant de la subvention."
+        },
+        {
+          "number": 7,
+          "prompt": "Gaeste, die vom NachtZug profitiert haben: ___",
+          "answer": "85.000 Gaeste",
+          "explanation": "Bilan."
+        },
+        {
+          "number": 8,
+          "prompt": "Neue E-Bike-Routen: ___ km.",
+          "answer": "1.200 km",
+          "explanation": "Infrastructure velo."
+        },
+        {
+          "number": 9,
+          "prompt": "Programm fuer unbekannte Regionen: '___'",
+          "answer": "Stille Taeler",
+          "explanation": "Nom exact."
+        },
+        {
+          "number": 10,
+          "prompt": "Qualitaetslabel: '___'",
+          "answer": "Tirol Green",
+          "explanation": "Nom exact."
+        },
+        {
+          "number": 11,
+          "prompt": "Zertifizierte Betriebe: ___",
+          "answer": "340 Betriebe",
+          "explanation": "Nombre precis."
+        },
+        {
+          "number": 12,
+          "prompt": "Hoehere Auslastung zertifizierter Betriebe: ___ %",
+          "answer": "18 Prozent",
+          "explanation": "Avantage commercial."
+        },
+        {
+          "number": 13,
+          "prompt": "Erneuerung des Zertifikats: alle ___ Jahre.",
+          "answer": "drei Jahre",
+          "explanation": "Periodicite."
+        },
+        {
+          "number": 14,
+          "prompt": "Aktuelle Laenge Skipisten: ___ km.",
+          "answer": "3.400 km",
+          "explanation": "Chiffre actuel."
+        },
+        {
+          "number": 15,
+          "prompt": "Geplante Erweiterung: ___ km.",
+          "answer": "120 km",
+          "explanation": "Extension prevue."
+        },
+        {
+          "number": 16,
+          "prompt": "Volksinitiative mit ___ Unterschriften.",
+          "answer": "78.000",
+          "explanation": "Petition."
+        },
+        {
+          "number": 17,
+          "prompt": "Aktuelle Aufenthaltsdauer: ___ Naechte.",
+          "answer": "3,8 Naechte",
+          "explanation": "Duree actuelle."
+        },
+        {
+          "number": 18,
+          "prompt": "Ziel 2040: ___ Naechte pro Aufenthalt.",
+          "answer": "5,5 Naechte",
+          "explanation": "Objectif futur."
+        },
+        {
+          "number": 19,
+          "prompt": "Dr. Kofler leitet: ___",
+          "answer": "Tirol Werbung",
+          "explanation": "Organisation."
+        },
+        {
+          "number": 20,
+          "prompt": "Wie viele Kernmassnahmen? ___",
+          "answer": "vier Kernmassnahmen",
+          "explanation": "Chiffre annonce."
+        },
+        {
+          "number": 21,
+          "prompt": "Das NachtZug-Programm subventioniert Tickets nach: ___",
+          "answer": "Innsbruck",
+          "explanation": "Destination."
+        },
+        {
+          "number": 22,
+          "prompt": "Tirol will bis ___ emissionsfrei sein.",
+          "answer": "2040",
+          "explanation": "Vision a long terme."
+        },
+        {
+          "number": 23,
+          "prompt": "___ % kommen aus Schweiz und Niederlanden.",
+          "answer": "18 Prozent",
+          "explanation": "Second marche."
+        },
+        {
+          "number": 24,
+          "prompt": "Auditoren des Zertifikats muessen ___ sein.",
+          "answer": "unabhaengig",
+          "explanation": "Critere de controle."
+        },
+        {
+          "number": 25,
+          "prompt": "Volksinitiative eingereicht von: ___",
+          "answer": "Greenpeace Oesterreich",
+          "explanation": "Organisation."
+        },
+        {
+          "number": 26,
+          "prompt": "Massnahme 2: 'Tirol per ___'",
+          "answer": "Rad",
+          "explanation": "Nom du programme."
+        },
+        {
+          "number": 27,
+          "prompt": "Groesste CO2-Baustelle: ___",
+          "answer": "die Anreise (74%)",
+          "explanation": "'groesste Baustelle'."
+        },
+        {
+          "number": 28,
+          "prompt": "Was bedeutet qualitatives Wachstum? ___",
+          "answer": "weniger Gaeste, aber laengere Aufenthalte",
+          "explanation": "Definition de Dr. Kofler."
+        },
+        {
+          "number": 29,
+          "prompt": "Programm 'Stille Taeler': lenkt Besucher weg von ___ in unbekannte Regionen.",
+          "answer": "Hotspots / ueberlaufenen Orten",
+          "explanation": "Objectif du programme."
+        },
+        {
+          "number": 30,
+          "prompt": "Viertes Programm unter den Kernmassnahmen: ___",
+          "answer": "Label 'Tirol Green'",
+          "explanation": "Quatrieme mesure."
+        }
+      ]
+    },
+    "6": {
+      "title": "Wiener Wohnungspolitik im Fokus",
+      "instructions": "Sie hoeren ein Oe1-Stadtgespraech mit Prof. Petra Weiss, Stadtsoziologin der TU Wien. 90 Sekunden Lesezeit.",
+      "points": 10,
+      "listeningPasses": 2,
+      "preparationSeconds": 90,
+      "layout": "information-sheet",
+      "items": [
+        {
+          "number": 1,
+          "prompt": "Wien hat ___ Gemeindewohnungen.",
+          "answer": "220.000",
+          "explanation": "Chiffre exact."
+        },
+        {
+          "number": 2,
+          "prompt": "___ % der Wienerinnen leben in subventioniertem Wohnraum.",
+          "answer": "60 Prozent",
+          "explanation": "Proportion."
+        },
+        {
+          "number": 3,
+          "prompt": "Wien hatte 2010 ___ Millionen Einwohner.",
+          "answer": "1,7 Millionen",
+          "explanation": "Point de depart."
+        },
+        {
+          "number": 4,
+          "prompt": "Heute: ___ Millionen Einwohner.",
+          "answer": "2,1 Millionen",
+          "explanation": "Population actuelle."
+        },
+        {
+          "number": 5,
+          "prompt": "Wachstum in 14 Jahren: ___ Personen.",
+          "answer": "400.000",
+          "explanation": "Difference."
+        },
+        {
+          "number": 6,
+          "prompt": "Benoetigt: mindestens ___ Wohnungen pro Jahr.",
+          "answer": "20.000",
+          "explanation": "Besoin annuel."
+        },
+        {
+          "number": 7,
+          "prompt": "Gebaut: nur rund ___ pro Jahr.",
+          "answer": "11.500",
+          "explanation": "Production actuelle."
+        },
+        {
+          "number": 8,
+          "prompt": "In Mariahilf und Neubau stiegen Mieten in 10 Jahren um ___ %.",
+          "answer": "67 Prozent",
+          "explanation": "Hausse dans les quartiers centraux."
+        },
+        {
+          "number": 9,
+          "prompt": "'Wohnkostenbelastung' = mehr als ___ % des Einkommens fuer Wohnen.",
+          "answer": "40 Prozent",
+          "explanation": "Definition EU."
+        },
+        {
+          "number": 10,
+          "prompt": "___ % der Alleinerziehenden haben Wohnkostenprobleme.",
+          "answer": "73 Prozent",
+          "explanation": "Groupe le plus touche."
+        },
+        {
+          "number": 11,
+          "prompt": "WG-Zimmer-Durchschnittsmiete fuer Studierende: ___ Euro.",
+          "answer": "780 Euro",
+          "explanation": "Loyer moyen etudiant."
+        },
+        {
+          "number": 12,
+          "prompt": "Mindestrente aelterer Frauen: ___ Euro netto.",
+          "answer": "1.090 Euro",
+          "explanation": "Pension minimum."
+        },
+        {
+          "number": 13,
+          "prompt": "Kurzfristige Massnahme: Mietpreisbremse auf maximal ___ Euro pro m2.",
+          "answer": "12 Euro",
+          "explanation": "Plafond propose."
+        },
+        {
+          "number": 14,
+          "prompt": "Baugenehmigung dauert derzeit ___ Monate.",
+          "answer": "36 Monate",
+          "explanation": "Duree actuelle."
+        },
+        {
+          "number": 15,
+          "prompt": "Ziel: verkuerzen auf ___ Monate.",
+          "answer": "18 Monate",
+          "explanation": "Objectif."
+        },
+        {
+          "number": 16,
+          "prompt": "Modellstaedte fuer den Bodenfonds: ___ und ___",
+          "answer": "Singapur und Amsterdam",
+          "explanation": "Deux exemples."
+        },
+        {
+          "number": 17,
+          "prompt": "Prof. Weiss ist Stadtsoziologin an der: ___",
+          "answer": "TU Wien",
+          "explanation": "Institution."
+        },
+        {
+          "number": 18,
+          "prompt": "Wiens Wohnungsbestand ist der groesste der Welt nach: ___",
+          "answer": "Verhaeltnis zur Einwohnerzahl",
+          "explanation": "Precision importante."
+        },
+        {
+          "number": 19,
+          "prompt": "Langfristige Massnahme: Wiener ___",
+          "answer": "Bodenfonds",
+          "explanation": "Terme exact."
+        },
+        {
+          "number": 20,
+          "prompt": "Wie viele Gruppen leiden am meisten?",
+          "answer": "drei Gruppen",
+          "explanation": "Chiffre annonce."
+        },
+        {
+          "number": 21,
+          "prompt": "Zwei Beispiel-Bezirke fuer Gentrifizierung: ___",
+          "answer": "Mariahilf und Neubau",
+          "explanation": "Quartiers cites."
+        },
+        {
+          "number": 22,
+          "prompt": "Wie viele Massnahmen schlaegt Prof. Weiss vor?",
+          "answer": "drei (kurzfristig, mittelfristig, langfristig)",
+          "explanation": "Trois horizons."
+        },
+        {
+          "number": 23,
+          "prompt": "Mittelfristige Massnahme: ___",
+          "answer": "Beschleunigung des Baugenehmigungsverfahrens",
+          "explanation": "Mesure a moyen terme."
+        },
+        {
+          "number": 24,
+          "prompt": "Der Bodenfonds soll ___ Bodenhandel einschraenken.",
+          "answer": "spekulativen",
+          "explanation": "Adjectif precis."
+        },
+        {
+          "number": 25,
+          "prompt": "Jaehrliche Luecke zwischen Bedarf und Bau: ca. ___ Wohnungen.",
+          "answer": "ca. 8.500 (20.000 - 11.500)",
+          "explanation": "Calcul d'inference B2."
+        },
+        {
+          "number": 26,
+          "prompt": "EU-Definition 'Ueberbelastung': mehr als ___ % fuer Wohnen.",
+          "answer": "40 Prozent",
+          "explanation": "Seuil europeen."
+        },
+        {
+          "number": 27,
+          "prompt": "Zweite der drei gefaehrdeten Gruppen: ___",
+          "answer": "Studierende in Wien",
+          "explanation": "Ordre: Alleinerziehende, Studierende, aeltere Frauen."
+        },
+        {
+          "number": 28,
+          "prompt": "Wien wuchs um ___ Millionen in 14 Jahren.",
+          "answer": "0,4 Millionen / 400.000",
+          "explanation": "Croissance numerique."
+        },
+        {
+          "number": 29,
+          "prompt": "Wie nennt Prof. Weiss das Mietproblem? ___",
+          "answer": "Wohnkostenbelastung",
+          "explanation": "Terme technique."
+        },
+        {
+          "number": 30,
+          "prompt": "Ist Wien laut Prof. Weiss ein Vorbild? ___",
+          "answer": "Teilweise — ja, aber unter wachsendem Druck",
+          "explanation": "Reponse nuancee: 'Teilweise'."
+        }
+      ]
+    },
+    "7": {
+      "title": "Fachkraefte mit Migrationshintergrund in Oesterreich",
+      "instructions": "Sie hoeren ein Interview mit Dr. Ahmed Karim, Integrationsexperte der Uni Graz. Lesen Sie die Aufgaben. 90 Sekunden.",
+      "points": 10,
+      "listeningPasses": 2,
+      "preparationSeconds": 90,
+      "layout": "information-sheet",
+      "items": [
+        {
+          "number": 1,
+          "prompt": "Dr. Karim nennt es das 'oesterreichische ___'.",
+          "answer": "Paradox",
+          "explanation": "Terme exact."
+        },
+        {
+          "number": 2,
+          "prompt": "In wie vielen Mangelberufen fehlen Fachkraefte? ___",
+          "answer": "53 Mangelberufe",
+          "explanation": "Chiffre precis."
+        },
+        {
+          "number": 3,
+          "prompt": "Wie viele Personen mit auslaend. Qualifikationen sind arbeitssuchend? ___",
+          "answer": "68.000 Personen",
+          "explanation": "Chiffre cle."
+        },
+        {
+          "number": 4,
+          "prompt": "Im Jahr 2023 wurden ___ Berufsanerkennungen bewilligt.",
+          "answer": "4.200",
+          "explanation": "Statistique alarmante."
+        },
+        {
+          "number": 5,
+          "prompt": "Huerden-Kategorie 1: formale (z.B. fehlende ___ ).",
+          "answer": "Uebersetzungen",
+          "explanation": "Exemple cite."
+        },
+        {
+          "number": 6,
+          "prompt": "Huerden-Kategorie 2: sprachliche — Fachsprache nicht auf ___ Niveau.",
+          "answer": "C1",
+          "explanation": "Niveau linguistique."
+        },
+        {
+          "number": 7,
+          "prompt": "Bewerber mit tuerckischem Namen haben ___ % weniger Rueckrufe.",
+          "answer": "43 Prozent",
+          "explanation": "Resultat de l'etude."
+        },
+        {
+          "number": 8,
+          "prompt": "Kompetenzzentrum am: ___",
+          "answer": "Jakominiplatz",
+          "explanation": "Adresse precise."
+        },
+        {
+          "number": 9,
+          "prompt": "Gegruendet: ___",
+          "answer": "2018",
+          "explanation": "Date."
+        },
+        {
+          "number": 10,
+          "prompt": "Beratung in ___ Sprachen.",
+          "answer": "18 Sprachen",
+          "explanation": "Nombre de langues."
+        },
+        {
+          "number": 11,
+          "prompt": "In 5 Jahren begleitet: ___ Personen.",
+          "answer": "9.400 Personen",
+          "explanation": "Bilan."
+        },
+        {
+          "number": 12,
+          "prompt": "___ % kamen in Beschaeftigung.",
+          "answer": "71 Prozent",
+          "explanation": "Taux de reussite."
+        },
+        {
+          "number": 13,
+          "prompt": "Jahresbudget des Zentrums: ___ Millionen Euro.",
+          "answer": "1,2 Millionen Euro",
+          "explanation": "Budget."
+        },
+        {
+          "number": 14,
+          "prompt": "___ % gefoerdert vom Land Steiermark.",
+          "answer": "60 Prozent",
+          "explanation": "Part du financement."
+        },
+        {
+          "number": 15,
+          "prompt": "Maximale Anerkennungsfrist: ___ Tage.",
+          "answer": "90 Tage",
+          "explanation": "Delai propose."
+        },
+        {
+          "number": 16,
+          "prompt": "Derzeit: ___ Landesgesetze plus Bundesregelungen.",
+          "answer": "neun Landesgesetze",
+          "explanation": "Fragmentation."
+        },
+        {
+          "number": 17,
+          "prompt": "Kosten einer Antidiskriminierungsschulung: ca. ___ Euro.",
+          "answer": "400 Euro",
+          "explanation": "Cout precis."
+        },
+        {
+          "number": 18,
+          "prompt": "Die Studie zeigte Diskriminierung bei ___ Lebenslauf.",
+          "answer": "identischem",
+          "explanation": "Condition de l'experience."
+        },
+        {
+          "number": 19,
+          "prompt": "Wie viele Huerden-Kategorien? ___",
+          "answer": "drei Kategorien",
+          "explanation": "Chiffre annonce."
+        },
+        {
+          "number": 20,
+          "prompt": "Huerden-Kategorie 3: ___",
+          "answer": "diskriminierende Einstellungspraktiken",
+          "explanation": "Troisieme categorie."
+        },
+        {
+          "number": 21,
+          "prompt": "Kompetenzzentrum in der Stadt: ___",
+          "answer": "Graz",
+          "explanation": "Ville."
+        },
+        {
+          "number": 22,
+          "prompt": "Forderung 1: bundesweit ___ Anerkennungsgesetz.",
+          "answer": "einheitliches",
+          "explanation": "Adjectif exact."
+        },
+        {
+          "number": 23,
+          "prompt": "Antidiskriminierungsschulungen fuer: alle ___",
+          "answer": "HR-Abteilungen",
+          "explanation": "Cible."
+        },
+        {
+          "number": 24,
+          "prompt": "Beratung im Zentrum ist: ___",
+          "answer": "kostenlos",
+          "explanation": "Gratuite."
+        },
+        {
+          "number": 25,
+          "prompt": "Welches Sprachniveau wird fuer Fachsprache gefordert?",
+          "answer": "C1",
+          "explanation": "Niveau cle."
+        },
+        {
+          "number": 26,
+          "prompt": "Dr. Karim arbeitet an der: ___",
+          "answer": "Universitaet Graz",
+          "explanation": "Institution."
+        },
+        {
+          "number": 27,
+          "prompt": "Nur ___ von 68.000 Wartenden erhielten 2023 Anerkennung.",
+          "answer": "4.200",
+          "explanation": "Ratio choquant."
+        },
+        {
+          "number": 28,
+          "prompt": "'Eklatantes Missverhaeltnis' beschreibt: ___",
+          "answer": "4.200 Anerkennungen bei 68.000 Wartenden",
+          "explanation": "Terme evaluatif."
+        },
+        {
+          "number": 29,
+          "prompt": "Wie viele Forderungen stellt Dr. Karim? ___",
+          "answer": "drei (einheitliches Gesetz, Frist 90 Tage, Schulungen)",
+          "explanation": "Trois revendications."
+        },
+        {
+          "number": 30,
+          "prompt": "ORF-Regionalprogramm: ORF ___",
+          "answer": "Steiermark",
+          "explanation": "Source depuis le jingle."
+        }
+      ]
+    }
+  }
+}
