@@ -4479,22 +4479,35 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
   const renderB1ChoiceQuestion = ({ taskIndex, task }, partType) => {
     const selectedValue = answers[taskIndex] ?? "";
+    const questionLabelId = `b1-question-${task.id}`;
     const compactChoices = [
       "reading_true_false_not_in_text",
       "reading_true_false",
       "opinion_for_against",
     ].includes(partType);
     return (
-      <fieldset key={task.id} className={styles.b1QuestionCard} onFocus={() => setCurrentIndex(taskIndex)}>
-        <legend translate="no">
-          <span>{task.sourceQuestionNumber}</span>
-          {task.question}
-        </legend>
-        <div className={compactChoices ? styles.b1CompactChoices : styles.b1ChoiceList}>
-          {(task.options || []).map((option) => {
+      <article
+        key={task.id}
+        className={styles.b1QuestionCard}
+        role="group"
+        aria-labelledby={questionLabelId}
+        data-b1-question-card="true"
+        onFocus={() => setCurrentIndex(taskIndex)}
+      >
+        <header className={styles.b1QuestionHeader}>
+          <span className={styles.b1QuestionNumber} aria-hidden="true">{task.sourceQuestionNumber}</span>
+          <p id={questionLabelId} translate="no">{task.question}</p>
+        </header>
+        <div className={styles.b1AnswerArea}>
+          <div
+            className={compactChoices ? styles.b1CompactChoices : styles.b1ChoiceList}
+            data-option-count={(task.options || []).length}
+          >
+            {(task.options || []).map((option) => {
             const selected = selectedValue === option.value;
             const code = String(option.value).toUpperCase();
             const label = getProtectedChoiceLabel(task, option);
+            const hasDistinctCode = label.toLocaleUpperCase("de-DE") !== code;
             return (
               <button
                 key={option.value}
@@ -4502,14 +4515,19 @@ export default function SimulationModulePage({ moduleIdOverride }) {
                 className={selected ? styles.b1ChoiceSelected : styles.b1ChoiceButton}
                 onClick={() => setGoetheAnswer(taskIndex, option.value)}
                 aria-pressed={selected}
+                data-has-code={hasDistinctCode}
               >
-                <span>{code}</span>
-                {label.toLocaleUpperCase("de-DE") !== code ? <strong translate="no">{label}</strong> : null}
+                {hasDistinctCode ? <span className={styles.b1ChoiceCode}>{code}</span> : null}
+                <strong translate="no">{label}</strong>
+                <span className={styles.b1ChoiceState} aria-hidden="true">
+                  {selected ? <CheckCircle2 size={18} strokeWidth={2.4} /> : null}
+                </span>
               </button>
             );
-          })}
+            })}
+          </div>
         </div>
-      </fieldset>
+      </article>
     );
   };
 
