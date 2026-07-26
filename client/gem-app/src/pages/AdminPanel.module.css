@@ -1038,7 +1038,7 @@
   gap: 10px;
   max-height: 760px;
   overflow: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior: auto;
   padding-right: 4px;
 }
 
@@ -1605,7 +1605,7 @@
   min-height: 180px;
   max-height: 420px;
   overflow-y: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior: auto;
   border: 1px solid #cbd5e1;
   border-radius: 8px;
   background: #ffffff;
@@ -1807,7 +1807,7 @@
 .manualBlockList {
   max-height: 280px;
   overflow: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior: auto;
   display: grid;
   gap: 7px;
   padding-right: 4px;
@@ -1848,7 +1848,7 @@
   gap: 10px;
   max-height: 480px;
   overflow: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior: auto;
   padding-right: 4px;
 }
 

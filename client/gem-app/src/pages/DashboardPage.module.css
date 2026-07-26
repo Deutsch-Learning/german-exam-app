@@ -879,7 +879,7 @@
     width: 240px;
     height: calc(100dvh - 80px);
     overflow-y: auto;
-    overscroll-behavior: contain;
+    overscroll-behavior: auto;
     border-right: none;
     box-shadow: var(--shadow-lg);
     z-index: 110;
