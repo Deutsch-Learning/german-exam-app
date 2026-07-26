@@ -3463,20 +3463,25 @@ const buildReadingTask = (question, index = 0) => {
   const metadata = asJsonObject(question.source_metadata);
   const scoring = asJsonObject(question.scoring);
   const taskPoints = Number(scoring.points);
+  const isStructuredB1Lesen = metadata.structuredB1Lesen === true;
   const base = {
     id: `db-question-${question.id}`,
     level: question.level || "B1",
     typeLabel: question.section_title || "Lesen",
     question: clipText(question.prompt, 900),
-    hint: question.section_title ? `Relisez ${question.section_title}.` : "Relisez le texte source.",
-    explanation: question.explanation || "Réponse issue du document importé.",
+    hint: isStructuredB1Lesen
+      ? (question.section_title ? `Lesen Sie ${question.section_title} noch einmal.` : "Lesen Sie den Ausgangstext noch einmal.")
+      : (question.section_title ? `Relisez ${question.section_title}.` : "Relisez le texte source."),
+    explanation: question.explanation || (isStructuredB1Lesen
+      ? "Lösung aus dem offiziellen Aufgabenschlüssel."
+      : "Réponse issue du document importé."),
     sourceQuestionId: question.id,
     contentStyle: asJsonObject(metadata.contentStyle),
     points: Number.isFinite(taskPoints) ? taskPoints : 1,
     ...buildTaskPartMeta(question, index),
   };
 
-  if (metadata.structuredB1Lesen && options.length >= 2) {
+  if (isStructuredB1Lesen && options.length >= 2) {
     const isMatching = questionType.includes("matching");
     return {
       ...base,
