@@ -7,7 +7,8 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "nodemon server.js",
     "start": "node server.js",
-    "repair:goethe-b1-hoeren": "node scripts/repairGoetheB1HoerenQuestions.js"
+    "repair:goethe-b1-hoeren": "node scripts/repairGoetheB1HoerenQuestions.js",
+    "validate:osd-b2-hoeren-teil2": "node scripts/validate-osd-b2-hoeren-teil2.js"
   },
   "keywords": [],
   "author": "",
