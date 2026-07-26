@@ -3476,6 +3476,18 @@ const buildReadingTask = (question, index = 0) => {
     ...buildTaskPartMeta(question, index),
   };
 
+  if (metadata.structuredB1Lesen && options.length >= 2) {
+    const isMatching = questionType.includes("matching");
+    return {
+      ...base,
+      type: isMatching ? "select" : "multiple",
+      options,
+      correct: correctValue || options[0].value,
+      alternatives: correctValue ? [correctValue.toLowerCase(), correctValue.toUpperCase()] : [],
+      uniqueAnswers: metadata.uniqueAnswers === true,
+    };
+  }
+
   if (metadata.structuredB2Lesen) {
     const acceptedAnswers = Array.isArray(correctAnswerData.acceptedAnswers)
       ? correctAnswerData.acceptedAnswers.map((value) => cleanPlainText(value)).filter(Boolean)
