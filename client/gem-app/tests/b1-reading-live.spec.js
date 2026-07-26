@@ -190,8 +190,10 @@ test("global 60-minute timer survives Teil navigation and refresh, then auto-sub
   const initialDeadline = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).timerDeadlineAt, progressKey);
 
   await page.getByRole("region", { name: "Aufgabennavigation" }).getByRole("button", { name: /Weiter/ }).click();
-  await expect(page.getByText("Verbleibende Gesamtzeit", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Teil öffnen" }).click();
+  await expect(page.getByText("Der nächste Teil beginnt in", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("10 Sekunden")).toBeVisible();
+  await expect(page.getByText("60-Minuten-Test", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Ueberspringen" }).click();
   await expect(page.getByRole("heading", { name: /Aufgabe 2/ })).toBeVisible();
   await page.reload({ waitUntil: "domcontentloaded" });
   await expect(page.getByRole("heading", { name: /Aufgabe 2/ })).toBeVisible();
