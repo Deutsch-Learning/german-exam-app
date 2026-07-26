@@ -62,6 +62,7 @@ const LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"];
 const PASS_SCORE = 70;
 const MOBILE_AUDIO_UNSUPPORTED_MESSAGE =
   "Fuer diese Hoeren-Aufgabe ist noch keine freigegebene Audiodatei verfuegbar. Bitte versuchen Sie es spaeter erneut.";
+const PART_TRANSITION_SECONDS = 10;
 const GLOBAL_TEST_DURATION_MINUTES = 60;
 const GLOBAL_TEST_DURATION_SECONDS = GLOBAL_TEST_DURATION_MINUTES * 60;
 const WRITING_GLOBAL_DURATION_MINUTES = GLOBAL_TEST_DURATION_MINUTES;
@@ -80,11 +81,50 @@ const cleanTeilTitle = (value = "") =>
 const TeilTransitionScreen = ({
   nextTeilTitle = "",
   nextTeilNumber,
-  remainingSeconds = GLOBAL_TEST_DURATION_SECONDS,
+  durationSeconds = PART_TRANSITION_SECONDS,
   onComplete,
 }) => {
-  const safeRemaining = Math.max(0, Math.round(Number(remainingSeconds) || 0));
-  const formattedRemaining = `${String(Math.floor(safeRemaining / 60)).padStart(2, "0")}:${String(safeRemaining % 60).padStart(2, "0")}`;
+  const [remaining, setRemaining] = useState(durationSeconds);
+  const [skipping, setSkipping] = useState(false);
+  const onCompleteRef = useRef(onComplete);
+  const completedRef = useRef(false);
+  const intervalRef = useRef(null);
+
+  useEffect(() => {
+    onCompleteRef.current = onComplete;
+  }, [onComplete]);
+
+  const finishTransition = useCallback((delayMs = 0) => {
+    if (completedRef.current) return;
+    completedRef.current = true;
+    if (intervalRef.current) window.clearInterval(intervalRef.current);
+    window.setTimeout(() => onCompleteRef.current?.(), delayMs);
+  }, []);
+
+  useEffect(() => {
+    completedRef.current = false;
+    setSkipping(false);
+    setRemaining(durationSeconds);
+    const startTime = Date.now();
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const tick = () => {
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      const nextRemaining = Math.max(0, durationSeconds - elapsed);
+      setRemaining((value) => (value === nextRemaining ? value : nextRemaining));
+      if (nextRemaining <= 0) finishTransition(180);
+    };
+
+    intervalRef.current = window.setInterval(tick, 200);
+    tick();
+    return () => {
+      if (intervalRef.current) window.clearInterval(intervalRef.current);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [durationSeconds, finishTransition]);
+
+  const progress = durationSeconds > 0 ? ((durationSeconds - remaining) / durationSeconds) * 360 : 360;
   const title = cleanTeilTitle(nextTeilTitle);
 
   return (
@@ -94,27 +134,31 @@ const TeilTransitionScreen = ({
           <Timer size={34} />
         </div>
         <p className={styles.sectionLabel}>Teilwechsel</p>
-        <h2>Bereit für den nächsten Teil?</h2>
+        <h2>Der nächste Teil beginnt gleich</h2>
         <p className={styles.teilTransitionNext}>
           Teil {nextTeilNumber || ""}
           {title ? `: ${title}` : ""}
         </p>
-        <p className={styles.teilTransitionText}>Verbleibende Gesamtzeit</p>
+        <p className={styles.teilTransitionText}>Der nächste Teil beginnt in</p>
         <div
           className={styles.teilTransitionRing}
-          style={{ "--transition-progress": "360deg" }}
-          aria-label={`${formattedRemaining} verbleibende Gesamtzeit`}
+          style={{ "--transition-progress": `${progress}deg` }}
+          aria-label={`${remaining} Sekunden`}
         >
-          <span>{formattedRemaining}</span>
+          <span>{remaining}</span>
         </div>
-        <p className={styles.teilTransitionSeconds}>60-Minuten-Test</p>
-        <p className={styles.teilTransitionHint}>Die globale Prüfungszeit läuft ohne Unterbrechung weiter.</p>
+        <p className={styles.teilTransitionSeconds}>Sekunden</p>
+        <p className={styles.teilTransitionHint}>Bereite dich auf die nächste Aufgabe vor.</p>
         <button
           type="button"
           className={styles.teilTransitionSkip}
-          onClick={onComplete}
+          onClick={() => {
+            setSkipping(true);
+            finishTransition(0);
+          }}
+          disabled={skipping}
         >
-          Teil öffnen
+          {skipping ? "Oeffnen..." : "Ueberspringen"}
         </button>
       </div>
     </section>
@@ -6123,7 +6167,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           key={partTransition.id}
           nextTeilTitle={partTransition.nextPart?.displayTitle}
           nextTeilNumber={partTransition.nextPart?.number}
-          remainingSeconds={timerSeconds}
+          durationSeconds={PART_TRANSITION_SECONDS}
           onComplete={completePartTransition}
         />
       ), document.body) : null}
