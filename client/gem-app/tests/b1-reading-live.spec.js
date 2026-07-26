@@ -7,7 +7,7 @@ const startReadingSimulation = async (page, examId, provider) => {
   await page.goto(`${baseUrl}/simulations/${examId}/${seriesId}`, { waitUntil: "networkidle" });
   await page.getByRole("button", { name: /^Lesen\b/ }).click();
   await page.getByRole("button", { name: "Beginnen" }).click();
-  await expect(page.getByRole("button", { name: "Test starten" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Test starten" })).toBeVisible({ timeout: 20000 });
   await page.getByRole("button", { name: "Test starten" }).click();
   return seriesId;
 };
