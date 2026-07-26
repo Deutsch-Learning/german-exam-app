@@ -592,6 +592,7 @@ const parseGoetheSeries = (text, metadata) => {
   return makeSlices(clean, seriesMatches).map((seriesBlock) => {
     const seriesNumber = Number(seriesBlock.match[1]);
     const title = seriesBlock.match[2].trim();
+    const sourceLabel = `Goethe B1 Lesen ${String(seriesNumber).padStart(2, "0")}`;
     const correctionIndex = seriesBlock.text.search(/(?:^|\n)HIDDEN CORRECTION\s*-\s*PRÜFUNGSHEFT\s+\d+/i);
     const taskText = correctionIndex >= 0 ? seriesBlock.text.slice(0, correctionIndex) : seriesBlock.text;
     const correction = correctionIndex >= 0 ? seriesBlock.text.slice(correctionIndex) : "";
@@ -713,11 +714,14 @@ const parseGoetheSeries = (text, metadata) => {
     return {
       seriesNumber,
       title,
-      sourceLabel: `Goethe B1 Lesen ${String(seriesNumber).padStart(2, "0")}`,
+      sourceLabel,
       instructions: "Goethe-Zertifikat B1 Lesen: fünf Teile in einer 60-minütigen Prüfung.",
       scoring: { totalPoints: 30, globalDurationMinutes: 60, parts: GOETHE_PART_POINTS },
       metadata: {
         ...metadata,
+        title,
+        theme: title,
+        sourceLabel,
         parserVersion: PARSER_VERSION,
         globalDurationMinutes: 60,
         structuredB1Lesen: true,
