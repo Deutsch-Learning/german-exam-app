@@ -86,6 +86,7 @@ const CLIENT_DIST_DIR = SERVE_CLIENT
 const CLIENT_INDEX_FILE = CLIENT_DIST_DIR ? path.join(CLIENT_DIST_DIR, "index.html") : "";
 const isProduction = process.env.NODE_ENV === "production";
 const WRITING_GLOBAL_DURATION_MINUTES = 60;
+const ECL_B1_GLOBAL_DURATION_MINUTES = 35;
 
 const normalizeOrigin = (value) =>
   String(value ?? "")
@@ -3021,6 +3022,16 @@ const getProviderRouteMeta = (value) => {
   };
 };
 
+const resolvePublicGlobalDurationMinutes = ({ routeMeta = {}, moduleId, metadata = {}, fallback = null }) => {
+  if (routeMeta.provider === "ecl" && routeMeta.level === "B1") {
+    return ECL_B1_GLOBAL_DURATION_MINUTES;
+  }
+  if (moduleId === "write") return WRITING_GLOBAL_DURATION_MINUTES;
+  return Number(metadata.globalDurationMinutes || metadata.scoring?.globalDurationMinutes) ||
+    Number(fallback) ||
+    null;
+};
+
 const toImportedSeriesId = (provider, level, seriesNumber) =>
   `imported-${provider}-${String(level || "level").toLowerCase()}-series-${String(seriesNumber).padStart(2, "0")}`;
 
@@ -3262,11 +3273,12 @@ const toPublicSeriesList = (rows, routeMeta = {}) => {
       title: title || moduleMeta.label,
       questionCount: Number(row.question_count) || 0,
       sectionCount: Number(row.section_count) || 0,
-      durationMinutes: moduleId === "write"
-        ? WRITING_GLOBAL_DURATION_MINUTES
-        : Number(metadata.globalDurationMinutes || metadata.scoring?.globalDurationMinutes) ||
-          Number(row.duration_minutes) ||
-          moduleMeta.defaultMinutes,
+      durationMinutes: resolvePublicGlobalDurationMinutes({
+        routeMeta,
+        moduleId,
+        metadata,
+        fallback: Number(row.duration_minutes) || moduleMeta.defaultMinutes,
+      }),
     };
   }
 
@@ -4100,9 +4112,7 @@ const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {},
             : stripPublicListeningTranscriptFields(audioSummary);
         })()
       : undefined,
-    globalDurationMinutes: moduleId === "write"
-      ? WRITING_GLOBAL_DURATION_MINUTES
-      : Number(metadata.globalDurationMinutes || metadata.scoring?.globalDurationMinutes) || null,
+    globalDurationMinutes: resolvePublicGlobalDurationMinutes({ routeMeta, moduleId, metadata }),
     tasks,
     sourceExamId: exam.id,
   };
