@@ -2665,6 +2665,14 @@ const cleanEclB1WritingArtifacts = (value) =>
     .replace(/<br\s*\/?>\s*(?:<strong\b[^>]*>\s*)?(?:<em\b[^>]*>\s*)?<span\b[^>]*>\s*<\/span>\s*(?:<\/em>\s*)?(?:<\/strong>\s*)?/giu, "")
     .replace(/\n[ \t]+\n/g, "\n\n");
 
+const cleanEclB1WritingTitle = (value) =>
+  compactText(
+    String(value ?? "")
+      .replace(/<br\s*\/?>/gi, " ")
+      .replace(/<[^>]*>/g, " ")
+      .replace(/&nbsp;/gi, " ")
+  );
+
 const parseEclWritingSolutionBody = (body) => {
   const clean = compactText(cleanEclB1WritingArtifacts(body));
   const criteriaIndex = clean.search(/(?:^|\n)\s*3\s+/);
@@ -2713,7 +2721,7 @@ const parseEclWritingSeries = (text, metadata) => {
     const sections = partMatches.map((match, index) => {
       const next = partMatches[index + 1];
       const partNumber = Number(match[1]);
-      const header = compactText(match[2]);
+      const header = cleanEclB1WritingTitle(match[2]).replace(/^Aufgabe\s+[12]\s*[-:–—]\s*/i, "");
       const body = cleanEclB1WritingArtifacts(
         stripEclResponseMarker(block.text.slice(match.index + match[0].length, next ? next.index : block.text.length))
       );
@@ -5178,6 +5186,7 @@ module.exports = {
   buildHoerenParsedPreview,
   buildListeningImportFoundation,
   cleanEclB1WritingArtifacts,
+  cleanEclB1WritingTitle,
   ensureDocumentImportSchema,
   getExamImportDraft,
   importParsedExamDocument,

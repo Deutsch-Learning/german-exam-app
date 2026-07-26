@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const pool = require("../db");
-const { cleanEclB1WritingArtifacts } = require("../services/documentImport");
+const { cleanEclB1WritingArtifacts, cleanEclB1WritingTitle } = require("../services/documentImport");
 
 const GLOBAL_DURATION_MINUTES = 35;
 const EXAM_INSTRUCTIONS =
@@ -40,6 +40,7 @@ const readScope = (client, lock = false) => client.query(
           e.metadata AS exam_metadata,
           s.id AS section_id,
           s.part_number,
+          s.title AS section_title,
           s.instructions,
           s.duration_minutes,
           s.global_duration_minutes,
@@ -89,7 +90,10 @@ const run = async () => {
     const expectedSections = new Map();
     const expectedQuestions = new Map();
     for (const row of before.rows) {
-      expectedSections.set(row.section_id, cleanEclB1WritingArtifacts(row.instructions));
+      expectedSections.set(row.section_id, {
+        title: cleanEclB1WritingTitle(row.section_title),
+        instructions: cleanEclB1WritingArtifacts(row.instructions),
+      });
       expectedQuestions.set(row.question_id, {
         prompt: cleanEclB1WritingArtifacts(row.prompt),
         correctAnswer: cleanArtifactValue(row.correct_answer || {}),
@@ -97,16 +101,17 @@ const run = async () => {
       });
     }
 
-    for (const [sectionId, instructions] of expectedSections) {
+    for (const [sectionId, section] of expectedSections) {
       await client.query(
         `UPDATE exam_sections
-            SET instructions = $2,
+            SET title = $2,
+                instructions = $3,
                 duration_minutes = NULL,
-                global_duration_minutes = $3,
+                global_duration_minutes = $4,
                 scoring = COALESCE(scoring, '{}'::jsonb) - 'durationMinutes',
                 updated_at = NOW()
           WHERE id = $1`,
-        [sectionId, instructions, GLOBAL_DURATION_MINUTES]
+        [sectionId, section.title, section.instructions, GLOBAL_DURATION_MINUTES]
       );
     }
 
@@ -145,7 +150,9 @@ const run = async () => {
     const after = await readScope(client);
     assertCompleteScope(after.rows);
     after.rows.forEach((row) => {
-      assert.equal(row.instructions, expectedSections.get(row.section_id), `section ${row.section_id}: instructions`);
+      const expectedSection = expectedSections.get(row.section_id);
+      assert.equal(row.section_title, expectedSection.title, `section ${row.section_id}: title`);
+      assert.equal(row.instructions, expectedSection.instructions, `section ${row.section_id}: instructions`);
       const expectedQuestion = expectedQuestions.get(row.question_id);
       assert.equal(row.prompt, expectedQuestion.prompt, `question ${row.question_id}: prompt`);
       assert.deepEqual(row.correct_answer, expectedQuestion.correctAnswer, `question ${row.question_id}: correction`);

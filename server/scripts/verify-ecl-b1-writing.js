@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const pool = require("../db");
-const { cleanEclB1WritingArtifacts } = require("../services/documentImport");
+const { cleanEclB1WritingArtifacts, cleanEclB1WritingTitle } = require("../services/documentImport");
 
 const baseUrl = String(process.argv[2] || "").replace(/\/$/, "");
 const GLOBAL_DURATION_MINUTES = 35;
@@ -23,6 +23,7 @@ const verifyDatabase = async () => {
             e.metadata AS exam_metadata,
             s.id AS section_id,
             s.part_number,
+            s.title AS section_title,
             s.instructions,
             s.duration_minutes,
             s.global_duration_minutes,
@@ -46,6 +47,8 @@ const verifyDatabase = async () => {
   assert.equal(result.rowCount, 40, "database: task count");
   assert.equal(new Set(result.rows.map((row) => row.exam_id)).size, 20, "database: series count");
   result.rows.forEach((row) => {
+    assert.equal(cleanEclB1WritingTitle(row.section_title), row.section_title, `series ${row.series_number} part ${row.part_number}: title clean`);
+    assert.match(row.section_title, new RegExp(`^Aufgabe ${row.part_number}:`), `series ${row.series_number} part ${row.part_number}: title structure`);
     assert.equal(cleanEclB1WritingArtifacts(row.instructions), row.instructions, `series ${row.series_number} part ${row.part_number}: instructions clean`);
     assert.equal(cleanEclB1WritingArtifacts(row.prompt), row.prompt, `series ${row.series_number} part ${row.part_number}: prompt clean`);
     assertCleanValue(row.correct_answer, `series ${row.series_number} part ${row.part_number}: correction clean`);
@@ -83,7 +86,11 @@ const verifyApi = async () => {
     assert.equal(content.parts?.length, 2, `${item.id}: part count`);
     assert.equal(content.tasks?.length, 2, `${item.id}: task count`);
     assertCleanValue(content, `${item.id}: public content clean`);
+    content.parts.forEach((part) => {
+      assert.equal(cleanEclB1WritingTitle(part.heading), part.heading, `${item.id}/${part.id}: public heading clean`);
+    });
     content.tasks.forEach((task) => {
+      assert.equal(cleanEclB1WritingTitle(task.title), task.title, `${item.id}: public task title clean`);
       assert.equal(cleanEclB1WritingArtifacts(task.prompt), task.prompt, `${item.id}: task prompt clean`);
       assert.equal(task.partDurationMinutes, null, `${item.id}: no part duration`);
     });
