@@ -1,4 +1,6 @@
-const PARSER_VERSION = "b1StructuredLesen.v1";
+const { getGoetheB1AdvertisementBank } = require("../data/goetheB1LesenAdvertisements");
+
+const PARSER_VERSION = "b1StructuredLesen.v2";
 
 const normalizeLineBreaks = (value = "") =>
   String(value || "")
@@ -437,6 +439,295 @@ const OSD_PART_TITLES = {
 const OSD_PART_POINTS = { 1: 6, 2: 6, 3: 7, 4: 7, 5: 4 };
 const OSD_PART_DURATIONS = { 1: 10, 2: 20, 3: 10, 4: 15, 5: 10 };
 
+const GOETHE_PART_TITLES = {
+  1: "Richtig oder Falsch",
+  2: "Zwei Artikel und Multiple Choice",
+  3: "Anzeigen den Situationen zuordnen",
+  4: "Lesermeinungen: Ja oder Nein",
+  5: "Regeln und Informationen",
+};
+
+const GOETHE_PART_POINTS = { 1: 6, 2: 6, 3: 7, 4: 7, 5: 4 };
+const GOETHE_PART_DURATIONS = { 1: 10, 2: 20, 3: 10, 4: 15, 5: 10 };
+
+const parseGoetheAnswersInRange = (raw, partNumber, start, end, allowedPattern) => {
+  const startMatch = new RegExp(`Teil\\s+${partNumber}\\s*\\(`, "i").exec(raw);
+  if (!startMatch) return new Map();
+  const remainder = raw.slice(startMatch.index);
+  const nextMatch = partNumber < 5
+    ? new RegExp(`Teil\\s+${partNumber + 1}\\s*\\(`, "i").exec(remainder.slice(startMatch[0].length))
+    : null;
+  const body = nextMatch
+    ? remainder.slice(0, startMatch[0].length + nextMatch.index)
+    : remainder;
+  const answers = new Map();
+  const pattern = new RegExp(`(?<!\\d)(\\d{1,2})\\s*(${allowedPattern})(?=\\s|\\d|$)`, "gi");
+  for (const match of body.matchAll(pattern)) {
+    const number = Number(match[1]);
+    if (number >= start && number <= end) answers.set(number, match[2]);
+  }
+  return answers;
+};
+
+const parseGoetheCorrections = (raw) => ({
+  1: parseGoetheAnswersInRange(raw, 1, 1, 6, "Richtig|Falsch"),
+  2: parseGoetheAnswersInRange(raw, 2, 7, 12, "[abc]"),
+  3: parseGoetheAnswersInRange(raw, 3, 13, 19, "[a-j]|0"),
+  4: parseGoetheAnswersInRange(raw, 4, 20, 26, "Ja|Nein"),
+  5: parseGoetheAnswersInRange(raw, 5, 27, 30, "[abc]"),
+});
+
+const parseGoetheNumberedRows = (raw, start, end) => {
+  const rows = [];
+  const cells = paragraphs(raw).filter((cell) => !/^(Nr\.|Nr\s)/i.test(cell));
+  cells.forEach((cell) => {
+    const markers = [];
+    for (let number = start; number <= end; number += 1) {
+      const match = new RegExp(`${number}\\s+`).exec(cell);
+      if (match) markers.push({ number, index: match.index, length: match[0].length });
+    }
+    markers.sort((a, b) => a.index - b.index).forEach((marker, markerIndex) => {
+      const next = markers[markerIndex + 1];
+      const before = markerIndex === 0 ? cell.slice(0, marker.index) : "";
+      const after = cell.slice(marker.index + marker.length, next?.index ?? cell.length);
+      const prompt = compactText(`${before} ${after}`.replace(/[_■]+/g, " "));
+      if (prompt && !rows.some((row) => row.number === marker.number)) rows.push({ number: marker.number, prompt });
+    });
+  });
+  return rows.sort((a, b) => a.number - b.number);
+};
+
+const parseGoetheChoiceCells = (raw, start, end) => {
+  const rows = [];
+  paragraphs(raw).forEach((cell) => {
+    for (let number = start; number <= end; number += 1) {
+      const marker = new RegExp(`Aufgabe\\s+${number}\\s*:\\s*`, "i");
+      const markerMatch = marker.exec(cell);
+      if (!markerMatch || rows.some((row) => row.number === number)) continue;
+      const body = cell.slice(markerMatch.index + markerMatch[0].length);
+      const match = body.match(/^([\s\S]*?)\s*■\s*a\)\s*([\s\S]*?)\s*■\s*b\)\s*([\s\S]*?)\s*■\s*c\)\s*([\s\S]*)$/i);
+      if (!match) continue;
+      rows.push({
+        number,
+        prompt: compactText(match[1]),
+        options: [
+          { value: "a", label: compactText(match[2]) },
+          { value: "b", label: compactText(match[3]) },
+          { value: "c", label: compactText(match[4]) },
+        ],
+      });
+    }
+  });
+  return rows.sort((a, b) => a.number - b.number);
+};
+
+const getGoetheSourceBeforeQuestion = (raw, number) => {
+  const cells = paragraphs(raw);
+  const index = cells.findIndex((cell) => new RegExp(`Aufgabe\\s+${number}\\s*:`, "i").test(cell));
+  if (index < 0) return "";
+  const markerIndex = cells[index].search(new RegExp(`Aufgabe\\s+${number}\\s*:`, "i"));
+  return normalizeLineBreaks([...cells.slice(0, index), cells[index].slice(0, markerIndex)].filter(Boolean).join("\n\n"));
+};
+
+const parseGoetheAdvertisements = (raw) => {
+  const source = normalizeLineBreaks(raw.replace(/^Anzeigen\s*:\s*/i, ""));
+  const matches = getMatches(source, /(?:^|\s)\(([a-j])\)\s*/gi);
+  const advertisements = makeSlices(source, matches).map((block) => ({
+    value: block.match[1].toLowerCase(),
+    label: compactText(block.text.replace(block.match[0].trimStart(), "")),
+  }));
+  return [
+    ...advertisements,
+    { value: "0", label: "Keine passende Anzeige" },
+  ];
+};
+
+const parseGoetheOpinions = (raw) => {
+  const tableIndex = raw.search(/^Nr\.\s+Person/im);
+  const visible = normalizeLineBreaks(tableIndex >= 0 ? raw.slice(0, tableIndex) : raw);
+  const matches = getMatches(visible, /(?:^|\s)([A-ZÄÖÜ][\p{L}'’-]*(?:\s+[\p{L}'’-]+)*\s+[A-ZÄÖÜ]\.)\s*:/gu);
+  const opinions = makeSlices(visible, matches).map((block) => ({
+    name: `${block.match[1]}:`,
+    text: normalizeLineBreaks(block.text.slice(block.match[0].length)),
+  }));
+  const theme = normalizeLineBreaks(visible.slice(0, matches[0]?.index ?? visible.length));
+  return { theme, opinions };
+};
+
+const decodeBasicHtml = (value) => String(value || "")
+  .replace(/<[^>]+>/g, "")
+  .replace(/&amp;/g, "&")
+  .replace(/&quot;/g, '"')
+  .replace(/&#39;/g, "'")
+  .replace(/&nbsp;/g, " ")
+  .trim();
+
+const getGoetheEmphasizedTitle = (metadata, seriesNumber, partNumber) => {
+  const html = String(metadata.structuredSourceHtml || "");
+  if (!html) return "";
+  const seriesLabel = `PRÜFUNGSHEFT ${String(seriesNumber).padStart(2, "0")}`;
+  const seriesStart = html.indexOf(seriesLabel);
+  if (seriesStart < 0) return "";
+  const nextSeries = html.indexOf(`PRÜFUNGSHEFT ${String(seriesNumber + 1).padStart(2, "0")}`, seriesStart + seriesLabel.length);
+  const seriesHtml = html.slice(seriesStart, nextSeries >= 0 ? nextSeries : html.length);
+  const partMarker = new RegExp(`>TEIL\\s+${partNumber}<`, "i").exec(seriesHtml);
+  if (!partMarker) return "";
+  const partStart = partMarker.index + partMarker[0].length;
+  const nextPart = partNumber < 5 ? new RegExp(`>TEIL\\s+${partNumber + 1}<`, "i").exec(seriesHtml.slice(partStart)) : null;
+  const partHtml = seriesHtml.slice(partStart, nextPart ? partStart + nextPart.index : seriesHtml.length);
+  const studentStart = partHtml.indexOf("STUDENT-VISIBLE CONTENT");
+  const visibleHtml = studentStart >= 0 ? partHtml.slice(studentStart + "STUDENT-VISIBLE CONTENT".length) : partHtml;
+  return decodeBasicHtml(visibleHtml.match(/<em>([\s\S]*?)<\/em>/i)?.[1] || "");
+};
+
+const separateGoetheTitle = (text, title) => {
+  const source = normalizeLineBreaks(text);
+  if (!title || !source.startsWith(title) || source.startsWith(`${title}\n`)) return source;
+  return normalizeLineBreaks(`${title}\n\n${source.slice(title.length)}`);
+};
+
+const parseGoetheSeries = (text, metadata) => {
+  const clean = normalizeLineBreaks(text);
+  const seriesMatches = getMatches(clean, /(?:^|\n)PRÜFUNGSHEFT\s+(\d{2})\s*\|\s*Thema\s*:\s*([^\n]+)/gi);
+  return makeSlices(clean, seriesMatches).map((seriesBlock) => {
+    const seriesNumber = Number(seriesBlock.match[1]);
+    const title = seriesBlock.match[2].trim();
+    const correctionIndex = seriesBlock.text.search(/(?:^|\n)HIDDEN CORRECTION\s*-\s*PRÜFUNGSHEFT\s+\d+/i);
+    const taskText = correctionIndex >= 0 ? seriesBlock.text.slice(0, correctionIndex) : seriesBlock.text;
+    const correction = correctionIndex >= 0 ? seriesBlock.text.slice(correctionIndex) : "";
+    const answers = parseGoetheCorrections(correction);
+    const partMatches = getMatches(taskText, /(?:^|\n)TEIL\s+([1-5])\s*$/gim);
+    const sections = makeSlices(taskText, partMatches).map((partBlock) => {
+      const partNumber = Number(partBlock.match[1]);
+      const instructionCells = paragraphs(partBlock.text);
+      const studentMarker = instructionCells.findIndex((cell) => /^STUDENT-VISIBLE CONTENT$/i.test(cell));
+      const instruction = studentMarker > 0 ? instructionCells[studentMarker - 1] : "";
+      const visible = lineSlice(partBlock.text, /^STUDENT-VISIBLE CONTENT$/im);
+      const points = GOETHE_PART_POINTS[partNumber];
+      const durationMinutes = GOETHE_PART_DURATIONS[partNumber];
+
+      if (partNumber === 1) {
+        const statementMarker = visible.search(/^Nr\.\s+Aussage/im);
+        const sourceText = separateGoetheTitle(
+          visible.slice(0, statementMarker >= 0 ? statementMarker : visible.length),
+          getGoetheEmphasizedTitle(metadata, seriesNumber, partNumber)
+        );
+        const statements = parseGoetheNumberedRows(lineSlice(visible, /^Nr\.\s+Aussage/im), 1, 6);
+        const options = [
+          { value: "Richtig", label: "Richtig" },
+          { value: "Falsch", label: "Falsch" },
+        ];
+        const questions = statements.map((item) => buildQuestion({
+          provider: "goethe", seriesNumber, partNumber, partType: "reading_true_false",
+          position: item.number, prompt: item.prompt, options,
+          correct: answers[1].get(item.number) || "", points: 1,
+        }));
+        return buildSection({
+          provider: "goethe", seriesNumber, partNumber, title: `Teil 1: ${GOETHE_PART_TITLES[1]}`,
+          instruction, partType: "reading_true_false", durationMinutes, points,
+          metadata: { sourceMaterials: [{ label: "Text", text: sourceText }] }, questions,
+        });
+      }
+
+      if (partNumber === 2) {
+        const rows = parseGoetheChoiceCells(visible, 7, 12);
+        const textA = getGoetheSourceBeforeQuestion(visible, 7);
+        const afterQuestionNine = paragraphs(visible).slice(
+          paragraphs(visible).findIndex((cell) => /Aufgabe\s+9\s*:/i.test(cell)) + 1
+        ).join("\n\n");
+        const textB = separateGoetheTitle(
+          getGoetheSourceBeforeQuestion(afterQuestionNine, 10),
+          getGoetheEmphasizedTitle(metadata, seriesNumber, partNumber)
+        );
+        const questions = rows.map((item) => buildQuestion({
+          provider: "goethe", seriesNumber, partNumber, partType: "reading_mcq",
+          position: item.number, prompt: item.prompt, options: item.options,
+          correct: String(answers[2].get(item.number) || "").toLowerCase(), points: 1,
+          metadata: { sourceMaterialIndex: item.number <= 9 ? 0 : 1 },
+        }));
+        return buildSection({
+          provider: "goethe", seriesNumber, partNumber, title: `Teil 2: ${GOETHE_PART_TITLES[2]}`,
+          instruction, partType: "reading_mcq", durationMinutes, points,
+          metadata: { sourceMaterials: [{ label: "Artikel 1", text: textA }, { label: "Artikel 2", text: textB }] }, questions,
+        });
+      }
+
+      if (partNumber === 3) {
+        const advertisementsMarker = visible.search(/^Anzeigen\s*:/im);
+        const situationText = advertisementsMarker >= 0 ? visible.slice(0, advertisementsMarker) : visible;
+        const advertisementText = advertisementsMarker >= 0 ? visible.slice(advertisementsMarker) : "";
+        const situations = parseGoetheNumberedRows(situationText, 13, 19);
+        const parsedAdvertisements = parseGoetheAdvertisements(advertisementText);
+        const advertisements = [
+          ...getGoetheB1AdvertisementBank(seriesNumber),
+          parsedAdvertisements.find((item) => item.value === "0") || { value: "0", label: "Keine passende Anzeige" },
+        ];
+        const questions = situations.map((item) => buildQuestion({
+          provider: "goethe", seriesNumber, partNumber, partType: "situation_ad_match",
+          position: item.number, prompt: item.prompt, options: advertisements,
+          correct: String(answers[3].get(item.number) || "").toLowerCase(), points: 1,
+          metadata: { uniqueAnswers: true, reusableAnswers: ["0"] },
+        }));
+        return buildSection({
+          provider: "goethe", seriesNumber, partNumber, title: `Teil 3: ${GOETHE_PART_TITLES[3]}`,
+          instruction, partType: "situation_ad_match", durationMinutes, points,
+          metadata: { advertisements, uniqueAnswers: true, reusableAnswers: ["0"] }, questions,
+        });
+      }
+
+      if (partNumber === 4) {
+        const { theme, opinions } = parseGoetheOpinions(visible);
+        const options = [{ value: "Ja", label: "Ja" }, { value: "Nein", label: "Nein" }];
+        const questions = opinions.map((opinion, index) => {
+          const number = 20 + index;
+          return buildQuestion({
+            provider: "goethe", seriesNumber, partNumber, partType: "opinion_yes_no",
+            position: number, prompt: `${opinion.name}\n${opinion.text}`, options,
+            correct: answers[4].get(number) || "", points: 1,
+          });
+        });
+        return buildSection({
+          provider: "goethe", seriesNumber, partNumber, title: `Teil 4: ${GOETHE_PART_TITLES[4]}`,
+          instruction, partType: "opinion_yes_no", durationMinutes, points,
+          metadata: { theme }, questions,
+        });
+      }
+
+      const rows = parseGoetheChoiceCells(visible, 27, 30);
+      const sourceText = separateGoetheTitle(
+        getGoetheSourceBeforeQuestion(visible, 27),
+        getGoetheEmphasizedTitle(metadata, seriesNumber, partNumber)
+      );
+      const questions = rows.map((item) => buildQuestion({
+        provider: "goethe", seriesNumber, partNumber, partType: "reading_mcq",
+        position: item.number, prompt: item.prompt, options: item.options,
+        correct: String(answers[5].get(item.number) || "").toLowerCase(), points: 1,
+      }));
+      return buildSection({
+        provider: "goethe", seriesNumber, partNumber, title: `Teil 5: ${GOETHE_PART_TITLES[5]}`,
+        instruction, partType: "reading_mcq", durationMinutes, points,
+        metadata: { sourceMaterials: [{ label: "Text", text: sourceText }] }, questions,
+      });
+    });
+
+    return {
+      seriesNumber,
+      title,
+      sourceLabel: `Goethe B1 Lesen ${String(seriesNumber).padStart(2, "0")}`,
+      instructions: "Goethe-Zertifikat B1 Lesen: fünf Teile in einer 60-minütigen Prüfung.",
+      scoring: { totalPoints: 30, globalDurationMinutes: 60, parts: GOETHE_PART_POINTS },
+      metadata: {
+        ...metadata,
+        parserVersion: PARSER_VERSION,
+        globalDurationMinutes: 60,
+        structuredB1Lesen: true,
+        replacePublishedScope: true,
+      },
+      sections,
+    };
+  });
+};
+
 const parseOsdSeries = (text, metadata) => {
   const clean = normalizeLineBreaks(text);
   const seriesMatches = getMatches(clean, /(?:^|\n)MODELLSATZ\s+(\d{1,2})\s+—\s+Lesen\s*\(ÖSD B1\)/gi);
@@ -560,6 +851,7 @@ const parseOsdSeries = (text, metadata) => {
 
 const parseB1StructuredLesenSeries = (text, metadata = {}) => {
   const provider = String(metadata.provider || "").toLowerCase();
+  if (provider === "goethe") return parseGoetheSeries(text, metadata);
   if (provider === "telc") return parseTelcSeries(text, metadata);
   if (provider === "ecl") return parseEclSeries(text, metadata);
   if (provider === "osd") return parseOsdSeries(text, metadata);

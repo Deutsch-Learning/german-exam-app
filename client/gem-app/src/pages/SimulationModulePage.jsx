@@ -4201,7 +4201,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setCurrentIndex(taskIndex);
     setAnswers((previous) => {
       const next = { ...previous };
-      if (meta.uniqueAnswers && value) {
+      const reusableAnswers = new Set(meta.reusableAnswers || []);
+      if (meta.uniqueAnswers && value && !reusableAnswers.has(value)) {
         partIndexes.forEach((index) => {
           if (index !== taskIndex && next[index] === value) delete next[index];
         });
@@ -4319,6 +4320,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const renderB1ReferenceContent = (meta) => {
     const sourceMaterials = Array.isArray(meta.sourceMaterials) ? meta.sourceMaterials : [];
     const bank = meta.headings || meta.advertisements || [];
+    const lastAdvertisementCode = [...bank].reverse().find((item) => item.value !== "0")?.value || "J";
     if (sourceMaterials.length) {
       return (
         <div className={styles.b1SourceStack}>
@@ -4333,7 +4335,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     }
     return renderGoetheBank(
       bank,
-      meta.partType === "heading_text_match" ? "Überschriften A-G" : `Anzeigen A-${bank.at(-1)?.value || "J"}`
+      meta.partType === "heading_text_match" ? "Überschriften A-G" : `Anzeigen A-${lastAdvertisementCode}`
     );
   };
 
@@ -4377,6 +4379,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       "reading_true_false_not_in_text",
       "reading_true_false",
       "opinion_for_against",
+      "opinion_yes_no",
     ].includes(partType);
     return (
       <article

@@ -8,12 +8,14 @@ const {
 } = require("../services/documentImport");
 
 const files = {
-  telc: "TELC_B1_Lesen_20_Serien_RESTRUCTURED.docx",
-  ecl: "ECL_B1_Leseverstehen_20_Serien_RESTRUCTURED.docx",
-  osd: "OESD_B1_Lesen_20_Modellsaetze_RESTRUCTURED.docx",
+  goethe: { folder: "Goethe change", file: "GOETHE_B1_Lesen_20_Pruefungshefte_RESTRUCTURED.docx" },
+  telc: { folder: "Lessen Change", file: "TELC_B1_Lesen_20_Serien_RESTRUCTURED.docx" },
+  ecl: { folder: "Lessen Change", file: "ECL_B1_Leseverstehen_20_Serien_RESTRUCTURED.docx" },
+  osd: { folder: "Lessen Change", file: "OESD_B1_Lesen_20_Modellsaetze_RESTRUCTURED.docx" },
 };
 
 const expectedCounts = {
+  goethe: { exams: 20, sections: 100, questions: 600 },
   telc: { exams: 20, sections: 60, questions: 400 },
   ecl: { exams: 20, sections: 40, questions: 300 },
   osd: { exams: 20, sections: 100, questions: 600 },
@@ -22,13 +24,13 @@ const expectedCounts = {
 const requestedProvider = String(process.argv[2] || "all").toLowerCase();
 const providers = requestedProvider === "all" ? Object.keys(files) : [requestedProvider];
 if (providers.some((provider) => !files[provider])) {
-  console.error("Usage: node server/scripts/publish-b1-reading-documents.js [all|telc|ecl|osd]");
+  console.error("Usage: node server/scripts/publish-b1-reading-documents.js [all|goethe|telc|ecl|osd]");
   process.exit(1);
 }
 
 const publishProvider = async (provider) => {
-  const filename = files[provider];
-  const filePath = path.resolve(__dirname, "../../Lessen Change", filename);
+  const { folder, file: filename } = files[provider];
+  const filePath = path.resolve(__dirname, "../..", folder, filename);
   const buffer = await fs.readFile(filePath);
   const parsed = await analyzeExamDocument({
     buffer,
