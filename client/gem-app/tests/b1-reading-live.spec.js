@@ -46,6 +46,12 @@ test("TELC B1 desktop preserves matching answers and confirms final submission",
   await page.waitForTimeout(800);
   await page.reload({ waitUntil: "domcontentloaded" });
   await expect(page.getByRole("heading", { name: /Teil 2/ })).toBeVisible();
+  const multipleChoiceCard = page.locator('[data-b1-question-card="true"]').first();
+  const firstMultipleChoice = multipleChoiceCard.getByRole("button").first();
+  await firstMultipleChoice.click();
+  await expect(firstMultipleChoice).toHaveAttribute("aria-pressed", "true");
+  await expect(firstMultipleChoice.locator("svg")).toBeVisible();
+  await page.screenshot({ path: "test-results/b1-reading-telc-multiple-choice-desktop.png", fullPage: true });
 
   const partProgress = page.getByRole("region", { name: "Abschnittsfortschritt" });
   await partProgress.getByRole("button", { name: /Teil 1/ }).click();
@@ -58,7 +64,7 @@ test("TELC B1 desktop preserves matching answers and confirms final submission",
   await page.getByRole("region", { name: "Aufgabennavigation" }).getByRole("button", { name: /Abgeben/ }).click();
   const confirmation = page.getByRole("dialog", { name: "Simulation abgeben?" });
   await expect(confirmation).toBeVisible();
-  await expect(confirmation).toContainText("19 Aufgaben sind noch unbeantwortet.");
+  await expect(confirmation).toContainText("18 Aufgaben sind noch unbeantwortet.");
   await confirmation.getByRole("button", { name: "Antworten prüfen" }).click();
   await expect(confirmation).toBeHidden();
 
@@ -88,16 +94,26 @@ test("ÖSD B1 mobile Teil 4 offers only Dafür and Dagegen", async ({ page }) =>
   await page.setViewportSize({ width: 390, height: 844 });
   await startReadingSimulation(page, "osd-b1", "osd");
 
+  const trueFalseCard = page.locator('[data-b1-question-card="true"]').first();
+  const richtig = trueFalseCard.getByRole("button", { name: "Richtig", exact: true });
+  const falsch = trueFalseCard.getByRole("button", { name: "Falsch", exact: true });
+  await expect(richtig).toBeVisible();
+  await expect(falsch).toBeVisible();
+  await richtig.click();
+  await expect(richtig).toHaveAttribute("aria-pressed", "true");
+  await expect(richtig.locator("svg")).toBeVisible();
+  await page.screenshot({ path: "test-results/b1-reading-osd-true-false-mobile.png", fullPage: true });
+
   await page.getByRole("button", { name: "Navigation", exact: true }).click();
   await page.getByRole("button", { name: /Teil 4/ }).first().click();
   await enterPendingPart(page);
   await expect(page.getByRole("heading", { name: /Teil 4/ })).toBeVisible();
-  const question = page.locator("fieldset").first();
-  await expect(question.getByRole("button", { name: /DAFÜR/ })).toBeVisible();
-  await expect(question.getByRole("button", { name: /DAGEGEN/ })).toBeVisible();
-  await expect(question.getByRole("button", { name: /BEIDES/ })).toHaveCount(0);
-  await question.getByRole("button", { name: /DAFÜR/ }).click();
-  await expect(question.getByRole("button", { name: /DAFÜR/ })).toHaveAttribute("aria-pressed", "true");
+  const question = page.locator('[data-b1-question-card="true"]').first();
+  await expect(question.getByRole("button", { name: /Dafür/i })).toBeVisible();
+  await expect(question.getByRole("button", { name: /Dagegen/i })).toBeVisible();
+  await expect(question.getByRole("button", { name: /Beides/i })).toHaveCount(0);
+  await question.getByRole("button", { name: /Dafür/i }).click();
+  await expect(question.getByRole("button", { name: /Dafür/i })).toHaveAttribute("aria-pressed", "true");
 
   await expectNoHorizontalOverflow(page);
   await page.screenshot({ path: "test-results/b1-reading-osd-mobile.png", fullPage: true });
@@ -108,16 +124,18 @@ test("ECL B1 tablet renders the three-state task and Aufgabe navigation", async 
   await startReadingSimulation(page, "ecl-b1", "ecl");
 
   await expect(page.getByRole("heading", { name: /Aufgabe 1/ })).toBeVisible();
-  const firstQuestion = page.locator("fieldset").first();
+  const firstQuestion = page.locator('[data-b1-question-card="true"]').first();
   const notInText = firstQuestion.getByRole("button", { name: /Steht nicht im Text/i });
   await expect(notInText).toBeVisible();
   await notInText.click();
   await expect(notInText).toHaveAttribute("aria-pressed", "true");
+  await expect(notInText.locator("svg")).toBeVisible();
+  await page.screenshot({ path: "test-results/b1-reading-ecl-three-state-tablet.png", fullPage: true });
 
   await page.getByRole("region", { name: "Aufgabennavigation" }).getByRole("button", { name: /Weiter/ }).click();
   await enterPendingPart(page);
   await expect(page.getByRole("heading", { name: /Aufgabe 2/ })).toBeVisible();
-  await expect(page.locator("fieldset")).toHaveCount(5);
+  await expect(page.locator('[data-b1-question-card="true"]')).toHaveCount(5);
 
   if (await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)) {
     const offenders = await page.evaluate(() => [...document.querySelectorAll("body *")]
