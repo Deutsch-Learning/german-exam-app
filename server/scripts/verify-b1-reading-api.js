@@ -37,10 +37,13 @@ const readJson = async (pathname) => {
 const verifySeries = async (examId, series, contract) => {
   const payload = await readJson(`/api/exams/${examId}/series/${series.id}/read`);
   const content = payload.content || {};
+  const serializedContent = JSON.stringify(content);
   assert.equal(content.available, true, `${series.id}: available`);
   assert.equal(content.globalDurationMinutes, contract.duration, `${series.id}: global duration`);
   assert.equal(content.parts?.length, contract.partTypes.length, `${series.id}: part count`);
   assert.equal(content.tasks?.length, contract.questionCounts.reduce((sum, count) => sum + count, 0), `${series.id}: task count`);
+  assert.doesNotMatch(serializedContent, /HIDDEN CORRECTION|IMPLEMENTATION RULE|STUDENT-VISIBLE CONTENT/i, `${series.id}: authoring metadata hidden`);
+  assert.doesNotMatch(String(content.theme || ""), /GOETHE-ZERTIFIKAT B1LESEN/i, `${series.id}: series theme`);
 
   content.parts.forEach((part, partIndex) => {
     const metadata = part.sourceMetadata?.structuredB1Lesen || {};
