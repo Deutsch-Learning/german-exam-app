@@ -7,7 +7,7 @@ const startReadingSimulation = async (page, examId, provider) => {
   await page.goto(`${baseUrl}/simulations/${examId}/${seriesId}`, { waitUntil: "networkidle" });
   await page.getByRole("button", { name: /^Lesen\b/ }).click();
   await page.getByRole("button", { name: "Beginnen" }).click();
-  await expect(page.getByRole("button", { name: "Test starten" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Test starten" })).toBeVisible({ timeout: 20000 });
   await page.getByRole("button", { name: "Test starten" }).click();
   return seriesId;
 };
@@ -23,6 +23,8 @@ const expectNoHorizontalOverflow = async (page) => {
 const enterPendingPart = async (page) => {
   const skipTransition = page.getByRole("button", { name: "Ueberspringen" });
   if (await skipTransition.isVisible().catch(() => false)) await skipTransition.click();
+  const openPart = page.getByRole("button", { name: "Teil öffnen" });
+  if (await openPart.isVisible().catch(() => false)) await openPart.click();
   const startPart = page.getByRole("button", { name: "Test starten" });
   if (await startPart.isVisible().catch(() => false)) await startPart.click();
 };
@@ -130,7 +132,28 @@ test("ECL B1 tablet renders the three-state task and Aufgabe navigation", async 
   await notInText.click();
   await expect(notInText).toHaveAttribute("aria-pressed", "true");
   await expect(notInText.locator("svg")).toBeVisible();
+
+  const optionBoxes = await firstQuestion.getByRole("button").evaluateAll((buttons) =>
+    buttons.map((button) => {
+      const rect = button.getBoundingClientRect();
+      return { top: Math.round(rect.top), width: Math.round(rect.width) };
+    })
+  );
+  expect(optionBoxes).toHaveLength(3);
+  expect(optionBoxes[0].top).toBe(optionBoxes[1].top);
+  expect(optionBoxes[2].top).toBeGreaterThan(optionBoxes[0].top);
+  expect(optionBoxes[2].width).toBeGreaterThan(optionBoxes[0].width * 1.7);
   await page.screenshot({ path: "test-results/b1-reading-ecl-three-state-tablet.png", fullPage: true });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mobileOptionBoxes = await firstQuestion.getByRole("button").evaluateAll((buttons) =>
+    buttons.map((button) => Math.round(button.getBoundingClientRect().top))
+  );
+  expect(mobileOptionBoxes[1]).toBeGreaterThan(mobileOptionBoxes[0]);
+  expect(mobileOptionBoxes[2]).toBeGreaterThan(mobileOptionBoxes[1]);
+  await expectNoHorizontalOverflow(page);
+  await page.screenshot({ path: "test-results/b1-reading-ecl-three-state-mobile.png", fullPage: true });
+  await page.setViewportSize({ width: 768, height: 1024 });
 
   await page.getByRole("region", { name: "Aufgabennavigation" }).getByRole("button", { name: /Weiter/ }).click();
   await enterPendingPart(page);
@@ -151,4 +174,47 @@ test("ECL B1 tablet renders the three-state task and Aufgabe navigation", async 
   }
   await expectNoHorizontalOverflow(page);
   await page.screenshot({ path: "test-results/b1-reading-ecl-tablet.png", fullPage: true });
+});
+
+test("global 60-minute timer survives Teil navigation and refresh, then auto-submits", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const seriesId = await startReadingSimulation(page, "ecl-b1", "ecl");
+  const progressKey = `gem-module-progress-ecl-b1-${seriesId}-read`;
+  const globalTimer = page.getByLabel("Verbleibende Zeit");
+
+  await expect(globalTimer).toContainText(/^00:59:/);
+  await page.waitForFunction((key) => {
+    const snapshot = JSON.parse(localStorage.getItem(key) || "null");
+    return Boolean(snapshot?.timerStartedAt && snapshot?.timerDeadlineAt);
+  }, progressKey);
+  const initialDeadline = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).timerDeadlineAt, progressKey);
+
+  await page.getByRole("region", { name: "Aufgabennavigation" }).getByRole("button", { name: /Weiter/ }).click();
+  await expect(page.getByText("Verbleibende Gesamtzeit", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Teil öffnen" }).click();
+  await expect(page.getByRole("heading", { name: /Aufgabe 2/ })).toBeVisible();
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(page.getByRole("heading", { name: /Aufgabe 2/ })).toBeVisible();
+  const restoredDeadline = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).timerDeadlineAt, progressKey);
+  expect(restoredDeadline).toBe(initialDeadline);
+  await expect(globalTimer).toContainText(/^00:59:/);
+
+  await page.evaluate((key) => {
+    const snapshot = JSON.parse(localStorage.getItem(key));
+    snapshot.timerStartedAt = snapshot.timerStartedAt || new Date().toISOString();
+    snapshot.timerDeadlineAt = new Date(Date.now() + 1200).toISOString();
+    snapshot.timerSeconds = 2;
+    snapshot.completed = false;
+    snapshot.partIntroVisible = false;
+    localStorage.setItem(key, JSON.stringify(snapshot));
+  }, progressKey);
+  await page.reload({ waitUntil: "domcontentloaded" });
+
+  const timeoutNotice = page.getByRole("alert");
+  await expect(timeoutNotice).toContainText("Die globale Pruefungszeit von 60 Minuten ist abgelaufen", { timeout: 15000 });
+  await expect(timeoutNotice).toBeVisible();
+  await expect(page.locator('[data-b1-question-card="true"]')).toHaveCount(0);
+  await page.waitForFunction((key) => JSON.parse(localStorage.getItem(key) || "null")?.completed === true, progressKey);
+  await timeoutNotice.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: "test-results/global-timer-auto-submit.png" });
 });
