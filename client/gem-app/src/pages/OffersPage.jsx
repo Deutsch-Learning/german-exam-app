@@ -370,24 +370,6 @@ const buildEstimatedQuote = (priceEur, countryKey) => {
 
 const wait = (ms) => new Promise((resolve) => window.setTimeout(resolve, Math.max(0, ms)));
 
-const scrollModalFirst = (event, modalElement) => {
-  if (!modalElement) return;
-  const deltaY = event.deltaY;
-  if (!deltaY) return;
-
-  const maxScrollTop = modalElement.scrollHeight - modalElement.clientHeight;
-  if (maxScrollTop <= 0) return;
-
-  const goingDown = deltaY > 0;
-  const canScrollDown = modalElement.scrollTop < maxScrollTop - 1;
-  const canScrollUp = modalElement.scrollTop > 1;
-
-  if ((goingDown && canScrollDown) || (!goingDown && canScrollUp)) {
-    event.preventDefault();
-    modalElement.scrollTop += deltaY;
-  }
-};
-
 const CheckoutModalV2 = ({
   plan,
   selectedCertifications,
@@ -417,7 +399,6 @@ const CheckoutModalV2 = ({
   onPayMobileMoney,
   onVerifyPayment,
 }) => {
-  const modalRef = useRef(null);
   if (!plan) return null;
   const modalCopy = copy?.modal || offersCopy.fr.modal;
 
@@ -476,20 +457,13 @@ const CheckoutModalV2 = ({
       className="pricing-modal-backdrop"
       role="presentation"
       onMouseDown={onClose}
-      onWheel={(event) => {
-        if (event.target === event.currentTarget) {
-          scrollModalFirst(event, modalRef.current);
-        }
-      }}
     >
       <section
-        ref={modalRef}
         className={`pricing-modal pricing-certification-modal pricing-step-${step}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="checkout-title"
         onMouseDown={(event) => event.stopPropagation()}
-        onWheel={(event) => scrollModalFirst(event, modalRef.current)}
       >
         <button className="pricing-modal-close" type="button" aria-label={modalCopy.close} onClick={onClose}>
           <X size={18} />
@@ -972,7 +946,7 @@ export default function OffersPage() {
       ...(current || {}),
       status: current?.status || "processing",
       checked: false,
-      message: modalCopy.verifying,
+      message: copy.modal.verifying,
     }));
     const startedAt = Date.now();
     try {

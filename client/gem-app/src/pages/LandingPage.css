@@ -1949,7 +1949,7 @@ h4 {
     max-height: calc(100dvh - var(--landing-nav-height) - 18px);
     padding: 16px;
     overflow-y: auto;
-    overscroll-behavior: contain;
+    overscroll-behavior: auto;
     background: rgba(255, 255, 255, 0.96);
     border: 1px solid rgba(226, 232, 240, 0.92);
     border-radius: 18px;

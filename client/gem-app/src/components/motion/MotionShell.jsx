@@ -122,6 +122,7 @@ function useSmoothScroll(reduceMotion) {
       smoothWheel: true,
       syncTouch: false,
       wheelMultiplier: 0.92,
+      allowNestedScroll: true,
     });
 
     let frameId;

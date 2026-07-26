@@ -3431,22 +3431,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     beginPart(currentPart, startIndex);
   }, [beginPart, currentIndex, currentPart]);
 
-  const handleReadableWheel = useCallback((event) => {
-    const target = event.currentTarget;
-    const maxScrollTop = target.scrollHeight - target.clientHeight;
-    if (maxScrollTop <= 0 || event.deltaY === 0) return;
-
-    const scrollingDown = event.deltaY > 0;
-    const canScrollDown = target.scrollTop < maxScrollTop - 1;
-    const canScrollUp = target.scrollTop > 1;
-
-    if ((scrollingDown && canScrollDown) || (!scrollingDown && canScrollUp)) {
-      event.preventDefault();
-      event.stopPropagation();
-      target.scrollTop = Math.max(0, Math.min(maxScrollTop, target.scrollTop + event.deltaY));
-    }
-  }, []);
-
   const renderRichExamText = (html, keyPrefix = "rich-exam-text", className = "") => (
     <div
       key={keyPrefix}
@@ -3492,7 +3476,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       return (
         <div
           className={`${styles.examMaterial} ${styles.readableScrollArea} ${compact ? styles.examMaterialCompact : ""}`}
-          onWheel={handleReadableWheel}
         >
           {renderRichExamText(sourceText, `${part?.id ?? "part"}-rich`)}
         </div>
@@ -3507,7 +3490,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     return (
       <div
         className={`${styles.examMaterial} ${styles.readableScrollArea} ${compact ? styles.examMaterialCompact : ""}`}
-        onWheel={handleReadableWheel}
       >
         {blocks.length ? (
           blocks.map((block, index) => {
@@ -3717,7 +3699,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
         </div>
       </div>
 
-      <div className={styles.partIntroBody} onWheel={handleReadableWheel}>
+      <div className={styles.partIntroBody}>
         {renderPartMaterial(currentPart)}
       </div>
 
@@ -4120,7 +4102,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
     return (
       <div className={styles.sprachExamLayout}>
-        <section className={styles.sprachExamPane} onWheel={handleReadableWheel}>
+        <section className={styles.sprachExamPane}>
           <div className={styles.sectionLabel}>
             <BookOpen size={18} />
             TELC B2 Sprachbausteine
@@ -4466,7 +4448,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     );
     return (
       <div className={styles.goetheExamLayout}>
-        <section className={styles.goetheExamPane} onWheel={handleReadableWheel}>
+        <section className={styles.goetheExamPane}>
           {header}
           {hasReference ? (
             <div className={`${styles.b1PartGrid} ${meta.partType === "situation_ad_match" ? styles.b1ReferenceRight : ""}`}>
@@ -4505,7 +4487,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     if (meta.partType === "person_matching") {
       return (
         <div className={styles.goetheExamLayout}>
-          <section className={styles.goetheExamPane} onWheel={handleReadableWheel}>
+          <section className={styles.goetheExamPane}>
             {header}
             <div className={styles.goethePersonGrid}>
               {(meta.persons || []).map((person) => (
@@ -4532,7 +4514,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     if (meta.partType === "inline_sentence_gap") {
       return (
         <div className={styles.goetheExamLayout}>
-          <section className={styles.goetheExamPane} onWheel={handleReadableWheel}>
+          <section className={styles.goetheExamPane}>
             {header}
             <article className={styles.goetheArticle}>{renderGoetheArticleWithGaps(meta.article)}</article>
             {renderGoetheBank(meta.bank, "Satzbank A-H")}
@@ -4545,7 +4527,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     if (meta.partType === "single_choice") {
       return (
         <div className={styles.goetheExamLayout}>
-          <section className={styles.goetheExamPane} onWheel={handleReadableWheel}>
+          <section className={styles.goetheExamPane}>
             {header}
             <article className={styles.goetheArticle}>{renderGoetheTextBlocks(meta.readingText, "goethe-teil3")}</article>
             <div className={styles.goetheChoiceList}>
@@ -4580,7 +4562,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     if (meta.partType === "heading_matching_with_unmatched_opinion") {
       return (
         <div className={styles.goetheExamLayout}>
-          <section className={styles.goetheExamPane} onWheel={handleReadableWheel}>
+          <section className={styles.goetheExamPane}>
             {header}
             {renderGoetheBank([...(meta.headingBank || []), { value: "X", label: "Keine passende Ueberschrift" }], "Ueberschriften a-f und X")}
             <div className={styles.goetheQuestionList}>
@@ -4599,7 +4581,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
     return (
       <div className={styles.goetheExamLayout}>
-        <section className={styles.goetheExamPane} onWheel={handleReadableWheel}>
+        <section className={styles.goetheExamPane}>
           {header}
           <article className={styles.goetheArticle}>
             {meta.documentTitle ? <h3 className={styles.goetheArticleTitle} translate="no">{meta.documentTitle}</h3> : null}
@@ -4706,7 +4688,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     );
     const frame = (content) => (
       <div className={styles.goetheExamLayout}>
-        <section className={styles.goetheExamPane} onWheel={handleReadableWheel}>
+        <section className={styles.goetheExamPane}>
           {header}
           {content}
           {renderGoetheFeedback(tasks)}
@@ -4818,13 +4800,13 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     isStructuredB2LesenModule ? renderStructuredB2Lesen() :
     isTelcSprachbausteineModule ? renderTelcSprachbausteine() :
     <div className={styles.readingLayout}>
-      <section className={styles.passagePane} onWheel={handleReadableWheel}>
+      <section className={styles.passagePane}>
         <div className={styles.sectionLabel}>
           <BookOpen size={18} />
           Quelle Teil {currentPart?.number ?? currentPartIndex + 1}
         </div>
         <h2 translate="no">{currentPart?.displayTitle ?? module.passage.title}</h2>
-        <div className={`${styles.introText} ${styles.readableScrollArea}`} onWheel={handleReadableWheel}>
+        <div className={`${styles.introText} ${styles.readableScrollArea}`}>
           {renderStructuredExamText(module.passage.intro, "reading-intro")}
         </div>
         {renderPartMaterial(currentPart, { compact: true })}
@@ -5070,7 +5052,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             </div>
             <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
             {renderContentTitle(currentTask.title, `write-title-${currentTask.id}`)}
-            <div className={`${styles.instructionText} ${styles.readableScrollArea}`} onWheel={handleReadableWheel}>
+            <div className={`${styles.instructionText} ${styles.readableScrollArea}`}>
               {renderWritingPrompt()}
             </div>
             <div className={styles.promptMeta}>
@@ -5152,7 +5134,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           </div>
           <p className={styles.partMiniLabel}>{currentTask.typeLabel}</p>
           {renderContentTitle(currentTask.title, `write-title-${currentTask.id}`)}
-          <div className={`${styles.instructionText} ${styles.readableScrollArea}`} onWheel={handleReadableWheel}>
+          <div className={`${styles.instructionText} ${styles.readableScrollArea}`}>
             {renderWritingPrompt()}
           </div>
           <div className={styles.promptMeta}>
@@ -5251,7 +5233,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
         ) : null}
         {renderSpeakingVisual(visualAlt)}
         {currentTask.presentation.outro ? (
-          <div className={`${styles.instructionText} ${styles.readableScrollArea}`} onWheel={handleReadableWheel}>
+          <div className={`${styles.instructionText} ${styles.readableScrollArea}`}>
             {renderStructuredExamText(currentTask.presentation.outro, `speak-visual-outro-${currentTask.id}`)}
           </div>
         ) : null}
@@ -5259,7 +5241,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     ) : (
       <>
         {speakingVisual ? renderSpeakingVisual(visualAlt) : null}
-        <div className={`${styles.instructionText} ${styles.readableScrollArea}`} onWheel={handleReadableWheel}>
+        <div className={`${styles.instructionText} ${styles.readableScrollArea}`}>
           {currentTask.presentation?.kind === "paired_roles" && pairedCards.length === 2 ? (
           <div className={styles.speakingPairedPresentation}>
             {currentTask.presentation.intro ? (

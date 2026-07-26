@@ -267,22 +267,6 @@ const makeClientBatchId = () =>
     ? crypto.randomUUID()
     : `style-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-const handleLocalScrollableWheel = (event) => {
-  const target = event.currentTarget;
-  const maxScrollTop = target.scrollHeight - target.clientHeight;
-  if (maxScrollTop <= 0 || event.deltaY === 0) return;
-
-  const scrollingDown = event.deltaY > 0;
-  const canScrollDown = target.scrollTop < maxScrollTop - 1;
-  const canScrollUp = target.scrollTop > 1;
-
-  if ((scrollingDown && canScrollDown) || (!scrollingDown && canScrollUp)) {
-    event.preventDefault();
-    event.stopPropagation();
-    target.scrollTop = Math.max(0, Math.min(maxScrollTop, target.scrollTop + event.deltaY));
-  }
-};
-
 const buildAdminStyleBlocks = (exams = [], sections = [], questions = []) => {
   const examMap = new Map(exams.map((exam) => [exam.id, exam]));
   const sectionMap = new Map(sections.map((section) => [section.id, section]));
@@ -2132,7 +2116,7 @@ function AdminExams() {
             <h2>Content library</h2>
             <span>{visibleExams.length} shown</span>
           </div>
-          <div className={styles.examList} onWheel={handleLocalScrollableWheel}>
+          <div className={styles.examList}>
             {visibleExams.map((exam) => {
               const module = MODULE_OPTIONS.find((item) => item.id === exam.section_type);
               const Icon = module?.icon ?? FileJson;
@@ -2738,7 +2722,7 @@ function StyleTemplatePanel({
 
   return (
     <div className={styles.modalOverlay} role="presentation">
-      <section className={styles.styleModal} role="dialog" aria-modal="true" aria-labelledby="style-template-title" onWheel={handleLocalScrollableWheel}>
+      <section className={styles.styleModal} role="dialog" aria-modal="true" aria-labelledby="style-template-title">
         <div className={styles.styleModalHeader}>
           <div>
             <p className={styles.modalEyebrow}>Reusable style</p>
@@ -2813,7 +2797,7 @@ function StyleTemplatePanel({
               Manual override across block types
             </label>
             {state.scope === "manual" ? (
-              <div className={styles.manualBlockList} onWheel={handleLocalScrollableWheel}>
+              <div className={styles.manualBlockList}>
                 <div className={styles.panelHeader}>
                   <h3>Selected blocks</h3>
                   <div className={styles.actions}>
@@ -2913,7 +2897,7 @@ function StyleTemplatePanel({
             </div>
           ) : null}
           {preview?.blocks?.length ? (
-            <div className={styles.stylePreviewList} onWheel={handleLocalScrollableWheel}>
+            <div className={styles.stylePreviewList}>
               {preview.blocks.slice(0, 12).map((block) => (
                 <article key={block.blockId} className={styles.stylePreviewItem}>
                   <strong>{block.label}</strong>
@@ -3828,20 +3812,6 @@ function RichTextEditor({ label, value, onChange, variant = "material", onApplyS
     rememberSelection();
   };
 
-  const handleEditorWheel = (event) => {
-    const editor = editorRef.current;
-    if (!editor) return;
-    const maxScrollTop = editor.scrollHeight - editor.clientHeight;
-    if (maxScrollTop <= 0 || event.deltaY === 0) return;
-
-    const nextScrollTop = Math.max(0, Math.min(maxScrollTop, editor.scrollTop + event.deltaY));
-    if (nextScrollTop !== editor.scrollTop) {
-      event.preventDefault();
-      event.stopPropagation();
-      editor.scrollTop = nextScrollTop;
-    }
-  };
-
   const handleKeyDown = (event) => {
     const modKey = event.ctrlKey || event.metaKey;
     if (!modKey) return;
@@ -3981,7 +3951,6 @@ function RichTextEditor({ label, value, onChange, variant = "material", onApplyS
         onKeyUp={rememberSelection}
         onMouseUp={rememberSelection}
         onBlur={sanitizeValue}
-        onWheel={handleEditorWheel}
       />
     </div>
   );

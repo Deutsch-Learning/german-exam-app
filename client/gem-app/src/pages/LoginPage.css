@@ -309,7 +309,7 @@
 .country-options {
   max-height: min(310px, 44vh);
   overflow-y: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior: auto;
 }
 
 .country-option {
