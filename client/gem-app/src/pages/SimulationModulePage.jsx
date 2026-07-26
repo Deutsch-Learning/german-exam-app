@@ -66,6 +66,7 @@ const PART_TRANSITION_SECONDS = 10;
 const GLOBAL_TEST_DURATION_MINUTES = 60;
 const GLOBAL_TEST_DURATION_SECONDS = GLOBAL_TEST_DURATION_MINUTES * 60;
 const WRITING_GLOBAL_DURATION_MINUTES = GLOBAL_TEST_DURATION_MINUTES;
+const ECL_B1_GLOBAL_DURATION_MINUTES = 35;
 
 const ImportedLoadingDots = ({ label = "Importierte Aufgaben werden geladen" }) => (
   <span className={styles.importedLoadingDots} role="status" aria-label={label}>
@@ -1909,9 +1910,7 @@ const buildSeriesModule = (baseModule, content, series) => {
       passage: content.passage ?? baseModule.passage,
       parts: content.parts ?? baseModule.parts,
       audio: content.audio ?? baseModule.audio,
-      globalDurationMinutes: baseModule.id === "write"
-        ? WRITING_GLOBAL_DURATION_MINUTES
-        : content.globalDurationMinutes ?? baseModule.globalDurationMinutes,
+      globalDurationMinutes: content.globalDurationMinutes ?? baseModule.globalDurationMinutes,
       focus: content.focus ?? baseModule.focus,
       advancement: content.advancement ?? baseModule.advancement,
       seriesContext: {
@@ -2155,7 +2154,13 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     ? `${selectedSeries.examId}-${selectedSeries.id}-${module.id}`
     : module.id;
   const progressKey = getProgressKey(progressScopeId);
-  const totalExamDuration = GLOBAL_TEST_DURATION_SECONDS;
+  const isEclB1Test = selectedSeries?.examId === "ecl-b1";
+  const totalExamDurationMinutes = isEclB1Test
+    ? ECL_B1_GLOBAL_DURATION_MINUTES
+    : GLOBAL_TEST_DURATION_MINUTES;
+  const totalExamDuration = isEclB1Test
+    ? ECL_B1_GLOBAL_DURATION_MINUTES * 60
+    : GLOBAL_TEST_DURATION_SECONDS;
   const seriesRoute = selectedSeries
     ? `/simulations/${selectedSeries.examId}/${selectedSeries.id}`
     : "/simulations";
@@ -2539,8 +2544,11 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     const savedStartedAt = stored?.timerStartedAt ? new Date(stored.timerStartedAt).getTime() : Number.NaN;
     const hasPersistedDeadline =
       !stored?.completed && Number.isFinite(savedDeadlineAt) && Number.isFinite(savedStartedAt);
+    const restoredDeadlineAt = hasPersistedDeadline
+      ? Math.min(savedDeadlineAt, savedStartedAt + totalExamDuration * 1000)
+      : null;
     const restoredTimerSeconds = hasPersistedDeadline
-      ? Math.max(0, Math.ceil((savedDeadlineAt - Date.now()) / 1000))
+      ? Math.max(0, Math.ceil((restoredDeadlineAt - Date.now()) / 1000))
       : Number.isFinite(savedTimer) && savedTimer > 0 && !hasLegacyWritingTimer
         ? Math.min(savedTimer, totalExamDuration)
         : totalExamDuration;
@@ -2552,7 +2560,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     const shouldResumeTimer = !stored?.completed && (hasPersistedDeadline || !restoredPartIntroVisible);
     armExamTimer(restoredTimerSeconds, {
       running: shouldResumeTimer,
-      deadlineAt: hasPersistedDeadline ? savedDeadlineAt : null,
+      deadlineAt: restoredDeadlineAt,
       startedAt: hasPersistedDeadline ? savedStartedAt : null,
     });
     setSimulationMode(stored?.completed ? Boolean(stored?.simulationMode) : true);
@@ -3413,8 +3421,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
     timerSecondsRef.current = 0;
     setTimerSeconds(0);
-    setCompletionReason("Die globale Pruefungszeit von 60 Minuten ist abgelaufen. Der gesamte Test wurde automatisch mit Ihren gespeicherten Antworten abgegeben.");
-    persistProgress(`Test nach 60 Minuten automatisch abgegeben um ${formatClock()}`);
+    setCompletionReason(`Die globale Pruefungszeit von ${totalExamDurationMinutes} Minuten ist abgelaufen. Der gesamte Test wurde automatisch mit Ihren gespeicherten Antworten abgegeben.`);
+    persistProgress(`Test nach ${totalExamDurationMinutes} Minuten automatisch abgegeben um ${formatClock()}`);
     finishModule();
   }, [
     audioPlaying,
@@ -3423,6 +3431,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     pauseListeningAudio,
     persistProgress,
     stopRecording,
+    totalExamDurationMinutes,
   ]);
 
   useEffect(() => {

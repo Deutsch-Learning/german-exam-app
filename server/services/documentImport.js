@@ -2652,8 +2652,21 @@ const parseGoetheListeningSeries = (text, metadata) => {
   });
 };
 
+const ECL_B1_WRITING_DURATION_MINUTES = 35;
+const ECL_B1_WRITING_INSTRUCTIONS =
+  "ECL B1 Schriftliche Kommunikation: zwei Schreibaufgaben, 35 Minuten, 25 Punkte.";
+const ECL_B1_PAGE_HEADER_PATTERN =
+  /ECL\s+B1\s*[\u2010-\u2015-]\s*Schriftliche Kommunikation\s*[·•]\s*(?:20\s+Sujets\s+Originaux(?:\s+Page\s+\d+)?)?/giu;
+
+const cleanEclB1WritingArtifacts = (value) =>
+  String(value ?? "")
+    .replace(ECL_B1_PAGE_HEADER_PATTERN, "")
+    .replace(/(^|>|\n)([ \t]*)F(?:[ \t\u00a0]+|&nbsp;)+(?=[A-ZÄÖÜ])/gu, "$1$2")
+    .replace(/<br\s*\/?>\s*(?:<strong\b[^>]*>\s*)?(?:<em\b[^>]*>\s*)?<span\b[^>]*>\s*<\/span>\s*(?:<\/em>\s*)?(?:<\/strong>\s*)?/giu, "")
+    .replace(/\n[ \t]+\n/g, "\n\n");
+
 const parseEclWritingSolutionBody = (body) => {
-  const clean = compactText(body);
+  const clean = compactText(cleanEclB1WritingArtifacts(body));
   const criteriaIndex = clean.search(/(?:^|\n)\s*3\s+/);
   const sampleAnswer = criteriaIndex >= 0 ? clean.slice(0, criteriaIndex).trim() : clean;
   const criteria = criteriaIndex >= 0 ? clean.slice(criteriaIndex).replace(/(?:^|\n)\s*3\s+/g, "\n- ").trim() : "";
@@ -2701,9 +2714,10 @@ const parseEclWritingSeries = (text, metadata) => {
       const next = partMatches[index + 1];
       const partNumber = Number(match[1]);
       const header = compactText(match[2]);
-      const body = stripEclResponseMarker(block.text.slice(match.index + match[0].length, next ? next.index : block.text.length));
+      const body = cleanEclB1WritingArtifacts(
+        stripEclResponseMarker(block.text.slice(match.index + match[0].length, next ? next.index : block.text.length))
+      );
       const solution = solutions.get(partNumber) || {};
-      const durationMinutes = 20;
       const correctAnswer = {};
       if (solution.sampleAnswer) correctAnswer.sampleAnswer = solution.sampleAnswer;
       if (solution.criteria) correctAnswer.expectedPerformance = solution.criteria;
@@ -2712,9 +2726,9 @@ const parseEclWritingSeries = (text, metadata) => {
         partNumber,
         title: `Aufgabe ${partNumber}: ${header}`,
         instructions: trimForDb(body, 4000),
-        durationMinutes,
+        durationMinutes: null,
         points: null,
-        scoring: { durationMinutes, totalPoints: 25 },
+        scoring: { totalPoints: 25 },
         metadata: { sourceHeader: header, eclFormat: true },
         questions: [
           {
@@ -2724,7 +2738,7 @@ const parseEclWritingSeries = (text, metadata) => {
             correctAnswer,
             explanation: solution.criteria || solution.sampleAnswer || null,
             position: partNumber,
-            scoring: { durationMinutes, totalPoints: 25 },
+            scoring: { totalPoints: 25 },
             metadata: { wordTarget: extractEclWordTarget(body) || 100, eclPart: partNumber },
             sectionType: "write",
           },
@@ -2735,9 +2749,17 @@ const parseEclWritingSeries = (text, metadata) => {
       seriesNumber,
       title,
       sourceLabel: `Sujet ${String(seriesNumber).padStart(2, "0")}`,
-      instructions: "ECL B1 Schriftliche Kommunikation: zwei Schreibaufgaben, 40 Minuten, 25 Punkte.",
-      scoring: { totalPoints: 25, parts: { 1: null, 2: null } },
-      metadata: { ...metadata, eclFormat: true },
+      instructions: ECL_B1_WRITING_INSTRUCTIONS,
+      scoring: {
+        totalPoints: 25,
+        globalDurationMinutes: ECL_B1_WRITING_DURATION_MINUTES,
+        parts: { 1: null, 2: null },
+      },
+      metadata: {
+        ...metadata,
+        eclFormat: true,
+        globalDurationMinutes: ECL_B1_WRITING_DURATION_MINUTES,
+      },
       sections,
     };
   });
@@ -5155,6 +5177,7 @@ module.exports = {
   analyzeExamDocument,
   buildHoerenParsedPreview,
   buildListeningImportFoundation,
+  cleanEclB1WritingArtifacts,
   ensureDocumentImportSchema,
   getExamImportDraft,
   importParsedExamDocument,
