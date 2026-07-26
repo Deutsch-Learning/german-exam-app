@@ -30,7 +30,6 @@ import {
   SkipForward,
   Square,
   Timer,
-  TimerReset,
   Trophy,
   WandSparkles,
   X,
@@ -63,8 +62,9 @@ const LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"];
 const PASS_SCORE = 70;
 const MOBILE_AUDIO_UNSUPPORTED_MESSAGE =
   "Fuer diese Hoeren-Aufgabe ist noch keine freigegebene Audiodatei verfuegbar. Bitte versuchen Sie es spaeter erneut.";
-const PART_TRANSITION_SECONDS = 10;
-const WRITING_GLOBAL_DURATION_MINUTES = 60;
+const GLOBAL_TEST_DURATION_MINUTES = 60;
+const GLOBAL_TEST_DURATION_SECONDS = GLOBAL_TEST_DURATION_MINUTES * 60;
+const WRITING_GLOBAL_DURATION_MINUTES = GLOBAL_TEST_DURATION_MINUTES;
 
 const ImportedLoadingDots = ({ label = "Importierte Aufgaben werden geladen" }) => (
   <span className={styles.importedLoadingDots} role="status" aria-label={label}>
@@ -80,50 +80,11 @@ const cleanTeilTitle = (value = "") =>
 const TeilTransitionScreen = ({
   nextTeilTitle = "",
   nextTeilNumber,
-  durationSeconds = PART_TRANSITION_SECONDS,
+  remainingSeconds = GLOBAL_TEST_DURATION_SECONDS,
   onComplete,
 }) => {
-  const [remaining, setRemaining] = useState(durationSeconds);
-  const [skipping, setSkipping] = useState(false);
-  const onCompleteRef = useRef(onComplete);
-  const completedRef = useRef(false);
-  const intervalRef = useRef(null);
-
-  useEffect(() => {
-    onCompleteRef.current = onComplete;
-  }, [onComplete]);
-
-  const finishTransition = useCallback((delayMs = 0) => {
-    if (completedRef.current) return;
-    completedRef.current = true;
-    if (intervalRef.current) window.clearInterval(intervalRef.current);
-    window.setTimeout(() => onCompleteRef.current?.(), delayMs);
-  }, []);
-
-  useEffect(() => {
-    completedRef.current = false;
-    setSkipping(false);
-    setRemaining(durationSeconds);
-    const startTime = Date.now();
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
-    const tick = () => {
-      const elapsed = Math.floor((Date.now() - startTime) / 1000);
-      const nextRemaining = Math.max(0, durationSeconds - elapsed);
-      setRemaining((value) => (value === nextRemaining ? value : nextRemaining));
-      if (nextRemaining <= 0) finishTransition(180);
-    };
-
-    intervalRef.current = window.setInterval(tick, 200);
-    tick();
-    return () => {
-      if (intervalRef.current) window.clearInterval(intervalRef.current);
-      document.body.style.overflow = previousOverflow;
-    };
-  }, [durationSeconds, finishTransition]);
-
-  const progress = durationSeconds > 0 ? ((durationSeconds - remaining) / durationSeconds) * 360 : 360;
+  const safeRemaining = Math.max(0, Math.round(Number(remainingSeconds) || 0));
+  const formattedRemaining = `${String(Math.floor(safeRemaining / 60)).padStart(2, "0")}:${String(safeRemaining % 60).padStart(2, "0")}`;
   const title = cleanTeilTitle(nextTeilTitle);
 
   return (
@@ -133,31 +94,27 @@ const TeilTransitionScreen = ({
           <Timer size={34} />
         </div>
         <p className={styles.sectionLabel}>Teilwechsel</p>
-        <h2>Der nächste Teil beginnt gleich</h2>
+        <h2>Bereit für den nächsten Teil?</h2>
         <p className={styles.teilTransitionNext}>
           Teil {nextTeilNumber || ""}
           {title ? `: ${title}` : ""}
         </p>
-        <p className={styles.teilTransitionText}>Der nächste Teil beginnt in</p>
+        <p className={styles.teilTransitionText}>Verbleibende Gesamtzeit</p>
         <div
           className={styles.teilTransitionRing}
-          style={{ "--transition-progress": `${progress}deg` }}
-          aria-label={`${remaining} Sekunden`}
+          style={{ "--transition-progress": "360deg" }}
+          aria-label={`${formattedRemaining} verbleibende Gesamtzeit`}
         >
-          <span>{remaining}</span>
+          <span>{formattedRemaining}</span>
         </div>
-        <p className={styles.teilTransitionSeconds}>Sekunden</p>
-        <p className={styles.teilTransitionHint}>Bereite dich auf die nächste Aufgabe vor.</p>
+        <p className={styles.teilTransitionSeconds}>60-Minuten-Test</p>
+        <p className={styles.teilTransitionHint}>Die globale Prüfungszeit läuft ohne Unterbrechung weiter.</p>
         <button
           type="button"
           className={styles.teilTransitionSkip}
-          onClick={() => {
-            setSkipping(true);
-            finishTransition(0);
-          }}
-          disabled={skipping}
+          onClick={onComplete}
         >
-          {skipping ? "Oeffnen..." : "Ueberspringen"}
+          Teil öffnen
         </button>
       </div>
     </section>
@@ -2154,19 +2111,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     ? `${selectedSeries.examId}-${selectedSeries.id}-${module.id}`
     : module.id;
   const progressKey = getProgressKey(progressScopeId);
-  const totalExamDuration = useMemo(
-    () => {
-      if (module.id === "write") {
-        return WRITING_GLOBAL_DURATION_MINUTES * 60;
-      }
-      const configuredMinutes = Number(module.globalDurationMinutes);
-      if (Number.isFinite(configuredMinutes) && configuredMinutes > 0) {
-        return Math.round(configuredMinutes * 60);
-      }
-      return module.tasks.reduce((sum, task) => sum + getTaskDuration(module, task), 0);
-    },
-    [module]
-  );
+  const totalExamDuration = GLOBAL_TEST_DURATION_SECONDS;
   const seriesRoute = selectedSeries
     ? `/simulations/${selectedSeries.examId}/${selectedSeries.id}`
     : "/simulations";
@@ -2191,6 +2136,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const [navPanelOpen, setNavPanelOpen] = useState(false);
   const [, setSaveStatus] = useState("");
   const [resultStatus, setResultStatus] = useState("");
+  const [completionReason, setCompletionReason] = useState("");
   const [savedSimulationId, setSavedSimulationId] = useState(null);
   const [writingCorrection, setWritingCorrection] = useState(null);
   const [writingCorrectionLoading, setWritingCorrectionLoading] = useState(false);
@@ -2204,9 +2150,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const [audioSessionActive, setAudioSessionActive] = useState(false);
   const [audioError, setAudioError] = useState("");
   const [listeningAudioDuration, setListeningAudioDuration] = useState(0);
-  const [prepRemaining, setPrepRemaining] = useState(speakingTasks[0].prepSeconds);
-  const [prepActive, setPrepActive] = useState(false);
-  const [speakingPhase, setSpeakingPhase] = useState("prep");
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [recordError, setRecordError] = useState("");
@@ -2225,11 +2168,10 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const audioSessionRef = useRef(false);
   const audioTimestampRef = useRef(0);
   const timerDeadlineRef = useRef(null);
+  const timerStartedAtRef = useRef(null);
   const timerExpiredRef = useRef(false);
+  const submissionLockedRef = useRef(false);
   const timerSecondsRef = useRef(totalExamDuration);
-  const prepDeadlineRef = useRef(null);
-  const prepExpiredRef = useRef(false);
-  const prepRemainingRef = useRef(speakingTasks[0].prepSeconds);
   const recordingIntervalRef = useRef(null);
   const recordingSecondsRef = useRef(0);
   const recordingTaskIndexRef = useRef(0);
@@ -2484,20 +2426,23 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   }, [currentAudioDuration, currentListeningAudio, isBrowserSpeechAudio]);
 
 
-  const armExamTimer = useCallback((seconds, { running = false } = {}) => {
-    const safeSeconds = Math.max(0, Math.round(Number(seconds) || 0));
+  const armExamTimer = useCallback((seconds, { running = false, deadlineAt = null, startedAt = null } = {}) => {
+    const now = Date.now();
+    const parsedDeadline = deadlineAt ? new Date(deadlineAt).getTime() : Number.NaN;
+    const parsedStartedAt = startedAt ? new Date(startedAt).getTime() : Number.NaN;
+    const hasSavedDeadline = running && Number.isFinite(parsedDeadline);
+    const safeSeconds = hasSavedDeadline
+      ? Math.max(0, Math.ceil((parsedDeadline - now) / 1000))
+      : Math.max(0, Math.round(Number(seconds) || 0));
     timerSecondsRef.current = safeSeconds;
     setTimerSeconds(safeSeconds);
     timerExpiredRef.current = false;
-    timerDeadlineRef.current = running && safeSeconds > 0 ? Date.now() + safeSeconds * 1000 : null;
-  }, []);
-
-  const armPrepTimer = useCallback((seconds, { running = false } = {}) => {
-    const safeSeconds = Math.max(0, Math.round(Number(seconds) || 0));
-    prepRemainingRef.current = safeSeconds;
-    setPrepRemaining(safeSeconds);
-    prepExpiredRef.current = false;
-    prepDeadlineRef.current = running && safeSeconds > 0 ? Date.now() + safeSeconds * 1000 : null;
+    timerStartedAtRef.current = running
+      ? Number.isFinite(parsedStartedAt) ? parsedStartedAt : now
+      : null;
+    timerDeadlineRef.current = running && safeSeconds > 0
+      ? hasSavedDeadline ? parsedDeadline : now + safeSeconds * 1000
+      : null;
   }, []);
 
   useEffect(() => {
@@ -2511,6 +2456,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       armExamTimer(totalExamDuration, { running: false });
       setSimulationMode(true);
       setCompleted(false);
+      submissionLockedRef.current = false;
+      setCompletionReason("");
       setPartIntroVisible(true);
       setWritingVersions([]);
       setSavedSimulationId(null);
@@ -2531,34 +2478,41 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setFlagged(stored?.flagged ?? {});
     setNotes(stored?.notes ?? {});
     setElapsedSeconds(Number(stored?.elapsedSeconds) || 0);
-    const restoredTask = module.tasks[restoredIndex] ?? module.tasks[0];
     const savedTimer = Number(stored?.timerSeconds);
     const hasLegacyWritingTimer =
       module.id === "write" &&
       Number.isFinite(savedTimer) &&
       savedTimer > 0 &&
       savedTimer <= 5 * 60;
-    const restoredTimerSeconds =
-      Number.isFinite(savedTimer) && savedTimer > 0 && !hasLegacyWritingTimer
-        ? savedTimer
+    const savedDeadlineAt = stored?.timerDeadlineAt ? new Date(stored.timerDeadlineAt).getTime() : Number.NaN;
+    const savedStartedAt = stored?.timerStartedAt ? new Date(stored.timerStartedAt).getTime() : Number.NaN;
+    const hasPersistedDeadline =
+      !stored?.completed && Number.isFinite(savedDeadlineAt) && Number.isFinite(savedStartedAt);
+    const restoredTimerSeconds = hasPersistedDeadline
+      ? Math.max(0, Math.ceil((savedDeadlineAt - Date.now()) / 1000))
+      : Number.isFinite(savedTimer) && savedTimer > 0 && !hasLegacyWritingTimer
+        ? Math.min(savedTimer, totalExamDuration)
         : totalExamDuration;
-    const restoredPartIntroVisible = stored?.completed ? false : stored?.partIntroVisible ?? restoredIndex === 0;
+    const restoredPartIntroVisible = stored?.completed
+      ? false
+      : hasPersistedDeadline
+        ? false
+        : stored?.partIntroVisible ?? restoredIndex === 0;
+    const shouldResumeTimer = !stored?.completed && (hasPersistedDeadline || !restoredPartIntroVisible);
     armExamTimer(restoredTimerSeconds, {
-      running: !stored?.completed && !restoredPartIntroVisible,
+      running: shouldResumeTimer,
+      deadlineAt: hasPersistedDeadline ? savedDeadlineAt : null,
+      startedAt: hasPersistedDeadline ? savedStartedAt : null,
     });
     setSimulationMode(stored?.completed ? Boolean(stored?.simulationMode) : true);
     setCompleted(Boolean(stored?.completed));
+    submissionLockedRef.current = Boolean(stored?.completed);
+    setCompletionReason(String(stored?.completionReason || ""));
     setPartIntroVisible(restoredPartIntroVisible);
     setWritingVersions(stored?.writingVersions ?? []);
     const restoredAudioTimestamp = Number(stored?.audioTimestamp) || 0;
     setAudioTimestamp(restoredAudioTimestamp);
     audioTimestampRef.current = restoredAudioTimestamp;
-    const restoredPrepActive = module.id === "speak" && !stored?.completed && !restoredPartIntroVisible && (stored?.prepActive ?? true);
-    setSpeakingPhase(stored?.speakingPhase ?? "prep");
-    setPrepActive(restoredPrepActive);
-    armPrepTimer(Number(stored?.prepRemaining) || restoredTask?.prepSeconds || speakingTasks[0].prepSeconds, {
-      running: restoredPrepActive,
-    });
     setAudioPlaying(false);
     setAudioSessionActive(false);
     setResultStatus("");
@@ -2571,7 +2525,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setSpeakingCorrectionError("");
     setSaveStatus(stored?.savedAt ? `Dernière sauvegarde ${formatClock(new Date(stored.savedAt))}` : "Sauvegarde locale prête");
     setRestoredKey(progressKey);
-  }, [armExamTimer, armPrepTimer, examParts, module, progressKey, shouldPersistProgress, totalExamDuration, totalTasks]);
+  }, [armExamTimer, examParts, module, progressKey, shouldPersistProgress, totalExamDuration, totalTasks]);
 
   useEffect(() => {
     if (completed) return undefined;
@@ -2768,6 +2722,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   );
 
   const finishModule = useCallback(() => {
+    if (submissionLockedRef.current) return;
+    submissionLockedRef.current = true;
     partTransitionActiveRef.current = false;
     setPartTransition(null);
     setCompleted(true);
@@ -2806,15 +2762,19 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       notes,
       elapsedSeconds,
       timerSeconds,
+      timerStartedAt: timerStartedAtRef.current
+        ? new Date(timerStartedAtRef.current).toISOString()
+        : null,
+      timerDeadlineAt: timerDeadlineRef.current
+        ? new Date(timerDeadlineRef.current).toISOString()
+        : null,
       taskDuration: currentTaskDuration,
       partIntroVisible,
       currentPartId: currentPart?.id,
       simulationMode,
       completed,
+      completionReason,
       audioTimestamp,
-      prepRemaining,
-      prepActive,
-      speakingPhase,
       writingVersions,
       lastAccessedAt: new Date().toISOString(),
       savedAt: new Date().toISOString(),
@@ -2825,6 +2785,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       audioTimestamp,
       completedPartCount,
       completed,
+      completionReason,
       currentIndex,
       currentPart?.id,
       currentTaskDuration,
@@ -2835,15 +2796,12 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       moduleTitle,
       notes,
       partIntroVisible,
-      prepRemaining,
-      prepActive,
       progressPercent,
       remainingCount,
       progressScopeId,
       selectedSeries,
       simulationMode,
       skipped,
-      speakingPhase,
       timerSeconds,
       totalTasks,
       writingVersions,
@@ -2916,14 +2874,10 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
   useEffect(() => {
     if (module.id !== "speak") return;
-    const shouldRunPrep = simulationMode && !completed && !partIntroVisible;
-    armPrepTimer(currentTask.prepSeconds, { running: shouldRunPrep });
-    setSpeakingPhase("prep");
-    setPrepActive(shouldRunPrep);
     setRecordingSeconds(0);
     recordingSecondsRef.current = 0;
     setRecordError("");
-  }, [armPrepTimer, completed, currentIndex, currentTask.prepSeconds, module.id, partIntroVisible, simulationMode]);
+  }, [currentIndex, module.id]);
 
   useEffect(
     () => () => {
@@ -2940,6 +2894,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
   const setAnswerForCurrent = useCallback(
     (value) => {
+      if (submissionLockedRef.current) return;
       setAnswers((previous) => ({ ...previous, [currentIndex]: value }));
       setSkipped((previous) => {
         if (!previous[currentIndex]) return previous;
@@ -2952,6 +2907,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   );
 
   const setAnswerForIndex = useCallback((taskIndex, value) => {
+    if (submissionLockedRef.current) return;
     setAnswers((previous) => ({ ...previous, [taskIndex]: value }));
     setSkipped((previous) => {
       if (!previous[taskIndex]) return previous;
@@ -2971,6 +2927,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     armExamTimer(totalExamDuration, { running: false });
     setSimulationMode(true);
     setCompleted(false);
+    submissionLockedRef.current = false;
+    setCompletionReason("");
     setSubmitConfirmationOpen(false);
     setPartIntroVisible(true);
     setPartTransition(null);
@@ -2986,9 +2944,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setAudioSessionActive(false);
     setListeningAudioDuration(0);
     setAudioPlaying(false);
-    setSpeakingPhase("prep");
-    armPrepTimer(module.tasks[0]?.prepSeconds ?? speakingTasks[0].prepSeconds, { running: false });
-    setPrepActive(false);
     setRecordingSeconds(0);
     recordingSecondsRef.current = 0;
     setResultStatus("");
@@ -2999,36 +2954,26 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       listeningAudioRef.current.pause();
       listeningAudioRef.current.currentTime = 0;
     }
-  }, [armExamTimer, armPrepTimer, module, stopListeningAmbience, totalExamDuration]);
+  }, [armExamTimer, stopListeningAmbience, totalExamDuration]);
 
   const beginPart = useCallback((part, startIndex, { logStart = true } = {}) => {
     partTransitionActiveRef.current = false;
     const safeIndex = part?.firstIndex ?? startIndex ?? currentIndex;
     setCurrentIndex(safeIndex);
     setPartIntroVisible(false);
-    if (!timerDeadlineRef.current) {
-      timerDeadlineRef.current = Date.now() + Math.max(0, timerSecondsRef.current || totalExamDuration) * 1000;
+    if (!timerStartedAtRef.current) {
+      armExamTimer(timerSecondsRef.current || totalExamDuration, { running: true });
     }
-    setSpeakingPhase("prep");
-    armPrepTimer(module.tasks[safeIndex]?.prepSeconds ?? speakingTasks[0].prepSeconds, {
-      running: module.id === "speak" && simulationMode,
-    });
-    setPrepActive(module.id === "speak" && simulationMode);
     setRecordingSeconds(0);
     recordingSecondsRef.current = 0;
     if (logStart) {
       persistProgress(`Teil ${part?.number ?? currentPartIndex + 1} demarree a ${formatClock()}`);
     }
-  }, [armPrepTimer, currentIndex, currentPartIndex, module, persistProgress, simulationMode, totalExamDuration]);
+  }, [armExamTimer, currentIndex, currentPartIndex, persistProgress, totalExamDuration]);
 
   const startPartTransition = useCallback((nextPart, nextIndex, message = "") => {
     if (!nextPart || partTransitionActiveRef.current) return false;
     partTransitionActiveRef.current = true;
-    if (module.id !== "write") {
-      timerDeadlineRef.current = null;
-    }
-    prepDeadlineRef.current = null;
-    setPrepActive(false);
     setPartIntroVisible(false);
     setNavPanelOpen(false);
     setPartTransition({
@@ -3038,7 +2983,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     });
     if (message) setResultStatus(message);
     return true;
-  }, [module.id]);
+  }, []);
 
   const completePartTransition = useCallback(() => {
     if (!partTransition?.nextPart) return;
@@ -3069,14 +3014,9 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     if (module.id !== "listen" && startPartTransition(nextPart, nextIndex)) return;
     setCurrentIndex(nextIndex);
     setPartIntroVisible(false);
-    setSpeakingPhase("prep");
-    armPrepTimer(module.tasks[nextIndex]?.prepSeconds ?? speakingTasks[0].prepSeconds, {
-      running: module.id === "speak" && simulationMode,
-    });
-    setPrepActive(module.id === "speak" && simulationMode);
     setRecordingSeconds(0);
     recordingSecondsRef.current = 0;
-  }, [armPrepTimer, currentIndex, currentPart, currentPartIndex, examParts, module, partTransition, simulationMode, startPartTransition, totalTasks, usesFullPartNavigation]);
+  }, [currentIndex, currentPart, currentPartIndex, examParts, module.id, partTransition, startPartTransition, totalTasks, usesFullPartNavigation]);
 
   const goToPrevious = useCallback(() => {
     partTransitionActiveRef.current = false;
@@ -3237,12 +3177,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     ].slice(0, 8));
     persistProgress(`Brouillon sauvegardé à ${formatClock()}`);
   }, [answers, currentIndex, currentTask.title, module.id, persistProgress]);
-
-  const beginPrep = useCallback(() => {
-    setSpeakingPhase("prep");
-    armPrepTimer(currentTask.prepSeconds, { running: true });
-    setPrepActive(true);
-  }, [armPrepTimer, currentTask.prepSeconds]);
 
   const uploadSpeakingRecording = useCallback(async ({ blob, taskIndex, duration }) => {
     if (!blob || module.id !== "speak" || !auth?.id) return null;
@@ -3418,22 +3352,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     }
   }, [finishRecording, isRecording]);
 
-  const advanceAfterTimer = useCallback(() => {
-    if (isRecording) {
-      stopRecording();
-    }
-
-    persistProgress(`Auto-sauvegarde a ${formatClock()}`);
-
-    setPrepActive(false);
-    setSimulationMode(false);
-    setResultStatus("Zeit abgelaufen. Bitte pruefen Sie Ihre Antworten und klicken Sie auf Abgeben.");
-  }, [
-    isRecording,
-    persistProgress,
-    stopRecording,
-  ]);
-
   const finishCurrentTimedSection = useCallback(() => {
     if (isRecording) {
       stopRecording();
@@ -3442,22 +3360,15 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       pauseListeningAudio();
     }
 
-    if (module.id === "write") {
-      setResultStatus("Zeit abgelaufen. Ihre Schreiben-Pruefung wird automatisch abgegeben.");
-      persistProgress(`Schreiben automatisch abgegeben um ${formatClock()}`);
-      finishModule();
-      return;
-    }
-    persistProgress(`Temps termine a ${formatClock()}`);
-
-    setPrepActive(false);
-    setSimulationMode(false);
-    setResultStatus("Zeit abgelaufen. Bitte pruefen Sie Ihre Antworten und klicken Sie auf Abgeben.");
+    timerSecondsRef.current = 0;
+    setTimerSeconds(0);
+    setCompletionReason("Die globale Pruefungszeit von 60 Minuten ist abgelaufen. Der gesamte Test wurde automatisch mit Ihren gespeicherten Antworten abgegeben.");
+    persistProgress(`Test nach 60 Minuten automatisch abgegeben um ${formatClock()}`);
+    finishModule();
   }, [
     audioPlaying,
     finishModule,
     isRecording,
-    module.id,
     pauseListeningAudio,
     persistProgress,
     stopRecording,
@@ -3470,13 +3381,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       return undefined;
     }
 
-    if (module.id !== "write" && (partIntroVisible || partTransition)) {
-      timerDeadlineRef.current = null;
-      timerExpiredRef.current = false;
-      return undefined;
-    }
-
-    if (module.id === "write" && partIntroVisible && !timerDeadlineRef.current) {
+    if (!timerStartedAtRef.current) {
       timerExpiredRef.current = false;
       return undefined;
     }
@@ -3502,53 +3407,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     }, 250);
 
     return () => window.clearInterval(interval);
-  }, [completed, finishCurrentTimedSection, module.id, module.unavailable, partIntroVisible, partTransition, simulationMode]);
-
-  useEffect(() => {
-    if (module.id !== "speak" || !simulationMode || !prepActive || completed || partIntroVisible || partTransition) {
-      prepDeadlineRef.current = null;
-      prepExpiredRef.current = false;
-      return undefined;
-    }
-
-    if (!prepDeadlineRef.current) {
-      prepDeadlineRef.current = Date.now() + Math.max(0, prepRemainingRef.current) * 1000;
-    }
-
-    const tick = () => {
-      const remaining = Math.max(0, Math.ceil((prepDeadlineRef.current - Date.now()) / 1000));
-      prepRemainingRef.current = remaining;
-      setPrepRemaining((value) => (value === remaining ? value : remaining));
-      if (remaining > 0 || prepExpiredRef.current) return;
-      prepExpiredRef.current = true;
-      prepDeadlineRef.current = null;
-      if (speakingPhase === "prep") {
-        setSpeakingPhase("response");
-        armPrepTimer(currentTask.responseSeconds, { running: true });
-        return;
-      }
-
-      advanceAfterTimer();
-    };
-
-    tick();
-    const interval = window.setInterval(() => {
-      tick();
-    }, 250);
-
-    return () => window.clearInterval(interval);
-  }, [
-    advanceAfterTimer,
-    armPrepTimer,
-    completed,
-    currentTask.responseSeconds,
-    module.id,
-    partIntroVisible,
-    partTransition,
-    prepActive,
-    simulationMode,
-    speakingPhase,
-  ]);
+  }, [completed, finishCurrentTimedSection, module.unavailable, partIntroVisible, partTransition, simulationMode]);
 
   const rerecord = useCallback(() => {
     setRecordingSeconds(0);
@@ -3748,7 +3607,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
 
         <section className={styles.navCard} aria-label="Timer und Status">
           <div className={styles.navCardHeader}>
-            <span><Clock3 size={16} /> Section Timer/Status</span>
+            <span><Clock3 size={16} /> Gesamtzeit und Status</span>
           </div>
           <div className={styles.navTimer}>
             {formatExamTime(simulationMode ? timerSeconds : currentTaskDuration)}
@@ -3848,7 +3707,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           <p className={styles.sectionLabel}>Teil {currentPart?.number ?? currentPartIndex + 1}</p>
           <h2>{currentPart?.displayTitle ?? "Einleitung zum Teil"}</h2>
           <p className={styles.examTextIntroInstruction}>
-            Lesen Sie die Anweisungen aufmerksam. Der Timer laeuft fuer das gesamte Modul und wird zwischen den Teilen nicht neu gestartet.
+            Lesen Sie die Anweisungen aufmerksam. Die globale Zeit laeuft fuer den gesamten Test und wird zwischen den Teilen nicht neu gestartet.
           </p>
         </div>
         <div className={styles.partMetaStack}>
@@ -4303,6 +4162,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     {};
 
   const setGoetheAnswer = (taskIndex, value) => {
+    if (submissionLockedRef.current) return;
     const meta = getGoethePartMeta();
     const partIndexes = currentPart?.taskIndexes || [];
     setCurrentIndex(taskIndex);
@@ -5438,8 +5298,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             {renderContentTitle(currentTask.title, `speak-title-${currentTask.id}`)}
             {renderSpeakingPrompt("Bildimpuls zur mündlichen Aufgabe")}
             <div className={styles.promptMeta}>
-              <span><Clock3 size={16} /> Vorbereitung {currentTask.prepSeconds}s</span>
-              <span><Mic size={16} /> Zielantwort {currentTask.responseSeconds}s</span>
+              <span><Clock3 size={16} /> Empfohlene Vorbereitung {currentTask.prepSeconds}s</span>
+              <span><Mic size={16} /> Empfohlene Antwortdauer {currentTask.responseSeconds}s</span>
             </div>
           </section>
 
@@ -5447,8 +5307,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             <div className={styles.timerGrid}>
               <div className={styles.timerBlock}>
                 <Clock3 size={20} />
-                <strong>{formatTime(prepRemaining)}</strong>
-                <span>{speakingPhase === "prep" ? "Verbleibende Vorbereitungszeit" : "Verbleibende Zeit"}</span>
+                <strong>{formatExamTime(timerSeconds)}</strong>
+                <span>Verbleibende Gesamtzeit</span>
               </div>
               <div className={styles.timerBlock}>
                 <Mic size={20} />
@@ -5483,10 +5343,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             </div>
 
             <div className={styles.recordActions}>
-              <button type="button" className={styles.secondaryButton} onClick={beginPrep} disabled={prepActive || simulationMode}>
-                <TimerReset size={16} />
-                Vorbereitung neu starten
-              </button>
               <button type="button" className={styles.secondaryButton} onClick={rerecord} disabled={isRecording}>
                 <RotateCcw size={16} />
                 Erneut aufnehmen
@@ -5539,8 +5395,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           {renderContentTitle(currentTask.title, `speak-title-${currentTask.id}`)}
           {renderSpeakingPrompt("Support visuel pour la tâche orale")}
           <div className={styles.promptMeta}>
-            <span><Clock3 size={16} /> Préparation {currentTask.prepSeconds}s</span>
-            <span><Mic size={16} /> Réponse cible {currentTask.responseSeconds}s</span>
+            <span><Clock3 size={16} /> Empfohlene Vorbereitung {currentTask.prepSeconds}s</span>
+            <span><Mic size={16} /> Empfohlene Antwortdauer {currentTask.responseSeconds}s</span>
           </div>
         </section>
 
@@ -5548,8 +5404,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           <div className={styles.timerGrid}>
             <div className={styles.timerBlock}>
               <Clock3 size={20} />
-              <strong>{formatTime(prepRemaining)}</strong>
-              <span>{speakingPhase === "prep" ? "Temps de preparation restant" : "Temps restant"}</span>
+              <strong>{formatExamTime(timerSeconds)}</strong>
+              <span>Verbleibende Gesamtzeit</span>
             </div>
             <div className={styles.timerBlock}>
               <Mic size={20} />
@@ -5584,10 +5440,6 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           </div>
 
           <div className={styles.recordActions}>
-            <button type="button" className={styles.secondaryButton} onClick={beginPrep} disabled={prepActive || simulationMode}>
-              <TimerReset size={16} />
-              Relancer preparation
-            </button>
             <button type="button" className={styles.secondaryButton} onClick={rerecord} disabled={isRecording}>
               <RotateCcw size={16} />
               Re-record
@@ -6148,6 +6000,12 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             <p className={styles.sectionLabel}>{t.modulePage.result}</p>
             <h2>{scoreHeading}</h2>
             <p>{germanResultMessage}</p>
+            {completionReason ? (
+              <p className={styles.timeExpiredNotice} role="alert">
+                <Clock3 size={18} />
+                {completionReason}
+              </p>
+            ) : null}
             <div className={styles.resultStats}>
               <span><CheckCircle2 size={16} /> {answeredCount}/{totalTasks} Aufgaben bearbeitet</span>
               {isWritingResult ? (
@@ -6283,7 +6141,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           key={partTransition.id}
           nextTeilTitle={partTransition.nextPart?.displayTitle}
           nextTeilNumber={partTransition.nextPart?.number}
-          durationSeconds={PART_TRANSITION_SECONDS}
+          remainingSeconds={timerSeconds}
           onComplete={completePartTransition}
         />
       ), document.body) : null}

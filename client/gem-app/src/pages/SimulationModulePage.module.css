@@ -1736,6 +1736,26 @@
   line-height: 1.6;
 }
 
+.resultPanel .timeExpiredNotice {
+  width: min(100%, 720px);
+  max-width: 720px;
+  border: 1px solid #f3c86a;
+  border-radius: 8px;
+  background: #fff8e6;
+  color: #7a4a00;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  font-weight: 800;
+  text-align: left;
+}
+
+.timeExpiredNotice svg {
+  flex: 0 0 auto;
+}
+
 .unavailablePanel {
   border: 1px solid #e5e7eb;
   border-radius: 10px;
@@ -3071,7 +3091,7 @@
 }
 
 .b1CompactChoices[data-option-count="3"] {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(118px, 0.85fr) minmax(118px, 0.85fr) minmax(190px, 1.3fr);
 }
 
 .b1ChoiceButton,
@@ -3129,9 +3149,14 @@
   min-width: 0;
   color: inherit;
   line-height: 1.45;
-  overflow-wrap: break-word;
+  overflow-wrap: normal;
   word-break: normal;
   hyphens: none;
+}
+
+.b1CompactChoices .b1ChoiceButton[data-has-code="false"] strong,
+.b1CompactChoices .b1ChoiceSelected[data-has-code="false"] strong {
+  white-space: nowrap;
 }
 
 .b1ChoiceButton[data-has-code="false"] strong,
@@ -3228,7 +3253,21 @@
 
 @media (max-width: 900px) {
   .b1CompactChoices[data-option-count="3"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .b1CompactChoices[data-option-count="3"] > :nth-child(3) {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 480px) {
+  .b1CompactChoices[data-option-count="3"] {
     grid-template-columns: 1fr;
+  }
+
+  .b1CompactChoices[data-option-count="3"] > :nth-child(3) {
+    grid-column: auto;
   }
 }
 
@@ -3413,10 +3452,6 @@
 
   .b1AnswerArea {
     padding: 12px 13px 14px;
-  }
-
-  .b1CompactChoices[data-option-count="3"] {
-    grid-template-columns: 1fr;
   }
 
   .b1ReferenceOverlay {
