@@ -3264,8 +3264,8 @@ const toPublicSeriesList = (rows, routeMeta = {}) => {
       sectionCount: Number(row.section_count) || 0,
       durationMinutes: moduleId === "write"
         ? WRITING_GLOBAL_DURATION_MINUTES
-        : Number(row.duration_minutes) ||
-          Number(metadata.globalDurationMinutes || metadata.scoring?.globalDurationMinutes) ||
+        : Number(metadata.globalDurationMinutes || metadata.scoring?.globalDurationMinutes) ||
+          Number(row.duration_minutes) ||
           moduleMeta.defaultMinutes,
     };
   }
