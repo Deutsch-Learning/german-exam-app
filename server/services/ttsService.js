@@ -94,7 +94,7 @@ const splitSpeakerTurns = (text, trackIndex = 0) => {
   if (/^\s*(?:sie|thema|das thema|aufgabe|aufgaben|frage|fragen|multiple-choice|richtig\/falsch|richtig falsch|loesung|lösung|antwort|skript|format|transkription|transcription|type de t[aâ]che|heute|und|dann|erstens|zweitens|drittens|au[ßs]erdem|überraschungen|ueberraschungen|kluft|weltbild|sprache|achtsamkeit|pakete|qualit[aä]tsfinanzierung|qualitaetsfinanzierung|vorteile|nachteile|optionen|zum abschluss)\s*:/i.test(normalized)) {
     return [];
   }
-  const matches = Array.from(normalized.matchAll(/(^|[\s.!?\n])((?:Herr|Frau|Dr\.?|Moderator|Moderatorin|Reporter|Reporterin|Sprecher|Sprecherin|Person|Mann|Frau|[A-ZÄÖÜ][\p{Ll}.'-]+)(?:\s+(?:[A-ZÄÖÜ][\p{Ll}.'-]+|[A-Z]|\d+)){0,4})\s*:\s*/gu))
+  const matches = Array.from(normalized.matchAll(/(^|[\s.!?\n])((?:Herr|Frau|Dr\.?|Moderator|Moderatorin|Reporter|Reporterin|Sprecher|Sprecherin|Person|Mann|Frau|[A-ZÄÖÜ][\p{Ll}.'-]+|[A-ZÄÖÜ]{2,})(?:\s+(?:[A-ZÄÖÜ][\p{Ll}.'-]+|[A-ZÄÖÜ]{2,}|[A-Z]|\d+)){0,4})\s*:\s*/gu))
     .map((match) => {
       const label = cleanMatchedSpeakerLabel(match[2]);
       const labelOffset = match[0].lastIndexOf(label);
@@ -108,6 +108,7 @@ const splitSpeakerTurns = (text, trackIndex = 0) => {
     .filter((match) => {
       if (isProductionOnlyLabel(match.label)) return false;
       if (/^(?:Herr|Frau|Dr\.?|Moderator|Moderatorin|Reporter|Reporterin|Sprecher|Sprecherin|Person|Mann|Frau)\b/i.test(match.label)) return true;
+      if (/^[A-ZÄÖÜ]{2,}(?:\s+[A-ZÄÖÜ]{2,}){0,3}$/u.test(match.label)) return true;
       return match.startsLine;
     });
   if (!matches.length) {

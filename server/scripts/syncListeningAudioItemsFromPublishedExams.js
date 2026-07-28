@@ -13,16 +13,23 @@ const main = async () => {
   const providers = providerArg
     ? providerArg.split(",").map((provider) => provider.trim().toLowerCase()).filter(Boolean)
     : ["goethe", "telc", "ecl", "osd"];
+  const includeInactive = process.argv.includes("--include-inactive");
+  const queueForGeneration = process.argv.includes("--queue-for-generation");
+  const seriesArg = (process.argv.find((arg) => arg.startsWith("--series=")) || "").split("=")[1] || "";
+  const seriesMatch = seriesArg.match(/^(\d+)(?:-(\d+))?$/);
+  const seriesFrom = seriesMatch ? Number(seriesMatch[1]) : null;
+  const seriesTo = seriesMatch ? Number(seriesMatch[2] || seriesMatch[1]) : null;
 
   const exams = await pool.query(
     `SELECT *
        FROM exams
-      WHERE is_active = TRUE
+      WHERE ($3::boolean = TRUE OR is_active = TRUE)
         AND level = $1
         AND section_type = 'listen'
         AND provider = ANY($2::text[])
+        AND ($4::int IS NULL OR series_number BETWEEN $4 AND $5)
       ORDER BY provider, series_number, id`,
-    [level, providers]
+    [level, providers, includeInactive, seriesFrom, seriesTo]
   );
 
   const synced = [];
@@ -64,23 +71,31 @@ const main = async () => {
         if (transcript.length < 20) continue;
         const audioSettings = {
           ...asObject(audio.audioEngineSettings),
-          browserTtsFallback: true,
-          fallbackEngine: "browser-speech",
-          productionLabel: "Browser TTS (no MP3)",
+          browserTtsFallback: !queueForGeneration,
+          fallbackEngine: queueForGeneration ? "" : "browser-speech",
+          generationProvider: queueForGeneration ? "elevenlabs" : "",
+          generationStatus: queueForGeneration ? "queued" : "published",
+          productionLabel: queueForGeneration ? "ElevenLabs MP3 queued" : "Browser TTS (no MP3)",
         };
         const title = itemQuestions.length > 1
           ? `${section.title || `Teil ${partNumber}`} - Audio ${itemNumber}`
           : (section.title || `Teil ${partNumber}`);
+        const publicationStatus = queueForGeneration ? "queued" : (exam.is_active ? "published" : "draft");
+        const adminNotes = queueForGeneration ? "ElevenLabs MP3 generation queued" : "Browser TTS (no MP3)";
+        const validationWarnings = queueForGeneration
+          ? []
+          : ["Browser TTS fallback is active until ElevenLabs MP3 generation is available."];
+        const speakerProfiles = Array.isArray(audioSettings.speakers) ? audioSettings.speakers : [];
         const result = await pool.query(
           `INSERT INTO exam_listening_audio_items (
              exam_id, section_id, source_import_id, provider, level, series_number,
              part_number, item_number, title, instructions, admin_transcript,
              audio_engine_settings, listening_count, audio_generation_status,
              generated_audio_url, generated_audio_asset_id, admin_notes,
-             validation_warnings, source_metadata, position, updated_at
+             validation_warnings, source_metadata, voice_profile_map, position, updated_at
            )
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13,
-                   'published', '', NULL, 'Browser TTS (no MP3)', $14::jsonb, $15::jsonb, $16, NOW())
+                   $14, '', NULL, $15, $16::jsonb, $17::jsonb, $18::jsonb, $19, NOW())
            ON CONFLICT (exam_id, part_number, item_number)
            DO UPDATE SET
              section_id = EXCLUDED.section_id,
@@ -93,12 +108,13 @@ const main = async () => {
              admin_transcript = EXCLUDED.admin_transcript,
              audio_engine_settings = EXCLUDED.audio_engine_settings,
              listening_count = EXCLUDED.listening_count,
-             audio_generation_status = 'published',
+             audio_generation_status = EXCLUDED.audio_generation_status,
              generated_audio_url = '',
              generated_audio_asset_id = NULL,
-             admin_notes = 'Browser TTS (no MP3)',
+             admin_notes = EXCLUDED.admin_notes,
              validation_warnings = EXCLUDED.validation_warnings,
              source_metadata = EXCLUDED.source_metadata,
+             voice_profile_map = EXCLUDED.voice_profile_map,
              position = EXCLUDED.position,
              updated_at = NOW()
            RETURNING id`,
@@ -116,15 +132,19 @@ const main = async () => {
             transcript,
             JSON.stringify(audioSettings),
             Number(audio.listeningCount || asObject(section.metadata).listeningCount || 2),
-            JSON.stringify(["Browser TTS fallback is active until ElevenLabs MP3 generation is available."]),
+            publicationStatus,
+            adminNotes,
+            JSON.stringify(validationWarnings),
             JSON.stringify({
               source: "published-exam-content",
               sourceImportId: exam.source_import_id || null,
-              browserTtsFallback: true,
-              fallbackEngine: "browser-speech",
-              fallbackReason: "ElevenLabs MP3 generation skipped until credits are available",
-              productionLabel: "Browser TTS (no MP3)",
+              browserTtsFallback: !queueForGeneration,
+              fallbackEngine: queueForGeneration ? "" : "browser-speech",
+              generationProvider: queueForGeneration ? "elevenlabs" : "",
+              productionLabel: queueForGeneration ? "ElevenLabs MP3 queued" : "Browser TTS (no MP3)",
+              publicationStatus,
             }),
+            JSON.stringify(speakerProfiles),
             (partNumber * 100) + itemNumber,
           ]
         );
@@ -146,7 +166,16 @@ const main = async () => {
     [level, providers]
   );
 
-  console.log(JSON.stringify({ ok: true, level, providers, synced: synced.length, summary: summary.rows }, null, 2));
+  console.log(JSON.stringify({
+    ok: true,
+    level,
+    providers,
+    includeInactive,
+    queueForGeneration,
+    series: seriesArg || "all",
+    synced: synced.length,
+    summary: summary.rows,
+  }, null, 2));
 };
 
 main()

@@ -8,7 +8,9 @@
     "dev": "nodemon server.js",
     "start": "node server.js",
     "repair:goethe-b1-hoeren": "node scripts/repairGoetheB1HoerenQuestions.js",
-    "validate:osd-b2-hoeren-teil2": "node scripts/validate-osd-b2-hoeren-teil2.js"
+    "validate:osd-b2-hoeren-teil2": "node scripts/validate-osd-b2-hoeren-teil2.js",
+    "validate:osd-b2-hoeren-08-20": "node scripts/validate-osd-b2-hoeren-series-08-20.js",
+    "publish:osd-b2-hoeren-08-20": "node scripts/publish-osd-b2-hoeren-series-08-20.js"
   },
   "keywords": [],
   "author": "",

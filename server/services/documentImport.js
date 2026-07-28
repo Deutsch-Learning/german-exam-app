@@ -3732,9 +3732,15 @@ const normalizeB2HoerenAnswer = (value = "") => {
   return letter ? letter.toUpperCase() : text;
 };
 
+const stripB2HoerenPageHeaders = (value = "") =>
+  String(value || "")
+    .replace(/(?:ÖSD|OESD|OSD)\s+B2\s*[-\u2010-\u2015]\s*Modul\s+H(?:Ö|OE|O)REN\s+\d+/giu, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n");
+
 const parseB2HoerenCorrectionMap = (text = "") => {
   const answers = new Map();
-  const clean = normalizeHoerenLineText(text);
+  const clean = normalizeHoerenLineText(stripB2HoerenPageHeaders(text));
   const add = (number, value) => {
     const n = Number(number);
     const normalized = normalizeB2HoerenAnswer(value);
@@ -3751,6 +3757,28 @@ const parseB2HoerenCorrectionMap = (text = "") => {
     .forEach((match) => add(match[1], match[2]));
   [...clean.matchAll(/(?:^|\s)(\d{1,2})\s+(Richtig|Falsch|[A-J])(?:\s|$)/gi)]
     .forEach((match) => add(match[1], match[2]));
+
+  const lines = clean.split("\n").map((line) => line.trim()).filter(Boolean);
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!/^Item$/i.test(lines[index])) continue;
+    if (!/Richtige\s+Antwort|erwartete\s+Information/i.test(lines[index + 1] || "")) continue;
+    index += 2;
+    while (index < lines.length) {
+      if (/^(?:TEIL|PRÜFUNG|PRUEFUNG|SOURCE_VALIDATION_WARNING|AUDIO_ITEM_METADATA|AUDIO_ENGINE_SETTINGS|ADMIN_ONLY_TRANSCRIPT|STUDENT_VISIBLE_)/i.test(lines[index])) {
+        index -= 1;
+        break;
+      }
+      if (!/^\d{1,2}$/.test(lines[index])) {
+        index += 1;
+        continue;
+      }
+      const number = Number(lines[index]);
+      const answer = lines[index + 1] || "";
+      if (!answer) break;
+      add(number, answer);
+      index += 2;
+    }
+  }
 
   return answers;
 };
@@ -3816,10 +3844,28 @@ const buildB2HoerenQuestion = ({ item, answers, transcript, audio, metadata, fal
   const body = compactText(item.body);
   const options = parseB2HoerenOptions(`\n${item.body}`);
   const answer = answers.get(item.number) || "";
+  const questionPoints = Number(metadata.questionPoints) || 1;
   const baseMetadata = {
     ...metadata,
     sourceQuestionNumber: item.number,
+    ...(metadata.osdB2HoerenTeil2 ? { detailItemNumber: item.number } : {}),
   };
+
+  if (metadata.osdB2HoerenTeil2) {
+    return {
+      questionType: "blank",
+      prompt: trimForDb(body),
+      options: [],
+      correctAnswer: answer ? { value: answer, acceptedAnswers: [answer] } : {},
+      explanation: answer || null,
+      position: item.number,
+      transcript,
+      audio,
+      scoring: { points: questionPoints },
+      metadata: baseMetadata,
+      sectionType: "listen",
+    };
+  }
 
   if (options.length >= 2) {
     const prompt = compactText(item.body.replace(/(?:^|\n)\s*[A-Ja-j]\)\s*(?:[A-Ja-j]\)\s*)?[^\n]+/g, ""));
@@ -3831,6 +3877,7 @@ const buildB2HoerenQuestion = ({ item, answers, transcript, audio, metadata, fal
       transcript,
       audio,
       metadata: baseMetadata,
+      points: questionPoints,
     });
   }
 
@@ -3842,6 +3889,7 @@ const buildB2HoerenQuestion = ({ item, answers, transcript, audio, metadata, fal
       transcript,
       audio,
       metadata: baseMetadata,
+      points: questionPoints,
     });
   }
 
@@ -3855,6 +3903,7 @@ const buildB2HoerenQuestion = ({ item, answers, transcript, audio, metadata, fal
       transcript,
       audio,
       metadata: baseMetadata,
+      points: questionPoints,
     });
   }
 
@@ -3867,7 +3916,7 @@ const buildB2HoerenQuestion = ({ item, answers, transcript, audio, metadata, fal
     position: item.number,
     transcript,
     audio,
-    scoring: { points: 1 },
+    scoring: { points: questionPoints },
     metadata: baseMetadata,
     sectionType: "listen",
   };
@@ -3960,12 +4009,134 @@ const parseB2HoerenQuestions = ({ raw, answers, transcript, audio, metadata }) =
     .sort((a, b) => (Number(a.position) || 0) - (Number(b.position) || 0));
 };
 
-const parseB2HoerenAudioSettings = (raw = "") => ({
-  raw: normalizeHoerenLineText(raw),
-  browserTtsFallback: true,
-  fallbackEngine: "browser-speech",
-  fallbackReason: "ElevenLabs MP3 generation skipped until credits are available",
-});
+const matchB2HoerenTranscriptSpeaker = (profile, transcriptLabels, usedLabels) => {
+  const profileTokens = new Set(
+    foldForSearch(`${profile.sourceName} ${profile.role}`)
+      .split(/\s+/)
+      .filter((token) => token.length > 2)
+  );
+  const candidates = transcriptLabels
+    .filter((label) => !usedLabels.has(label))
+    .map((label) => {
+      const labelTokens = foldForSearch(label).split(/\s+/).filter((token) => token.length > 2);
+      const score = labelTokens.reduce((sum, token) => sum + (profileTokens.has(token) ? 2 : 0), 0) +
+        (foldForSearch(profile.sourceName).includes(foldForSearch(label)) ? 3 : 0);
+      return { label, score };
+    })
+    .sort((a, b) => b.score - a.score);
+  return candidates[0]?.score > 0 ? candidates[0].label : "";
+};
+
+const parseB2HoerenSpeakerProfiles = (raw = "", transcript = "") => {
+  const text = normalizeHoerenLineText(raw);
+  const start = text.search(/SPEAKER_PROFILES_SOURCE/i);
+  const end = text.search(/SOUND_EFFECTS_SOURCE/i);
+  if (start < 0 || end <= start) return [];
+
+  const lines = text
+    .slice(start + "SPEAKER_PROFILES_SOURCE".length, end)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !/^(?:Figur|Rolle|Alter|Stimme\s*\/\s*Register)$/i.test(line));
+  const profiles = [];
+  const ageIndexes = lines
+    .map((line, index) => (/^\d{1,3}$/.test(line) ? index : -1))
+    .filter((index) => index >= 0);
+  if (ageIndexes.length === 1) {
+    const ageIndex = ageIndexes[0];
+    let sourceName = lines[0] || "";
+    let role = lines.slice(1, ageIndex).join(" ").trim();
+    let voiceDescription = lines[ageIndex + 1] || "";
+    const extras = lines.slice(ageIndex + 2);
+    if (extras.length && /^[A-ZÄÖÜ][\p{L}-]+$/u.test(extras[0])) {
+      sourceName = `${sourceName} ${extras.shift()}`.trim();
+    }
+    if (extras.length && /\b(?:eines|einer|einem|einen|von|der|des)$/i.test(role)) {
+      role = `${role} ${extras.shift()}`.trim();
+    }
+    if (extras.length) voiceDescription = `${voiceDescription} ${extras.join(" ")}`.trim();
+    profiles.push({
+      id: "speaker-1",
+      sourceName,
+      speaker: sourceName,
+      voiceName: sourceName,
+      role,
+      suggestedGender: inferSpeakerGender(voiceDescription),
+      suggestedAge: Number(lines[ageIndex]) || null,
+      style: voiceDescription,
+      emotion: voiceDescription,
+      speed: /langsam|bedacht|ruhig/i.test(voiceDescription) ? "0.92x" : /schnell|energisch|lebendig/i.test(voiceDescription) ? "1.03x" : "0.98x",
+      accent: /schweiz|zürich|schweizer/i.test(voiceDescription)
+        ? "Swiss German light"
+        : /österreich|wien|steier|salzburg|tirol/i.test(voiceDescription)
+          ? "Austrian German light"
+          : "Standard German",
+    });
+  }
+
+  let cursor = 0;
+  for (let index = 0; ageIndexes.length > 1 && index < lines.length; index += 1) {
+    if (!/^\d{1,3}$/.test(lines[index])) continue;
+    const role = lines[index - 1] || "";
+    const sourceName = lines.slice(cursor, Math.max(cursor, index - 1)).join(" ").trim();
+    const voiceDescription = lines[index + 1] || "";
+    if (!sourceName || !role || !voiceDescription) continue;
+    profiles.push({
+      id: `speaker-${profiles.length + 1}`,
+      sourceName,
+      speaker: sourceName,
+      voiceName: sourceName,
+      role,
+      suggestedGender: inferSpeakerGender(voiceDescription),
+      suggestedAge: Number(lines[index]) || null,
+      style: voiceDescription,
+      emotion: voiceDescription,
+      speed: /langsam|bedacht|ruhig/i.test(voiceDescription) ? "0.92x" : /schnell|energisch|lebendig/i.test(voiceDescription) ? "1.03x" : "0.98x",
+      accent: /schweiz|zürich|schweizer/i.test(voiceDescription)
+        ? "Swiss German light"
+        : /österreich|wien|steier|salzburg|tirol/i.test(voiceDescription)
+          ? "Austrian German light"
+          : "Standard German",
+    });
+    cursor = index + 2;
+    index += 1;
+  }
+
+  const transcriptLabels = extractSpeakerNamesFromTranscript(transcript);
+  const usedLabels = new Set();
+  return profiles.map((profile) => {
+    const speaker = matchB2HoerenTranscriptSpeaker(profile, transcriptLabels, usedLabels);
+    if (speaker) usedLabels.add(speaker);
+    return {
+      ...profile,
+      speaker: speaker || profile.sourceName,
+      aliases: Array.from(new Set([profile.sourceName, speaker].filter(Boolean))),
+    };
+  });
+};
+
+const parseB2HoerenAudioSettings = (raw = "", transcript = "") => {
+  const normalizedRaw = normalizeHoerenLineText(raw);
+  const soundMarker = normalizedRaw.search(/SOUND_EFFECTS_SOURCE/i);
+  const soundEffects = soundMarker >= 0
+    ? compactText(normalizedRaw.slice(soundMarker + "SOUND_EFFECTS_SOURCE".length))
+    : "";
+  const speakers = parseB2HoerenSpeakerProfiles(normalizedRaw, transcript);
+  return {
+    raw: normalizedRaw,
+    speakers,
+    speakerCount: speakers.length,
+    voiceCount: speakers.length,
+    soundEffects,
+    soundInstructions: soundEffects,
+    browserTtsFallback: false,
+    fallbackEngine: "",
+    generationProvider: "elevenlabs",
+    generationStatus: "queued",
+    productionLabel: "ElevenLabs MP3 queued",
+  };
+};
 
 const isManualReviewPlaceholder = (value = "") =>
   !compactText(value) || /\(not found in source|manual review required\)/i.test(compactText(value));
@@ -3990,6 +4161,7 @@ const parseB2HoerenAudioItem = ({ block, provider, partNumber, itemNumber, title
   const correctionRaw = getMarkerBlock(block, /CORRECTION_VISIBLE_AFTER_SUBMIT[^\n]*/i);
   const localAnswers = new Map([...answers, ...parseB2HoerenCorrectionMap(correctionRaw)]);
   const production = audioSettingsRaw;
+  const audioEngineSettings = parseB2HoerenAudioSettings(audioSettingsRaw, transcript);
   const audio = buildListeningAudioMetadata({
     provider,
     documentType: title,
@@ -3999,9 +4171,13 @@ const parseB2HoerenAudioItem = ({ block, provider, partNumber, itemNumber, title
     partNumber,
     title,
   });
-  audio.fallbackEngine = "browser-speech";
-  audio.productionLabel = "Browser TTS (no MP3)";
-  audio.audioEngineSettings = parseB2HoerenAudioSettings(audioSettingsRaw);
+  audio.fallbackEngine = "";
+  audio.productionLabel = "ElevenLabs MP3 queued";
+  audio.speakers = audioEngineSettings.speakers;
+  audio.speakerCount = audioEngineSettings.speakerCount;
+  audio.speakerNames = audioEngineSettings.speakers.map((speaker) => speaker.speaker);
+  audio.sfx = audioEngineSettings.soundEffects;
+  audio.audioEngineSettings = audioEngineSettings;
 
   const questions = parseB2HoerenQuestions({
     raw: isManualReviewPlaceholder(questionRaw) ? extractB2HoerenNumberedTaskFallback(block) : questionRaw,
@@ -4022,7 +4198,7 @@ const parseB2HoerenAudioItem = ({ block, provider, partNumber, itemNumber, title
     itemNumber,
     title,
     adminTranscript: transcript,
-    audioEngineSettings: parseB2HoerenAudioSettings(audioSettingsRaw),
+    audioEngineSettings,
     studentVisibleQuestions: questionRaw,
     correctionVisibleAfterSubmit: correctionRaw,
     listeningCount: /1\s*[×x]/i.test(title) || /Geh(?:o|\u00f6|oe)rt:\s*1/i.test(title) ? 1 : 2,
@@ -4056,8 +4232,11 @@ const getB2HoerenPartMatches = (seriesText, provider) => {
     return getLineMatches(seriesText, /(?:^|\n)TEXTE\s+([12])\s*[-\u2010-\u2015]\s*([^\n]+)/giu);
   }
   if (provider === "osd") {
-    return getLineMatches(seriesText, /(?:^|\n)AUFGABE\s+([12])\s*-\s*([^\n]+)/giu)
+    const aufgabeMatches = getLineMatches(seriesText, /(?:^|\n)AUFGABE\s+([12])\s*[-\u2010-\u2015]\s*([^\n]+)/gu)
       .filter((match) => !/AUFGABE\s+\d+\s*\//i.test(match[0]));
+    if (aufgabeMatches.length) return aufgabeMatches;
+    return getLineMatches(seriesText, /(?:^|\n)TEIL\s+([12])\s*[-\u2010-\u2015]\s*([^\n]+)/gu)
+      .filter((match) => !/TEIL\s+\d+\s*\//i.test(match[0]));
   }
   return getLineMatches(seriesText, /(?:^|\n)TEIL\s+([1-4])\s*[-\u2010-\u2015]\s*([^\n]+)/giu)
     .filter((match) => !/\//.test(match[0]));
@@ -4078,10 +4257,11 @@ const getB2HoerenAudioMatches = (sectionText, provider, partNumber) => {
 
 const parseB2HoerenMarkerSeries = (text, metadata) => {
   const provider = normalizeDetectedProvider(metadata.provider);
-  const clean = normalizeHoerenLineText(stripPdfPageMarkers(text));
+  const clean = normalizeHoerenLineText(stripB2HoerenPageHeaders(stripPdfPageMarkers(text)));
   const seriesMatches = getB2HoerenSeriesMatches(clean, provider);
   if (!seriesMatches.length) return [];
   const seriesBlocks = makeBlockSlices(clean, seriesMatches).slice(0, 20);
+  const isOsdContinuationPackage = provider === "osd" && /CONTINUATION_MAPPING/i.test(clean);
 
   return seriesBlocks.map((seriesBlock, seriesIndex) => {
     const seriesNumber = Number(seriesBlock.match[1]) || seriesIndex + 1;
@@ -4117,7 +4297,17 @@ const parseB2HoerenMarkerSeries = (text, metadata) => {
           title: audioMatches.length ? `Teil ${partNumber} - ${itemTitle}` : `Teil ${partNumber}: ${itemTitle}`,
           seriesTitle: title,
           answers,
-          metadata: { b2HoerenMarker: true, provider, seriesNumber },
+          metadata: {
+            b2HoerenMarker: true,
+            provider,
+            seriesNumber,
+            questionPoints: provider === "osd" && partNumber === 2 ? 1 / 3 : 1,
+            ...(provider === "osd" && partNumber === 2 ? {
+              osdB2HoerenTeil2: true,
+              detailItemNumber: null,
+              layout: "information-sheet",
+            } : {}),
+          },
           sourceQuestionBase: provider === "goethe" && Number(partNumber) === 1 ? (itemNumber - 1) * 2 : 0,
         });
       });
@@ -4132,8 +4322,16 @@ const parseB2HoerenMarkerSeries = (text, metadata) => {
         partNumber,
         title: partTitle,
       });
-      sectionAudio.fallbackEngine = "browser-speech";
-      sectionAudio.productionLabel = "Browser TTS (no MP3)";
+      sectionAudio.fallbackEngine = "";
+      sectionAudio.productionLabel = "ElevenLabs MP3 queued";
+      const sectionPoints = provider === "osd" ? 10 : questions.length || null;
+      const osdTeil2Metadata = provider === "osd" && partNumber === 2 ? {
+        title: partTitle,
+        layout: "information-sheet",
+        itemCount: questions.length,
+        preparationSeconds: 90,
+        listeningPasses: audioItems[0]?.listeningCount || 2,
+      } : null;
 
       return {
         sectionType: "listen",
@@ -4141,13 +4339,17 @@ const parseB2HoerenMarkerSeries = (text, metadata) => {
         title: provider === "osd" ? `Aufgabe ${partNumber}: ${partTitle}` : provider === "ecl" ? `Text ${partNumber}: ${partTitle}` : `Teil ${partNumber}: ${partTitle}`,
         instructions: trimForDb(instructionsRaw || LISTENING_STUDENT_INSTRUCTION, 5000),
         durationMinutes: Number(partNumber) === 1 && provider !== "ecl" ? 10 : 15,
-        points: questions.length || null,
-        scoring: { points: questions.length || null, listeningPasses: audioItems[0]?.listeningCount || 2 },
+        points: sectionPoints,
+        scoring: {
+          points: sectionPoints,
+          itemCount: questions.length,
+          pointsPerItem: questions.length ? sectionPoints / questions.length : null,
+          listeningPasses: audioItems[0]?.listeningCount || 2,
+        },
         metadata: {
           b2HoerenMarker: true,
           listening: true,
-          transcript: sectionTranscript,
-          audio: sectionAudio,
+          ...(osdTeil2Metadata ? { osdB2HoerenTeil2: osdTeil2Metadata } : {}),
           audioItems: audioItems.map((item) => ({
             itemNumber: item.itemNumber,
             title: item.title,
@@ -4166,7 +4368,17 @@ const parseB2HoerenMarkerSeries = (text, metadata) => {
       sourceLabel: `${metadata.examType || "B2 H\u00f6ren"} ${String(seriesNumber).padStart(2, "0")}`,
       instructions: `${metadata.examType || "B2"} H\u00f6ren: importierter Pr\u00fcfungssatz.`,
       scoring: { totalPoints: sections.reduce((sum, section) => sum + (Number(section.points) || 0), 0) || null },
-      metadata: { ...metadata, b2HoerenMarker: true, listening: true },
+      metadata: {
+        ...metadata,
+        b2HoerenMarker: true,
+        listening: true,
+        ...(isOsdContinuationPackage ? { replacePublishedSeries: true } : {}),
+        publicationStatus: "published",
+        ...(/SOURCE_VALIDATION_WARNING/i.test(seriesBlock.text) ? {
+          sourceValidationWarning: compactText(getMarkerBlock(seriesBlock.text, /SOURCE_VALIDATION_WARNING[^\n]*/i)),
+          correctionPublicationOverride: "approved-by-project-owner",
+        } : {}),
+      },
       sections,
     };
   }).filter((series) => series.sections?.some((section) => section.questions?.length));
@@ -4757,18 +4969,20 @@ const insertParsedExamsForImport = async ({ client, parsed, importRow, adminId =
       ];
       const code = explicitCode || codeParts.map(slugify).filter(Boolean).join("-");
       const name = `${parsed.metadata.examType} - ${SECTION_LABELS[parsed.metadata.sectionType] || parsed.metadata.sectionType} - ${series.sourceLabel || `Serie ${series.seriesNumber}`}`;
+      const seriesIsActive = isActive && series.metadata?.publicationStatus !== "draft";
       const exam = await client.query(
         `INSERT INTO exams (
            code, name, exam_type, level, is_active, created_by, provider, section_type,
            series_number, source_import_id, metadata
          )
-         VALUES ($1, $2, $3, $4, TRUE, $5, $6, $7, $8, $9, $10::jsonb)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
          RETURNING *`,
         [
           code.slice(0, 80),
           name.slice(0, 160),
           parsed.metadata.examType.slice(0, 80),
           parsed.metadata.level,
+          seriesIsActive,
           adminId,
           parsed.metadata.provider,
           parsed.metadata.sectionType,
@@ -5122,6 +5336,23 @@ const publishExamImportDraft = async ({ pool, importId, adminId = null }) => {
            AND section_type = $3
            AND is_active = TRUE`,
         [parsed.metadata?.provider, parsed.metadata?.level, parsed.metadata?.sectionType]
+      );
+    }
+    const replacePublishedSeries = parsed.series
+      ?.filter((series) => series.metadata?.replacePublishedSeries === true)
+      .map((series) => Number(series.seriesNumber))
+      .filter(Number.isFinite) || [];
+    if (!replacePublishedScope && replacePublishedSeries.length) {
+      await client.query(
+        `UPDATE exams
+         SET is_active = FALSE,
+             updated_at = NOW()
+         WHERE LOWER(provider) = LOWER($1)
+           AND UPPER(COALESCE(level, '')) = UPPER($2)
+           AND section_type = $3
+           AND series_number = ANY($4::int[])
+           AND is_active = TRUE`,
+        [parsed.metadata?.provider, parsed.metadata?.level, parsed.metadata?.sectionType, replacePublishedSeries]
       );
     }
     const importedExams = await insertParsedExamsForImport({ client, parsed, importRow, adminId, isActive: true });
