@@ -181,7 +181,7 @@ const validateDatabase = async (expectGenerated = false) => {
   });
 };
 
-const validateApi = async (baseUrl, expectGenerated = false) => {
+const validateApi = async (baseUrl, expectGenerated = false, parsed = null) => {
   for (let seriesNumber = 1; seriesNumber <= 20; seriesNumber += 1) {
     const code = String(seriesNumber).padStart(2, "0");
     const response = await fetch(`${baseUrl}/api/exams/osd-b2/series/imported-osd-b2-series-${code}/listen`);
@@ -197,6 +197,30 @@ const validateApi = async (baseUrl, expectGenerated = false) => {
       fail(`Series ${code} API exposes an incorrect question type.`);
     }
     if (seriesNumber >= 8) {
+      const expectedSeries = parsed?.series?.find((series) => series.seriesNumber === seriesNumber);
+      const expectedPart1 = expectedSeries?.sections?.find((section) => section.partNumber === 1)?.questions || [];
+      const expectedPart2 = expectedSeries?.sections?.find((section) => section.partNumber === 2)?.questions || [];
+      if (expectedPart1.length !== 10 || expectedPart2.length !== 30) {
+        fail(`Series ${code} has no complete authoritative prompt set for API validation.`);
+      }
+      [
+        [1, part1, expectedPart1],
+        [2, part2, expectedPart2],
+      ].forEach(([partNumber, actualTasks, expectedQuestions]) => {
+        actualTasks.forEach((task, index) => {
+          const expectedPrompt = String(expectedQuestions[index]?.prompt || "").trim();
+          const actualPrompt = String(task.question || "").trim();
+          if (actualPrompt !== expectedPrompt) {
+            fail(`Series ${code} Teil ${partNumber} item ${index + 1} does not match the authoritative document.`);
+          }
+          if (/^H\u00f6ren Sie den Audiotext und beantworten Sie die Aufgaben zu diesem Teil\./i.test(actualPrompt)) {
+            fail(`Series ${code} Teil ${partNumber} item ${index + 1} still contains the generic API prefix.`);
+          }
+          if (/^Aufgabe\s+2:\s*NOTIZEN\s+VERVOLLST\u00c4NDIGEN$/i.test(actualPrompt)) {
+            fail(`Series ${code} Teil ${partNumber} item ${index + 1} exposes the section heading instead of its question.`);
+          }
+        });
+      });
       if (part1[0]?.audio?.fallbackEngine || part1[0]?.audio?.speakers?.length !== 2) {
         fail(`Series ${code} Teil 1 ElevenLabs voice plan is incomplete.`);
       }
@@ -221,7 +245,7 @@ const main = async () => {
   if (process.argv.includes("--db")) await validateDatabase(expectGenerated);
   const apiArg = process.argv.find((arg) => arg.startsWith("--api="));
   const apiBaseUrl = apiArg ? apiArg.slice("--api=".length).replace(/\/$/, "") : "";
-  if (apiBaseUrl) await validateApi(apiBaseUrl, expectGenerated);
+  if (apiBaseUrl) await validateApi(apiBaseUrl, expectGenerated, parsed);
   console.log(JSON.stringify({
     ok: true,
     sourceSeriesMatched: 13,

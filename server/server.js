@@ -3414,6 +3414,10 @@ const buildListeningTask = (question, index = 0, listeningAudioMap = new Map(), 
   const partNumber = Number(question.part_number) || Number(question.section_position) || Number(metadata.partNumber) || index + 1;
   const sourceQuestionNumber = Number(metadata.sourceQuestionNumber ?? question.position ?? index + 1);
   const sourceFix = sourceFixes?.[`${partNumber}:${sourceQuestionNumber}`] || null;
+  const preserveOsdB2SourcePrompt = metadata.b2HoerenMarker === true
+    && normalizeProviderId(metadata.provider) === "osd"
+    && Number(metadata.seriesNumber) >= 8
+    && Number(metadata.seriesNumber) <= 20;
   const questionType = String(sourceFix?.questionType || question.question_type || "").toLowerCase();
   const correctValue = sourceFix?.correctAnswer?.value || extractCorrectValue(question.correct_answer);
   const sourceAcceptedAnswers = Array.isArray(sourceFix?.correctAnswer?.acceptedAnswers)
@@ -3426,7 +3430,9 @@ const buildListeningTask = (question, index = 0, listeningAudioMap = new Map(), 
     id: `db-question-${question.id}`,
     level: question.level || "B1",
     typeLabel: question.section_title || `Hören Teil ${question.part_number || index + 1}`,
-    question: sourceFix?.prompt || extractListeningStudentPrompt(question.prompt || question.section_instructions, question.section_title),
+    question: sourceFix?.prompt || (preserveOsdB2SourcePrompt
+      ? clipText(question.prompt, 2400)
+      : extractListeningStudentPrompt(question.prompt || question.section_instructions, question.section_title)),
     hint: "Hören Sie den Audiotext aufmerksam und beantworten Sie die Aufgaben.",
     explanation: sourceFix?.explanation || question.explanation || "Antwort aus dem importierten Hörverstehen-Modul.",
     sourceQuestionId: question.id,
@@ -3438,7 +3444,9 @@ const buildListeningTask = (question, index = 0, listeningAudioMap = new Map(), 
       ...buildTaskPartMeta(question, index).sourceMetadata,
       ...stripStudentHiddenMetadata(sourceFix?.sourceMetadata || {}),
     },
-    partInstructions: LISTENING_STUDENT_INSTRUCTION,
+    partInstructions: preserveOsdB2SourcePrompt
+      ? clipText(question.section_instructions || "", 5200)
+      : LISTENING_STUDENT_INSTRUCTION,
   };
 
   if (questionType.includes("true_false")) {
