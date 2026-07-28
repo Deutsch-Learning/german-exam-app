@@ -67,6 +67,7 @@ const GLOBAL_TEST_DURATION_MINUTES = 60;
 const GLOBAL_TEST_DURATION_SECONDS = GLOBAL_TEST_DURATION_MINUTES * 60;
 const WRITING_GLOBAL_DURATION_MINUTES = GLOBAL_TEST_DURATION_MINUTES;
 const ECL_B1_GLOBAL_DURATION_MINUTES = 35;
+const NAVIGATION_DRAWER_MEDIA_QUERY = "(max-width: 1119px)";
 
 const ImportedLoadingDots = ({ label = "Importierte Aufgaben werden geladen" }) => (
   <span className={styles.importedLoadingDots} role="status" aria-label={label}>
@@ -2183,6 +2184,9 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const [partIntroVisible, setPartIntroVisible] = useState(true);
   const [partTransition, setPartTransition] = useState(null);
   const [navPanelOpen, setNavPanelOpen] = useState(false);
+  const [navigationDrawerViewport, setNavigationDrawerViewport] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia(NAVIGATION_DRAWER_MEDIA_QUERY).matches
+  );
   const [, setSaveStatus] = useState("");
   const [resultStatus, setResultStatus] = useState("");
   const [completionReason, setCompletionReason] = useState("");
@@ -2233,6 +2237,38 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const partTransitionActiveRef = useRef(false);
   const exitGuardBypassRef = useRef(false);
   const exitHistoryIndexRef = useRef(0);
+  const navPanelToggleRef = useRef(null);
+  const navPanelCloseRef = useRef(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const mediaQuery = window.matchMedia(NAVIGATION_DRAWER_MEDIA_QUERY);
+    const syncDrawerViewport = (event) => {
+      setNavigationDrawerViewport(event.matches);
+      if (!event.matches) setNavPanelOpen(false);
+    };
+    setNavigationDrawerViewport(mediaQuery.matches);
+    mediaQuery.addEventListener?.("change", syncDrawerViewport);
+    return () => mediaQuery.removeEventListener?.("change", syncDrawerViewport);
+  }, []);
+
+  useEffect(() => {
+    if (!navigationDrawerViewport || !navPanelOpen || typeof document === "undefined") return undefined;
+    const previousOverflow = document.body.style.overflow;
+    const toggleElement = navPanelToggleRef.current;
+    const focusFrame = window.requestAnimationFrame(() => navPanelCloseRef.current?.focus({ preventScroll: true }));
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setNavPanelOpen(false);
+    };
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", closeOnEscape);
+      toggleElement?.focus({ preventScroll: true });
+    };
+  }, [navPanelOpen, navigationDrawerViewport]);
 
   useEffect(() => {
     if (
@@ -3619,7 +3655,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     });
   };
 
-  const renderExamSidebar = () => (
+  const renderExamSidebar = (drawer = false) => (
     <>
       <button
         type="button"
@@ -3631,6 +3667,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
         id="exam-navigation-panel"
         className={`${styles.examNavPanel} ${navPanelOpen ? styles.examNavPanelOpen : ""}`}
         aria-label="Pruefungsnavigation"
+        aria-modal={drawer ? "true" : undefined}
+        role={drawer ? "dialog" : undefined}
       >
         <div className={styles.examNavPanelHeader}>
           <div>
@@ -3640,6 +3678,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           <button
             type="button"
             className={styles.navPanelClose}
+            ref={drawer ? navPanelCloseRef : undefined}
             onClick={() => setNavPanelOpen(false)}
             aria-label="Navigation schliessen"
           >
@@ -6279,6 +6318,9 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           </section>
         </div>
       ), document.body) : null}
+      {!completed && !module.unavailable && navigationDrawerViewport
+        ? createPortal(renderExamSidebar(true), document.body)
+        : null}
       <nav className={styles.nav}>
         <div className={styles.logoButton}>
           <img src={logo} alt="Deutsch Prüfungen" />
@@ -6337,6 +6379,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             <button
               type="button"
               className={styles.navPanelToggle}
+              ref={navPanelToggleRef}
               onClick={() => setNavPanelOpen(true)}
               aria-controls="exam-navigation-panel"
               aria-expanded={navPanelOpen}
@@ -6351,7 +6394,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
         <div className={`${styles.workArea} ${module.id === "read" ? styles.readingWorkArea : ""}`}>
           <section className={styles.mainContent}>{renderModuleContent()}</section>
 
-          {!completed && !module.unavailable ? renderExamSidebar() : null}
+          {!completed && !module.unavailable && !navigationDrawerViewport ? renderExamSidebar() : null}
         </div>
 
         {!completed && !module.unavailable && !partIntroVisible && !partTransition ? (
