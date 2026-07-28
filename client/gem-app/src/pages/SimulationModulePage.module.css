@@ -4014,6 +4014,14 @@
 }
 
 .examNavPanel {
+  --exam-red: #c62828;
+  --exam-red-dark: #9f1f1f;
+  --exam-yellow: #f4b400;
+  --exam-yellow-soft: #fff4c2;
+  --exam-text: #2f2f2f;
+  --exam-muted: #667085;
+  --exam-border: #e4e7ec;
+  --exam-shadow-soft: 0 8px 22px rgba(16, 24, 40, 0.08);
   align-self: start;
   display: grid;
   gap: 14px;

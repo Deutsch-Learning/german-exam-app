@@ -5268,6 +5268,64 @@ const recentSimulationsHandler = async (req, res) => {
 
 app.get("/api/user/simulations", requireAuth, recentSimulationsHandler);
 
+const normalizeDashboardModuleId = (simulation) => {
+  const details = simulation?.result_details && typeof simulation.result_details === "object"
+    ? simulation.result_details
+    : {};
+  const corrections = simulation?.ai_corrections && typeof simulation.ai_corrections === "object"
+    ? simulation.ai_corrections
+    : {};
+  const explicit = String(details.moduleId || corrections.module || "").trim().toLowerCase();
+  if (["read", "listen", "write", "speak", "sprach"].includes(explicit)) return explicit;
+
+  const label = `${explicit} ${simulation?.exam_name || ""}`.toLowerCase();
+  if (/sprachbaustein|grammar|grammatik/.test(label)) return "sprach";
+  if (/\b(read|reading|lesen)\b|compr.hension .crite/.test(label)) return "read";
+  if (/\b(listen|listening|h.ren|hoeren)\b|compr.hension orale/.test(label)) return "listen";
+  if (/\b(write|writing|schreiben)\b|expression .crite/.test(label)) return "write";
+  if (/\b(speak|speaking|sprechen)\b|expression orale/.test(label)) return "speak";
+  return "";
+};
+
+const averageDashboardScores = (values) => {
+  const valid = values
+    .filter((value) => value != null && value !== "")
+    .map(Number)
+    .filter((value) => Number.isFinite(value) && value >= 0 && value <= 100);
+  if (!valid.length) return null;
+  return Math.round(valid.reduce((sum, value) => sum + value, 0) / valid.length);
+};
+
+const buildDashboardSkills = (simulations = []) => {
+  const grouped = { read: [], listen: [], write: [], speak: [], sprach: [] };
+  simulations.forEach((simulation) => {
+    const moduleId = normalizeDashboardModuleId(simulation);
+    const score = Number(simulation?.score_pct);
+    if (grouped[moduleId] && Number.isFinite(score) && score >= 0 && score <= 100) {
+      grouped[moduleId].push(score);
+    }
+  });
+
+  const moduleScores = Object.fromEntries(
+    Object.entries(grouped).map(([moduleId, values]) => [moduleId, averageDashboardScores(values)])
+  );
+  const attemptedCommunicationScores = [
+    moduleScores.read,
+    moduleScores.listen,
+    moduleScores.write,
+    moduleScores.speak,
+  ].filter((value) => value != null);
+
+  return {
+    read: moduleScores.read ?? 0,
+    listen: moduleScores.listen ?? 0,
+    write: moduleScores.write ?? 0,
+    speak: moduleScores.speak ?? 0,
+    grammar: moduleScores.sprach ?? averageDashboardScores([moduleScores.read, moduleScores.write]) ?? 0,
+    vocabulary: averageDashboardScores(attemptedCommunicationScores) ?? 0,
+  };
+};
+
 const dashboardHandler = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -5292,6 +5350,13 @@ const dashboardHandler = async (req, res) => {
     );
     const stats = statsRes.rows[0] ?? { total_tests: 0, avg_score: 0 };
     const progressSnapshot = await getUserProgressSnapshot(userId);
+    const skillScoresRes = await pool.query(
+      `SELECT exam_name, score_pct, ai_corrections, result_details
+       FROM simulations
+       WHERE user_id = $1
+       ORDER BY created_at ASC, id ASC`,
+      [userId]
+    );
 
     const latest = simulations[0];
     const progressPct = progressSnapshot.percentage;
@@ -5305,14 +5370,7 @@ const dashboardHandler = async (req, res) => {
             "Renforcer le vocabulaire lié à l'environnement",
           ];
 
-    const skills = {
-      read: Math.max(0, Math.min(100, progressPct + (stats.total_tests > 0 ? 4 : 0))),
-      listen: Math.max(0, Math.min(100, progressPct + (stats.total_tests > 0 ? -8 : 0))),
-      write: Math.max(0, Math.min(100, progressPct + (stats.total_tests > 0 ? -2 : 0))),
-      speak: Math.max(0, Math.min(100, progressPct + (stats.total_tests > 0 ? 6 : 0))),
-      grammar: Math.max(0, Math.min(100, progressPct + (stats.total_tests > 0 ? -12 : 0))),
-      vocabulary: Math.max(0, Math.min(100, progressPct + (stats.total_tests > 0 ? 2 : 0))),
-    };
+    const skills = buildDashboardSkills(skillScoresRes.rows);
     const visibleRecommendations = stats.total_tests > 0 ? recommendations : [];
 
     return res.json({
