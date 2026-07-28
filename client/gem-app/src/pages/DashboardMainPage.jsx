@@ -240,6 +240,19 @@ const buildRadarPoints = (scores, radius = 96, center = 120) =>
     })
     .join(" ");
 
+const buildRadarVertices = (scores, radius = 96, center = 120) =>
+  skillsOrder.map((skill, idx) => {
+    const angle = (-90 + idx * (360 / skillsOrder.length)) * (Math.PI / 180);
+    const score = Math.max(0, Math.min(100, Number(scores?.[skill.key] ?? 0)));
+    const ratio = score / 100;
+    return {
+      ...skill,
+      score: Math.round(score),
+      x: center + radius * ratio * Math.cos(angle),
+      y: center + radius * ratio * Math.sin(angle),
+    };
+  });
+
 const buildHexRings = (radius, center = 120) =>
   skillsOrder
     .map((_, idx) => {
@@ -250,37 +263,55 @@ const buildHexRings = (radius, center = 120) =>
     })
     .join(" ");
 
-const SkillsCard = ({ scores, labels, moduleLabels }) => (
-  <div className={`${styles.card} ${styles.skillsCard}`}>
-    <h3 className={styles.cardTitle}>{labels.skillsBalance}</h3>
-    <div className={styles.hexMapContainer}>
-      <svg viewBox="0 0 240 240" className={styles.hexMap} role="img" aria-label="Carte de maîtrise des compétences">
-        <polygon points={buildHexRings(96)} className={styles.hexRingOuter} />
-        <polygon points={buildHexRings(64)} className={styles.hexRingMiddle} />
-        <polygon points={buildHexRings(32)} className={styles.hexRingInner} />
-        {skillsOrder.map((_, idx) => {
-          const angle = (-90 + idx * (360 / skillsOrder.length)) * (Math.PI / 180);
-          const x = 120 + 96 * Math.cos(angle);
-          const y = 120 + 96 * Math.sin(angle);
-          return <line key={idx} x1="120" y1="120" x2={x} y2={y} className={styles.hexAxis} />;
-        })}
-        <polygon points={buildRadarPoints(scores)} className={styles.hexSkillArea} />
-        {skillsOrder.map((skill, idx) => {
-          const p = labelPosition(idx);
-          return (
-            <text key={skill.key} x={p.x} y={p.y} className={styles.hexLabel}>
-            {moduleLabels?.[skill.key] ?? skill.label}
-            </text>
-          );
-        })}
-      </svg>
-      <div className={styles.hexLegend}>
-        <span>Zone proche du bord = mieux maîtrisé</span>
-        <span>Zone proche du centre = à renforcer</span>
+const SkillsCard = ({ scores, labels, moduleLabels }) => {
+  const vertices = buildRadarVertices(scores);
+  return (
+    <div className={`${styles.card} ${styles.skillsCard}`}>
+      <h3 className={styles.cardTitle}>{labels.skillsBalance}</h3>
+      <div className={styles.hexMapContainer}>
+        <svg viewBox="0 0 240 240" className={styles.hexMap} role="img" aria-label={labels.skillsBalance}>
+          <defs>
+            <linearGradient id="dashboard-skill-fill" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stopColor="#facc15" stopOpacity="0.72" />
+              <stop offset="100%" stopColor="#f97316" stopOpacity="0.42" />
+            </linearGradient>
+          </defs>
+          <polygon points={buildHexRings(96)} className={styles.hexRingOuter} />
+          <polygon points={buildHexRings(72)} className={styles.hexRingMiddle} />
+          <polygon points={buildHexRings(48)} className={styles.hexRingMiddle} />
+          <polygon points={buildHexRings(24)} className={styles.hexRingInner} />
+          {skillsOrder.map((_, idx) => {
+            const angle = (-90 + idx * (360 / skillsOrder.length)) * (Math.PI / 180);
+            const x = 120 + 96 * Math.cos(angle);
+            const y = 120 + 96 * Math.sin(angle);
+            return <line key={idx} x1="120" y1="120" x2={x} y2={y} className={styles.hexAxis} />;
+          })}
+          <polygon points={buildRadarPoints(scores)} className={styles.hexSkillArea} />
+          {vertices.map((vertex) => (
+            <circle key={vertex.key} cx={vertex.x} cy={vertex.y} r="3.25" className={styles.hexSkillPoint} />
+          ))}
+          {skillsOrder.map((skill, idx) => {
+            const p = labelPosition(idx);
+            return (
+              <text key={skill.key} x={p.x} y={p.y} className={styles.hexLabel}>
+                {moduleLabels?.[skill.key] ?? skill.label}
+              </text>
+            );
+          })}
+        </svg>
+        <div className={styles.skillScoreGrid}>
+          {vertices.map((vertex) => (
+            <span key={vertex.key}>
+              <i aria-hidden="true" />
+              <small>{moduleLabels?.[vertex.key] ?? vertex.label}</small>
+              <strong>{vertex.score}%</strong>
+            </span>
+          ))}
+        </div>
       </div>
     </div>
-  </div>
-);
+  );
+};
 
 const RecentSimulationsCard = ({ simulations, labels, onResume, onMore }) => (
   <div className={styles.card}>
