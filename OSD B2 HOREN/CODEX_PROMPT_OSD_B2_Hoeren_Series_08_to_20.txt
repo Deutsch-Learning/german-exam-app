@@ -1,0 +1,30 @@
+Inspect thIS FOLDER and locate these newly added files:
+
+1. OSD_B2_Hoeren_20_Modellpruefungen_COMPLETE_RESTRUCTURED_Admin_Codex.docx
+2. OSD_B2_Hoeren_Series_08_to_20_RESTRUCTURED_Admin_Codex.docx
+
+The complete document is the main source of truth. The continuation-only document is provided for easier review of Prüfungen 08-20.
+
+The existing ÖSD B2 Hören implementation already contains Prüfungen 01-07 and incomplete placeholders for Prüfungen 08-20. Preserve Prüfungen 01-07 exactly as they are. Replace only the incomplete Prüfungen 08-20 using the corresponding sections in the complete restructured document.
+
+Important mapping:
+- continuation source Prüfungssatz 1 → project Prüfung 08
+- source 2 → project Prüfung 09
+- continue sequentially
+- source 13 → project Prüfung 20
+
+Follow the markers in the restructured document exactly:
+- AUDIO_ITEM_METADATA
+- AUDIO_ENGINE_SETTINGS
+- ADMIN_ONLY_TRANSCRIPT
+- STUDENT_VISIBLE_INSTRUCTIONS
+- STUDENT_VISIBLE_QUESTIONS
+- CORRECTION_VISIBLE_AFTER_SUBMIT
+
+Do not rewrite, translate, shorten or correct the German source content. Speaker names are labels for voice assignment and must not be spoken by ElevenLabs. Sound-effect descriptions are production instructions and must not be spoken. Generate and store audio through the existing ElevenLabs/admin workflow; never generate audio live when a student presses Play. Keep transcripts, speaker profiles, sound instructions and corrections hidden from students.
+
+Implement in order, one Prüfung at a time from 08 to 20. After each Prüfung, verify the transcript, voice mapping, sound instructions, 10 Richtig/Falsch items, 30 note-completion items, answer key, audio lifecycle and responsive student interface before continuing.
+
+For project Prüfung 20, the source PDF omits the printed solution page. The restructured document contains transcript-derived corrections marked SOURCE_VALIDATION_WARNING. Keep Prüfung 20 as draft until an administrator reviews and approves those corrections.
+
+After all 13 Prüfungen are imported, run full regression tests for all ÖSD B2 Hören Prüfungen 01-20. Confirm that no other exam, level or module was modified. Use the existing deployment workflow to make the verified implementation live, then report all files, data records, migrations, audio assets and tests changed or created.

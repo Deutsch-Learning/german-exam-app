@@ -61,6 +61,21 @@ const stripExerciseTail = (transcript) =>
     .replace(/\s+(?:Lösung|Loesung|Antwort(?:en)?)\s*:?\s*[^]*$/i, " ")
     .trim();
 
+const PAGE_HEADER_PATTERN = /(?:ÖSD|OESD|OSD)\s+B2\s*[-‐-―]\s*Modul\s+H(?:Ö|OE|O)REN\s+\d{1,3}/giu;
+const NON_SPEECH_MARKER_PATTERN = /(?:AUDIO_ITEM_METADATA|AUDIO_ENGINE_SETTINGS|SPEAKER_PROFILES_SOURCE|SOUND_EFFECTS_SOURCE|STUDENT_VISIBLE_INSTRUCTIONS|STUDENT_VISIBLE_QUESTIONS|CORRECTION_VISIBLE_AFTER_SUBMIT|SOURCE_VALIDATION_WARNING)/iu;
+
+const stripNonSpeechArtifacts = (value) => {
+  const withoutHeaders = String(value || "")
+    .replace(PAGE_HEADER_PATTERN, " ")
+    .replace(/\[[^\]\r\n]*\]/g, " ");
+  const markerIndex = withoutHeaders.search(NON_SPEECH_MARKER_PATTERN);
+  const transcriptOnly = markerIndex >= 0 ? withoutHeaders.slice(0, markerIndex) : withoutHeaders;
+  return stripProductionMarkers(transcriptOnly)
+    .replace(/^\s*ADMIN_ONLY_TRANSCRIPT[^\n]*\n?/iu, "")
+    .replace(/^\s*(?:TRANSKRIPT|TRANSKRIPTION|SCRIPT)\s*[-‐-―:]\s*/iu, "")
+    .trim();
+};
+
 const hasUsableSpeechText = (transcript) =>
   /:\s*(?!_+\b).{30,}/s.test(stripExerciseTail(transcript));
 
@@ -116,7 +131,7 @@ const findKnownSpeakerLabel = (label, speakerLabels) => {
 const prepareTranscriptForTts = (item) => {
   const rawTranscript = item.admin_transcript || "";
   if (isOnlyTemplateTranscript(rawTranscript)) return "";
-  const transcript = stripExerciseTail(stripProductionMarkers(rawTranscript));
+  const transcript = stripExerciseTail(stripNonSpeechArtifacts(rawTranscript));
   if (!transcript || isOnlyTemplateTranscript(transcript)) return "";
   if (!/\b(?:radiointerview|radiogespr[aä]ch|radiogespraech|dialog|dialogue|interview|diskussion|discussion)\b/i.test(`${item.title || ""} ${JSON.stringify(item.audio_engine_settings || {})}`)) {
     return transcript;
@@ -328,7 +343,53 @@ const buildAudio = (item, profiles) => {
   };
 };
 
-const handleItem = async (item, profiles, { force = false, provider = "elevenlabs" } = {}) => {
+const auditAudioPlan = (item, audio) => {
+  const forbidden = `${audio.transcript || ""}`.match(new RegExp(`${PAGE_HEADER_PATTERN.source}|${NON_SPEECH_MARKER_PATTERN.source}`, "iu"));
+  if (forbidden) throw new Error(`Audio item ${item.id} contains non-spoken source content: ${forbidden[0]}`);
+  if (/\[[^\]\r\n]+\]/.test(audio.transcript || "")) {
+    throw new Error(`Audio item ${item.id} contains a sound or stage direction in the spoken payload.`);
+  }
+
+  const segments = parseSpeakerSegments(audio);
+  if (!segments.length || segments.some((segment) => !String(segment.text || "").trim())) {
+    throw new Error(`Audio item ${item.id} has no usable spoken segments.`);
+  }
+  for (const segment of segments) {
+    if (new RegExp(`${PAGE_HEADER_PATTERN.source}|${NON_SPEECH_MARKER_PATTERN.source}`, "iu").test(segment.text)) {
+      throw new Error(`Audio item ${item.id} would speak a non-transcript marker.`);
+    }
+    const label = String(segment.speaker || "").trim();
+    if (label && label !== "Narrator" && String(segment.text).trimStart().toLocaleLowerCase("de").startsWith(`${label.toLocaleLowerCase("de")}:`)) {
+      throw new Error(`Audio item ${item.id} would speak the speaker label ${label}.`);
+    }
+  }
+
+  const configuredCount = Number(asObject(item.audio_engine_settings).speakerCount)
+    || (Array.isArray(asObject(item.audio_engine_settings).speakers) ? asObject(item.audio_engine_settings).speakers.length : 0)
+    || 1;
+  if (audio.speakers.length !== configuredCount) {
+    throw new Error(`Audio item ${item.id} has ${audio.speakers.length} assigned voices instead of ${configuredCount}.`);
+  }
+  const voiceIds = audio.speakers.map((speaker) => String(speaker.voiceId || "").trim()).filter(Boolean);
+  if (voiceIds.length !== audio.speakers.length || new Set(voiceIds).size !== voiceIds.length) {
+    throw new Error(`Audio item ${item.id} does not have one distinct voice per speaker.`);
+  }
+
+  return {
+    id: item.id,
+    series: Number(item.series_number),
+    part: Number(item.part_number),
+    transcriptCharacters: audio.transcript.length,
+    spokenSegments: segments.length,
+    speakers: audio.speakers.map((speaker) => ({
+      label: speaker.speaker,
+      gender: speaker.suggestedGender || speaker.gender,
+      voiceId: speaker.voiceId,
+    })),
+  };
+};
+
+const handleItem = async (item, profiles, { force = false, provider = "elevenlabs", noBrowserFallback = false } = {}) => {
   try {
     await pool.query(
       `UPDATE exam_listening_audio_items
@@ -382,12 +443,12 @@ const handleItem = async (item, profiles, { force = false, provider = "elevenlab
     const shouldStop =
       !isMissingTranscript &&
       (error.name === "TtsConfigurationError" || [401, 402, 429].includes(Number(error.status) || 0) || isQuotaOrCreditError(error));
-    if (shouldStop) {
+    if (shouldStop && !noBrowserFallback) {
       await markBrowserTtsFallback(item, error.publicMessage || error.message || "ElevenLabs generation stopped; Browser TTS fallback preserved.").catch(() => {});
     } else {
       await pool.query(
         `UPDATE exam_listening_audio_items
-            SET audio_generation_status = 'failed',
+            SET audio_generation_status = $4,
                 admin_notes = $2,
                 generation_log = COALESCE(generation_log, '[]'::jsonb) || $3::jsonb,
                 updated_at = NOW()
@@ -396,6 +457,7 @@ const handleItem = async (item, profiles, { force = false, provider = "elevenlab
           item.id,
           error.publicMessage || error.message || "Audio generation failed.",
           JSON.stringify([{ at: new Date().toISOString(), action: "script_batch_failed", error: error.publicMessage || error.message }]),
+          shouldStop ? "queued" : "failed",
         ]
       ).catch(() => {});
     }
@@ -424,6 +486,13 @@ const main = async () => {
     .map((value) => Number(value))
     .filter((value) => Number.isInteger(value) && value > 0);
   const dryRun = flags["dry-run"] === true || flags.dryRun === true;
+  const preflight = flags.preflight === true || flags.preflight === "true";
+  const noBrowserFallback = flags["no-browser-fallback"] === true || flags.noBrowserFallback === true;
+  const seriesArg = String(flags.series || "");
+  const seriesMatch = seriesArg.match(/^(\d+)(?:-(\d+))?$/);
+  const seriesFrom = seriesMatch ? Number(seriesMatch[1]) : null;
+  const seriesTo = seriesMatch ? Number(seriesMatch[2] || seriesMatch[1]) : null;
+  const sourceImportId = Number(flags["source-import"] || flags.sourceImportId) || null;
   const candidates = (await pool.query(
     `SELECT *
        FROM exam_listening_audio_items
@@ -442,6 +511,8 @@ const main = async () => {
     .map((item) => ({ ...item, target_kind: classifyItem(item) }))
     .filter((item) => !levels.length || levels.includes(String(item.level || "").toUpperCase()))
     .filter((item) => !providers.length || providers.includes(String(item.provider || "").toLowerCase()))
+    .filter((item) => seriesFrom === null || (Number(item.series_number) >= seriesFrom && Number(item.series_number) <= seriesTo))
+    .filter((item) => sourceImportId === null || Number(item.source_import_id) === sourceImportId)
     .filter((item) => !itemIds.length || itemIds.includes(Number(item.id)))
     .filter((item) => !kinds.length || kinds.includes(item.target_kind))
     .slice(0, limit);
@@ -456,9 +527,23 @@ const main = async () => {
     providers,
     itemIds,
     dryRun,
+    preflight,
+    noBrowserFallback,
+    series: seriesArg || "all",
+    sourceImportId,
     candidates: candidates.length,
     selected: items.length,
   })}`);
+
+  const profiles = (dryRun && !preflight) ? [] : await getVoiceProfiles(pool);
+  const plans = preflight ? items.map((item) => {
+    const audio = buildAudio(item, profiles);
+    return auditAudioPlan(item, audio);
+  }) : [];
+
+  if (preflight) {
+    console.log(`PREFLIGHT ${JSON.stringify({ ok: true, items: plans.length, plans }, null, 2)}`);
+  }
 
   if (dryRun) {
     console.log(JSON.stringify(items.slice(0, 100).map((item) => ({
@@ -477,7 +562,6 @@ const main = async () => {
     return;
   }
 
-  const profiles = await getVoiceProfiles(pool);
   let index = 0;
   let stop = false;
   let stopReason = "";
@@ -487,7 +571,7 @@ const main = async () => {
     while (!stop && index < items.length) {
       const item = items[index];
       index += 1;
-      const result = await handleItem(item, profiles, { provider, force });
+      const result = await handleItem(item, profiles, { provider, force, noBrowserFallback });
       results.push(result);
       console.log(JSON.stringify(result));
       if (result.stop) {
@@ -500,10 +584,14 @@ const main = async () => {
   await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
   if (stop) {
     const remaining = items.slice(index);
-    for (const item of remaining) {
-      await markBrowserTtsFallback(item, stopReason);
+    if (noBrowserFallback) {
+      console.log(`QUEUED_REMAINING ${remaining.length}`);
+    } else {
+      for (const item of remaining) {
+        await markBrowserTtsFallback(item, stopReason);
+      }
+      console.log(`FALLBACK_MARKED ${remaining.length}`);
     }
-    console.log(`FALLBACK_MARKED ${remaining.length}`);
   }
   const summary = (await pool.query(
     `SELECT COUNT(*)::int AS total,
@@ -526,8 +614,17 @@ const main = async () => {
   if (results.some((result) => result.stop)) process.exitCode = 2;
 };
 
-main().catch(async (error) => {
-  console.error(error);
-  await pool.end().catch(() => {});
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch(async (error) => {
+    console.error(error);
+    await pool.end().catch(() => {});
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  auditAudioPlan,
+  buildAudio,
+  prepareTranscriptForTts,
+  stripNonSpeechArtifacts,
+};
