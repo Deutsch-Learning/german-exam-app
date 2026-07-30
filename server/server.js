@@ -1,6 +1,5 @@
 const crypto = require("crypto");
 const path = require("path");
-require("dotenv").config({ path: path.join(__dirname, ".env"), quiet: true });
 const express = require("express");
 const multer = require("multer");
 const pool = require("./db");
@@ -55,6 +54,7 @@ const {
 } = require("./services/ttsService");
 const { ensureSchemaReady } = require("./services/schemaReadiness");
 const { getStoredAudioPublicUrl } = require("./services/audioStorage");
+const { getOwnedPaymentTransaction, normalizePaymentReference } = require("./services/paymentStatusSecurity");
 const goetheB1HoerenQuestionFixes = require("./data/goetheB1HoerenQuestionFixes.json");
 const osdB1HoerenPart4Options = require("./data/osdB1HoerenPart4Options.json");
 const osdB2HoerenTeil2Fixes = require("./data/osdB2HoerenTeil2Fixes.json");
@@ -799,6 +799,13 @@ const buildNotchPayProcessPayload = ({ channel, phone, clientIp }) => ({
     country: String(phone || "").replace(/[^\d]/g, "").startsWith("237") ? "CM" : undefined,
   },
   client_ip: clientIp || undefined,
+});
+
+const paymentStatusRateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 
 const processNotchPayMobileMoneyPayment = async ({ reference, channel, phone, clientIp, method = "POST" }) =>
@@ -2024,44 +2031,6 @@ const requireAuth = createAuthMiddleware({
   emailVerificationRequired: EMAIL_VERIFICATION_REQUIRED,
 });
 const requireAdmin = [requireAuth, adminMiddleware];
-
-const optionalPaymentAuth = async (req, _res, next) => {
-  try {
-    const token = getBearerToken(req);
-    if (!token) return next();
-    const payload = jwt.verify(token, JWT_SECRET, {
-      issuer: JWT_ISSUER,
-      audience: JWT_AUDIENCE,
-      ignoreExpiration: true,
-    });
-    const userId = Number(payload.sub ?? payload.id);
-    if (!Number.isInteger(userId) || userId <= 0) return next();
-    if (payload.jti) {
-      const revoked = await pool.query(`SELECT 1 FROM revoked_tokens WHERE jti = $1 LIMIT 1`, [payload.jti]);
-      if (revoked.rows[0]) return next();
-    }
-    const result = await pool.query(
-      `SELECT id, email, username, first_name, last_name, date_of_birth, country, phone,
-              auth_provider, avatar_url, role, status,
-              email_verified, has_full_access, partial_access, current_level, target_level,
-              marketing_emails_enabled,
-              created_at, last_login_at
-         FROM users
-        WHERE id = $1`,
-      [userId]
-    );
-    const user = result.rows[0];
-    if (!user || user.status !== "active" || !["user", "admin"].includes(String(user.role)) || payload.role !== user.role) {
-      return next();
-    }
-    req.token = token;
-    req.authPayload = payload;
-    req.user = user;
-  } catch {
-    // Payment status can still be checked by reference; normal protected routes remain strict.
-  }
-  return next();
-};
 
 const optionalContentAuth = async (req, _res, next) => {
   try {
@@ -6992,24 +6961,11 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
   }
 });
 
-app.get("/api/checkout/session/:reference/status", optionalPaymentAuth, async (req, res) => {
+app.get("/api/checkout/session/:reference/status", requireAuth, paymentStatusRateLimiter, async (req, res) => {
   try {
-    const reference = String(req.params.reference || "").trim();
+    const reference = normalizePaymentReference(req.params.reference);
     if (!reference) return res.status(400).json({ ok: false, error: "Reference de paiement manquante." });
-    const result = await pool.query(
-      `SELECT id, user_id, provider, provider_reference, status, amount, currency, metadata
-         FROM payment_transactions
-        WHERE (
-          provider_reference = $1
-          OR metadata #>> '{notchpay,merchantReference}' = $1
-          OR metadata #>> '{notchpay,reference}' = $1
-          OR id::text = $1
-        )
-        ORDER BY created_at DESC
-        LIMIT 1`,
-      [reference]
-    );
-    const transaction = result.rows[0];
+    const transaction = await getOwnedPaymentTransaction(pool, { reference, userId: req.user.id });
     if (!transaction) return res.status(404).json({ ok: false, error: "Paiement introuvable." });
 
     let status = normalizePaymentStatus(transaction.status);
@@ -7079,19 +7035,11 @@ app.get("/api/checkout/session/:reference/status", optionalPaymentAuth, async (r
     }
 
     const responseMessage = buildPaymentStatusMessage(status, providerStatus, providerMessage);
-    const ownsTransaction = Number(req.user?.id) === Number(transaction.user_id);
-    const refreshedAuth = status === "succeeded" && ownsTransaction ? signAccessToken(req.user) : null;
+    const refreshedAuth = status === "succeeded" ? signAccessToken(req.user) : null;
     return res.json({
       ok: true,
       status,
-      providerStatus,
-      providerMessage,
-      activated,
-      providerReference: providerLookupReference,
-      transactionId: transaction.id,
-      quote: transactionMetadata.quote || null,
-      mobileMoney: transactionMetadata.mobileMoney || null,
-      user: status === "succeeded" && ownsTransaction ? await sanitizeUserWithSubscriptions(req.user) : null,
+      user: status === "succeeded" ? await sanitizeUserWithSubscriptions(req.user) : null,
       accessToken: refreshedAuth?.token || null,
       expiresIn: refreshedAuth?.expiresIn || null,
       message: responseMessage,
