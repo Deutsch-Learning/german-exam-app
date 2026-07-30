@@ -4,14 +4,14 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node --test tests/schemaReadiness.test.js && node scripts/checkNoRuntimeDdl.js",
+    "test": "node --test tests/*.test.js && node scripts/checkNoRuntimeDdl.js",
     "check:runtime-ddl": "node scripts/checkNoRuntimeDdl.js",
-    "dev": "nodemon server.js",
-    "start": "node server.js",
-    "repair:goethe-b1-hoeren": "node scripts/repairGoetheB1HoerenQuestions.js",
-    "validate:osd-b2-hoeren-teil2": "node scripts/validate-osd-b2-hoeren-teil2.js",
-    "validate:osd-b2-hoeren-08-20": "node scripts/validate-osd-b2-hoeren-series-08-20.js",
-    "publish:osd-b2-hoeren-08-20": "node scripts/publish-osd-b2-hoeren-series-08-20.js"
+    "dev": "nodemon -r dotenv/config server.js",
+    "start": "node -r dotenv/config server.js",
+    "repair:goethe-b1-hoeren": "node -r dotenv/config scripts/repairGoetheB1HoerenQuestions.js",
+    "validate:osd-b2-hoeren-teil2": "node -r dotenv/config scripts/validate-osd-b2-hoeren-teil2.js",
+    "validate:osd-b2-hoeren-08-20": "node -r dotenv/config scripts/validate-osd-b2-hoeren-series-08-20.js",
+    "publish:osd-b2-hoeren-08-20": "node -r dotenv/config scripts/publish-osd-b2-hoeren-series-08-20.js"
   },
   "keywords": [],
   "author": "",

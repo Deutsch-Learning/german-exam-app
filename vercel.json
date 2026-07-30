@@ -3,7 +3,6 @@
   "outputDirectory": "client/gem-app/dist",
   "functions": {
     "api/index.js": {
-      "includeFiles": "server/**",
       "maxDuration": 300
     }
   },

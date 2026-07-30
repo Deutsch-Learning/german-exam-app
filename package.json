@@ -4,9 +4,9 @@
     "install:server": "npm install --prefix server",
     "install:client": "npm install --include=dev --prefix client/gem-app",
     "build": "npm run install:server && npm run install:client && npm run build --prefix client/gem-app",
-    "start": "node server/server.js",
+    "start": "node -r ./server/node_modules/dotenv/config server/server.js dotenv_config_path=server/.env",
     "hostinger:build": "npm run build",
-    "hostinger:start": "node server/server.js"
+    "hostinger:start": "node -r ./server/node_modules/dotenv/config server/server.js dotenv_config_path=server/.env"
   },
   "engines": {
     "node": "22.x"
