@@ -1,4 +1,8 @@
 const crypto = require("crypto");
+const {
+  getAudioStorageSettings,
+  uploadAudioBuffer,
+} = require("./audioStorage");
 
 const DEFAULT_PROVIDER = "elevenlabs";
 const DEFAULT_MIME_TYPE = "audio/mpeg";
@@ -743,6 +747,13 @@ const getAudioAssetForExam = async ({ pool, examId, audio, provider = getConfigu
 const storeAudioAsset = async ({ pool, examId, audio, adminId = null, provider, generated }) => {
   await ensureAudioAssetSchema(pool);
   const contentHash = buildAudioContentHash(audio, provider);
+  let storage = null;
+  try {
+    storage = await uploadAudioBuffer({ buffer: generated.buffer, mimeType: generated.mimeType });
+  } catch (error) {
+    if (getAudioStorageSettings().required) throw error;
+    console.error("Audio object storage upload failed; retaining the database fallback.", error.message);
+  }
   const audioConfig = {
     title: audio.title,
     speaker: audio.speaker,
@@ -755,6 +766,7 @@ const storeAudioAsset = async ({ pool, examId, audio, adminId = null, provider, 
       partNumber: track.partNumber,
       transcriptHash: hashObject(normalizeText(track.transcript || "")),
     })),
+    ...(storage ? { storage } : {}),
   };
   const result = await pool.query(
     `INSERT INTO exam_audio_assets (
@@ -785,7 +797,7 @@ const storeAudioAsset = async ({ pool, examId, audio, adminId = null, provider, 
       JSON.stringify(generated.voices || []),
       JSON.stringify(audioConfig),
       generated.mimeType,
-      generated.buffer,
+      storage ? null : generated.buffer,
       generated.buffer.length,
       null,
       adminId,
@@ -829,9 +841,11 @@ const getAudioAssetById = async ({ pool, assetId }) => {
   await ensureAudioAssetSchema(pool);
   const result = await pool.query(
     `SELECT id, source_exam_id, content_hash, provider, provider_model, mime_type,
-            audio_data, byte_size, status, updated_at
+            audio_config, audio_data, byte_size, status, updated_at
        FROM exam_audio_assets
-      WHERE id = $1 AND status = 'ready' AND audio_data IS NOT NULL`,
+      WHERE id = $1
+        AND status = 'ready'
+        AND (audio_data IS NOT NULL OR COALESCE((audio_config->'storage'->>'verified')::boolean, FALSE) = TRUE)`,
     [assetId]
   );
   return result.rows[0] || null;

@@ -59,6 +59,7 @@ const {
   stripProductionMarkers,
   TtsConfigurationError,
 } = require("./services/ttsService");
+const { getStoredAudioPublicUrl } = require("./services/audioStorage");
 const goetheB1HoerenQuestionFixes = require("./data/goetheB1HoerenQuestionFixes.json");
 const osdB1HoerenPart4Options = require("./data/osdB1HoerenPart4Options.json");
 const osdB2HoerenTeil2Fixes = require("./data/osdB2HoerenTeil2Fixes.json");
@@ -6582,6 +6583,12 @@ app.get("/api/audio/generated/:assetId", async (req, res) => {
     if (!Number.isInteger(assetId)) return res.status(404).json({ ok: false, error: "Audio not found" });
     const asset = await getAudioAssetById({ pool, assetId });
     if (!asset) return res.status(404).json({ ok: false, error: "Audio not found" });
+    const storedAudioUrl = getStoredAudioPublicUrl(asset.audio_config);
+    if (storedAudioUrl) {
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      return res.redirect(307, storedAudioUrl);
+    }
+    if (!asset.audio_data) return res.status(503).json({ ok: false, error: "Audio temporarily unavailable" });
     res.setHeader("Content-Type", asset.mime_type || "audio/mpeg");
     res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
     res.setHeader("ETag", `"${asset.content_hash}"`);
