@@ -1,3 +1,5 @@
+const { ensureSchemaReady } = require("./schemaReadiness");
+
 const STYLE_BLOCK_TYPES = new Set([
   "exam_intro",
   "section_title",
@@ -472,26 +474,8 @@ const restoreBlock = async (client, item) => {
   }
 };
 
-const ensureContentStyleSchema = async (pool) => {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS content_style_templates (
-      id SERIAL PRIMARY KEY,
-      name TEXT NOT NULL,
-      description TEXT,
-      block_type TEXT NOT NULL,
-      style_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-      created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
-      is_active BOOLEAN NOT NULL DEFAULT TRUE,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-  `);
-  await pool.query(`ALTER TABLE content_style_templates ENABLE ROW LEVEL SECURITY;`);
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS content_style_templates_active_idx
-      ON content_style_templates(block_type, is_active, updated_at DESC);
-  `);
-};
+const ensureContentStyleSchema = async (pool) =>
+  ensureSchemaReady(pool, "content style templates");
 
 const registerContentStyleRoutes = ({ app, pool, requireAdmin, auditAdminAction }) => {
   app.get("/api/admin/style-templates", requireAdmin, async (req, res) => {

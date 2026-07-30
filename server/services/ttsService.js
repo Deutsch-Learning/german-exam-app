@@ -1,4 +1,9 @@
 const crypto = require("crypto");
+const {
+  getAudioStorageSettings,
+  uploadAudioBuffer,
+} = require("./audioStorage");
+const { ensureSchemaReady } = require("./schemaReadiness");
 
 const DEFAULT_PROVIDER = "elevenlabs";
 const DEFAULT_MIME_TYPE = "audio/mpeg";
@@ -227,65 +232,8 @@ const findSpeakerSettings = (audio, speakerName) => {
   }) || speakers[0] || {};
 };
 
-let voiceProfileSchemaPromise = null;
-
-const ensureVoiceProfileSchema = async (pool) => {
-  if (voiceProfileSchemaPromise) return voiceProfileSchemaPromise;
-  voiceProfileSchemaPromise = (async () => {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS tts_voice_profiles (
-        id SERIAL PRIMARY KEY,
-        profile_key TEXT NOT NULL UNIQUE,
-        label TEXT NOT NULL,
-        provider TEXT NOT NULL DEFAULT 'elevenlabs',
-        voice_id TEXT,
-        gender TEXT NOT NULL CHECK (gender IN ('female', 'male', 'neutral')),
-        role TEXT NOT NULL DEFAULT 'speaker',
-        style TEXT,
-        settings JSONB NOT NULL DEFAULT '{}'::jsonb,
-        is_active BOOLEAN NOT NULL DEFAULT TRUE,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      );
-    `);
-    await pool.query(`ALTER TABLE tts_voice_profiles ENABLE ROW LEVEL SECURITY;`);
-    await pool.query(`
-      DO $$
-      BEGIN
-        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
-          REVOKE ALL ON TABLE tts_voice_profiles FROM anon;
-        END IF;
-        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
-          REVOKE ALL ON TABLE tts_voice_profiles FROM authenticated;
-        END IF;
-      END $$;
-    `);
-    await pool.query(`
-      INSERT INTO tts_voice_profiles (profile_key, label, provider, voice_id, gender, role, style, settings)
-      VALUES
-        ('de_female_1', 'Deutsch weiblich 1', 'elevenlabs', 'Xb7hH8MSUJpSbSDYk0k2', 'female', 'speaker', 'klar, freundlich', '{"stability":0.62,"similarity":0.78}'::jsonb),
-        ('de_female_2', 'Deutsch weiblich 2', 'elevenlabs', 'XrExE9yKIg1WjnnlVkGX', 'female', 'speaker', 'natuerlich, ruhig', '{"stability":0.58,"similarity":0.76}'::jsonb),
-        ('de_female_3', 'Deutsch weiblich 3', 'elevenlabs', 'pFZP5JQG7iQjIQuC4Bku', 'female', 'speaker', 'warm, professionell', '{"stability":0.60,"similarity":0.77}'::jsonb),
-        ('de_male_1', 'Deutsch maennlich 1', 'elevenlabs', 'onwK4e9ZLuTAKqWW03F9', 'male', 'speaker', 'klar, neutral', '{"stability":0.62,"similarity":0.78}'::jsonb),
-        ('de_male_2', 'Deutsch maennlich 2', 'elevenlabs', 'iP95p4xoKVk53GoZ742B', 'male', 'speaker', 'natuerlich, warm', '{"stability":0.58,"similarity":0.76}'::jsonb),
-        ('de_male_3', 'Deutsch maennlich 3', 'elevenlabs', 'cjVigY5qzO86Huf0OWal', 'male', 'speaker', 'ruhig, vertrauenswuerdig', '{"stability":0.60,"similarity":0.77}'::jsonb)
-      ON CONFLICT (profile_key) DO UPDATE SET
-        label = EXCLUDED.label,
-        provider = EXCLUDED.provider,
-        voice_id = EXCLUDED.voice_id,
-        gender = EXCLUDED.gender,
-        role = EXCLUDED.role,
-        style = EXCLUDED.style,
-        settings = tts_voice_profiles.settings || EXCLUDED.settings,
-        updated_at = NOW();
-    `);
-    await pool.query(`CREATE INDEX IF NOT EXISTS tts_voice_profiles_active_idx ON tts_voice_profiles(provider, gender, is_active);`);
-  })().catch((err) => {
-    voiceProfileSchemaPromise = null;
-    throw err;
-  });
-  return voiceProfileSchemaPromise;
-};
+const ensureVoiceProfileSchema = async (pool) =>
+  ensureSchemaReady(pool, "TTS voice profiles");
 
 const getVoiceProfiles = async (pool) => {
   await ensureVoiceProfileSchema(pool);
@@ -616,53 +564,8 @@ const findElevenLabsVoice = async (apiKey, speaker = {}) => {
   return voiceId;
 };
 
-let audioAssetSchemaPromise = null;
-
-const ensureAudioAssetSchema = async (pool) => {
-  if (audioAssetSchemaPromise) return audioAssetSchemaPromise;
-
-  audioAssetSchemaPromise = (async () => {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS exam_audio_assets (
-      id SERIAL PRIMARY KEY,
-      source_exam_id INTEGER REFERENCES exams(id) ON DELETE CASCADE,
-      content_hash TEXT NOT NULL UNIQUE,
-      provider TEXT NOT NULL,
-      provider_model TEXT,
-      voice_summary JSONB NOT NULL DEFAULT '[]'::jsonb,
-      audio_config JSONB NOT NULL DEFAULT '{}'::jsonb,
-      mime_type TEXT NOT NULL DEFAULT 'audio/mpeg',
-      audio_data BYTEA,
-      byte_size INTEGER NOT NULL DEFAULT 0,
-      duration_seconds INTEGER,
-      status TEXT NOT NULL DEFAULT 'ready',
-      error_message TEXT,
-      created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-  `);
-  await pool.query(`ALTER TABLE exam_audio_assets ENABLE ROW LEVEL SECURITY;`);
-  await pool.query(`
-    DO $$
-    BEGIN
-      IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
-        REVOKE ALL ON TABLE exam_audio_assets FROM anon;
-      END IF;
-      IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
-        REVOKE ALL ON TABLE exam_audio_assets FROM authenticated;
-      END IF;
-    END $$;
-  `);
-  await pool.query(`CREATE INDEX IF NOT EXISTS exam_audio_assets_exam_idx ON exam_audio_assets(source_exam_id, updated_at DESC);`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS exam_audio_assets_status_idx ON exam_audio_assets(status, updated_at DESC);`);
-  })().catch((err) => {
-    audioAssetSchemaPromise = null;
-    throw err;
-  });
-
-  return audioAssetSchemaPromise;
-};
+const ensureAudioAssetSchema = async (pool) =>
+  ensureSchemaReady(pool, "exam audio assets");
 
 const buildAudioContentHash = (audio, provider = getConfiguredProvider()) =>
   hashObject({
@@ -743,6 +646,13 @@ const getAudioAssetForExam = async ({ pool, examId, audio, provider = getConfigu
 const storeAudioAsset = async ({ pool, examId, audio, adminId = null, provider, generated }) => {
   await ensureAudioAssetSchema(pool);
   const contentHash = buildAudioContentHash(audio, provider);
+  let storage = null;
+  try {
+    storage = await uploadAudioBuffer({ buffer: generated.buffer, mimeType: generated.mimeType });
+  } catch (error) {
+    if (getAudioStorageSettings().required) throw error;
+    console.error("Audio object storage upload failed; retaining the database fallback.", error.message);
+  }
   const audioConfig = {
     title: audio.title,
     speaker: audio.speaker,
@@ -755,6 +665,7 @@ const storeAudioAsset = async ({ pool, examId, audio, adminId = null, provider, 
       partNumber: track.partNumber,
       transcriptHash: hashObject(normalizeText(track.transcript || "")),
     })),
+    ...(storage ? { storage } : {}),
   };
   const result = await pool.query(
     `INSERT INTO exam_audio_assets (
@@ -785,7 +696,7 @@ const storeAudioAsset = async ({ pool, examId, audio, adminId = null, provider, 
       JSON.stringify(generated.voices || []),
       JSON.stringify(audioConfig),
       generated.mimeType,
-      generated.buffer,
+      storage ? null : generated.buffer,
       generated.buffer.length,
       null,
       adminId,
@@ -829,9 +740,11 @@ const getAudioAssetById = async ({ pool, assetId }) => {
   await ensureAudioAssetSchema(pool);
   const result = await pool.query(
     `SELECT id, source_exam_id, content_hash, provider, provider_model, mime_type,
-            audio_data, byte_size, status, updated_at
+            audio_config, audio_data, byte_size, status, updated_at
        FROM exam_audio_assets
-      WHERE id = $1 AND status = 'ready' AND audio_data IS NOT NULL`,
+      WHERE id = $1
+        AND status = 'ready'
+        AND (audio_data IS NOT NULL OR COALESCE((audio_config->'storage'->>'verified')::boolean, FALSE) = TRUE)`,
     [assetId]
   );
   return result.rows[0] || null;

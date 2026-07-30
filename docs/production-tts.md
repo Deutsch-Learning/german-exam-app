@@ -9,7 +9,7 @@ The learner Hoeren player uses cached production audio only. It no longer create
 3. Admin clicks `Generate audio`.
 4. The backend builds listening audio context from the existing exam, section, question, transcript, speaker, and ambience metadata.
 5. `server/services/ttsService.js` sends each speaker segment to the configured provider.
-6. The generated MP3 is stored in `exam_audio_assets`.
+6. The generated MP3 is uploaded to the configured object-storage bucket. `exam_audio_assets` keeps its metadata and stable asset ID.
 7. Learners receive `content.audio.audioUrl` only when the matching cached asset is ready.
 8. The learner player streams `/api/audio/generated/:assetId`.
 
@@ -49,7 +49,20 @@ Admins should generate and preview audio before publishing a Hoeren exam.
 
 The content hash includes transcript, tracks, speakers, ambience, provider, and rate. Audio is reused while that context stays the same. If generation fails, the backend records a failed asset status and keeps any older ready asset untouched.
 
-The `exam_audio_assets` table is created by `ensureSchema()`, has RLS enabled, and revokes direct `anon`/`authenticated` table access when those Supabase roles exist. Public playback goes through `/api/audio/generated/:assetId`.
+The `exam_audio_assets` table is created by `ensureSchema()`, has RLS enabled, and revokes direct `anon`/`authenticated` table access when those Supabase roles exist. Public playback continues through `/api/audio/generated/:assetId`; the route redirects verified migrated assets to object storage and retains database playback as a controlled migration fallback.
+
+Set these server-only values after the `exam-audio` bucket exists and published assets have been checksum-verified:
+
+```env
+SUPABASE_URL=https://PROJECT_REF.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-server-only-service-role-key
+AUDIO_STORAGE_BUCKET=exam-audio
+AUDIO_STORAGE_UPLOAD_ENABLED=true
+AUDIO_STORAGE_SERVE_OBJECTS=true
+AUDIO_STORAGE_REQUIRED=true
+```
+
+`AUDIO_STORAGE_SERVE_OBJECTS=false` keeps playback on the legacy database bytes during migration. Do not remove those bytes until every published object has been verified in production.
 
 ## Deployment
 

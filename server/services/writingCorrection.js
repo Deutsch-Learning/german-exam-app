@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const { ensureSchemaReady } = require("./schemaReadiness");
 
 const PROVIDER = "gemini";
 const DEFAULT_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
@@ -851,116 +852,8 @@ const evaluateTasksWithRetry = async ({ apiKey, model, tasks, deadlineAt = 0, ma
   throw lastError;
 };
 
-const ensureWritingCorrectionSchema = async (pool) => {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS writing_corrections (
-      id SERIAL PRIMARY KEY,
-      simulation_id INTEGER NOT NULL UNIQUE REFERENCES simulations(id) ON DELETE CASCADE,
-      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      status TEXT NOT NULL DEFAULT 'pending'
-        CHECK (status IN ('pending', 'processing', 'completed', 'partial', 'failed')),
-      provider TEXT NOT NULL DEFAULT 'gemini',
-      model TEXT,
-      total_score NUMERIC(8,2) NOT NULL DEFAULT 0,
-      max_score NUMERIC(8,2) NOT NULL DEFAULT 0,
-      percentage INTEGER,
-      overall_feedback TEXT,
-      overall_strengths JSONB NOT NULL DEFAULT '[]'::jsonb,
-      overall_weaknesses JSONB NOT NULL DEFAULT '[]'::jsonb,
-      error_message TEXT,
-      request_hash TEXT,
-      task_count INTEGER NOT NULL DEFAULT 0,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      corrected_at TIMESTAMPTZ
-    );
-  `);
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS writing_corrections_user_created_idx
-      ON writing_corrections(user_id, created_at DESC);
-  `);
-  await pool.query(`ALTER TABLE writing_corrections ENABLE ROW LEVEL SECURITY;`);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS writing_correction_tasks (
-      id SERIAL PRIMARY KEY,
-      correction_id INTEGER NOT NULL REFERENCES writing_corrections(id) ON DELETE CASCADE,
-      simulation_id INTEGER NOT NULL REFERENCES simulations(id) ON DELETE CASCADE,
-      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      task_index INTEGER NOT NULL,
-      task_id TEXT,
-      title TEXT,
-      instructions TEXT,
-      subtitles JSONB NOT NULL DEFAULT '[]'::jsonb,
-      exam_type TEXT,
-      module_type TEXT,
-      duration_minutes INTEGER,
-      task_weight NUMERIC(8,2),
-      response_text TEXT,
-      validation_status TEXT NOT NULL DEFAULT 'valid',
-      is_on_topic BOOLEAN NOT NULL DEFAULT TRUE,
-      is_meaningful BOOLEAN NOT NULL DEFAULT TRUE,
-      should_show_improvement BOOLEAN NOT NULL DEFAULT FALSE,
-      main_message TEXT,
-      sentence_corrections JSONB NOT NULL DEFAULT '[]'::jsonb,
-      improved_version TEXT,
-      next_steps JSONB NOT NULL DEFAULT '[]'::jsonb,
-      score_percentage NUMERIC(8,2) NOT NULL DEFAULT 0,
-      score NUMERIC(8,2) NOT NULL DEFAULT 0,
-      max_score NUMERIC(8,2) NOT NULL DEFAULT 0,
-      criterion_scores JSONB NOT NULL DEFAULT '{}'::jsonb,
-      strengths JSONB NOT NULL DEFAULT '[]'::jsonb,
-      weaknesses JSONB NOT NULL DEFAULT '[]'::jsonb,
-      feedback TEXT,
-      estimated_level TEXT,
-      model TEXT,
-      request_hash TEXT,
-      corrected_at TIMESTAMPTZ,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      UNIQUE (simulation_id, task_index)
-    );
-  `);
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS writing_correction_tasks_correction_idx
-      ON writing_correction_tasks(correction_id, task_index);
-  `);
-  await pool.query(`ALTER TABLE writing_correction_tasks ADD COLUMN IF NOT EXISTS validation_status TEXT NOT NULL DEFAULT 'valid';`);
-  await pool.query(`ALTER TABLE writing_correction_tasks ADD COLUMN IF NOT EXISTS is_on_topic BOOLEAN NOT NULL DEFAULT TRUE;`);
-  await pool.query(`ALTER TABLE writing_correction_tasks ADD COLUMN IF NOT EXISTS is_meaningful BOOLEAN NOT NULL DEFAULT TRUE;`);
-  await pool.query(`ALTER TABLE writing_correction_tasks ADD COLUMN IF NOT EXISTS should_show_improvement BOOLEAN NOT NULL DEFAULT FALSE;`);
-  await pool.query(`ALTER TABLE writing_correction_tasks ADD COLUMN IF NOT EXISTS main_message TEXT;`);
-  await pool.query(`ALTER TABLE writing_correction_tasks ADD COLUMN IF NOT EXISTS sentence_corrections JSONB NOT NULL DEFAULT '[]'::jsonb;`);
-  await pool.query(`ALTER TABLE writing_correction_tasks ADD COLUMN IF NOT EXISTS improved_version TEXT;`);
-  await pool.query(`ALTER TABLE writing_correction_tasks ADD COLUMN IF NOT EXISTS next_steps JSONB NOT NULL DEFAULT '[]'::jsonb;`);
-  await pool.query(`ALTER TABLE writing_correction_tasks ADD COLUMN IF NOT EXISTS score_percentage NUMERIC(8,2) NOT NULL DEFAULT 0;`);
-  await pool.query(`ALTER TABLE writing_correction_tasks ENABLE ROW LEVEL SECURITY;`);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS ai_correction_logs (
-      id SERIAL PRIMARY KEY,
-      correction_id INTEGER REFERENCES writing_corrections(id) ON DELETE SET NULL,
-      simulation_id INTEGER REFERENCES simulations(id) ON DELETE CASCADE,
-      user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-      task_index INTEGER,
-      provider TEXT NOT NULL DEFAULT 'gemini',
-      model TEXT,
-      request_hash TEXT,
-      status TEXT NOT NULL DEFAULT 'started',
-      attempt_count INTEGER NOT NULL DEFAULT 0,
-      error_message TEXT,
-      request_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-      response_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      completed_at TIMESTAMPTZ
-    );
-  `);
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS ai_correction_logs_simulation_created_idx
-      ON ai_correction_logs(simulation_id, created_at DESC);
-  `);
-  await pool.query(`ALTER TABLE ai_correction_logs ENABLE ROW LEVEL SECURITY;`);
-};
+const ensureWritingCorrectionSchema = async (pool) =>
+  ensureSchemaReady(pool, "writing correction");
 
 const toTaskPayload = (row) => ({
   id: row.id,
