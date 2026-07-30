@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const { ensureSchemaReady } = require("./schemaReadiness");
 
 const DEFAULT_TRANSCRIBE_MODEL = process.env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe";
 const DEFAULT_EVAL_MODEL = process.env.OPENAI_EVAL_MODEL || "gpt-4.1-mini";
@@ -210,76 +211,7 @@ const evaluateSpeakingAttempt = async ({ simulation, tasks, transcripts, rawMax 
 };
 
 async function ensureSpeakingCorrectionSchema(pool) {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS speaking_provider_profiles (
-      id SERIAL PRIMARY KEY,
-      profile_key TEXT UNIQUE NOT NULL,
-      provider TEXT NOT NULL,
-      level TEXT NOT NULL,
-      version TEXT NOT NULL,
-      profile JSONB NOT NULL DEFAULT '{}'::jsonb,
-      is_active BOOLEAN NOT NULL DEFAULT TRUE,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-  `);
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS speaking_content_packs (
-      id SERIAL PRIMARY KEY,
-      pack_key TEXT UNIQUE NOT NULL,
-      provider TEXT NOT NULL,
-      level TEXT NOT NULL,
-      package_version TEXT NOT NULL,
-      manifest JSONB NOT NULL DEFAULT '{}'::jsonb,
-      imported_exam_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
-      import_report JSONB NOT NULL DEFAULT '{}'::jsonb,
-      status TEXT NOT NULL DEFAULT 'draft',
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-  `);
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS speaking_recordings (
-      id SERIAL PRIMARY KEY,
-      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-      simulation_id INTEGER REFERENCES simulations(id) ON DELETE SET NULL,
-      source_exam_id INTEGER REFERENCES exams(id) ON DELETE SET NULL,
-      source_question_id INTEGER REFERENCES exam_questions(id) ON DELETE SET NULL,
-      task_id TEXT,
-      mime_type TEXT NOT NULL,
-      byte_size INTEGER NOT NULL DEFAULT 0,
-      duration_seconds INTEGER,
-      audio_sha256 TEXT NOT NULL,
-      audio_data BYTEA NOT NULL,
-      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-      status TEXT NOT NULL DEFAULT 'uploaded',
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-  `);
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS speaking_evaluations (
-      id SERIAL PRIMARY KEY,
-      simulation_id INTEGER UNIQUE REFERENCES simulations(id) ON DELETE CASCADE,
-      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-      status TEXT NOT NULL DEFAULT 'processing',
-      provider_result JSONB NOT NULL DEFAULT '{}'::jsonb,
-      diagnostics JSONB NOT NULL DEFAULT '{}'::jsonb,
-      evidence JSONB NOT NULL DEFAULT '[]'::jsonb,
-      feedback JSONB NOT NULL DEFAULT '{}'::jsonb,
-      quality JSONB NOT NULL DEFAULT '{}'::jsonb,
-      provenance JSONB NOT NULL DEFAULT '{}'::jsonb,
-      error_message TEXT,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-  `);
-  await pool.query(`CREATE INDEX IF NOT EXISTS speaking_recordings_user_created_idx ON speaking_recordings(user_id, created_at DESC);`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS speaking_recordings_question_idx ON speaking_recordings(source_question_id, user_id);`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS speaking_evaluations_user_created_idx ON speaking_evaluations(user_id, created_at DESC);`);
-  await pool.query(`ALTER TABLE speaking_provider_profiles ENABLE ROW LEVEL SECURITY;`);
-  await pool.query(`ALTER TABLE speaking_content_packs ENABLE ROW LEVEL SECURITY;`);
-  await pool.query(`ALTER TABLE speaking_recordings ENABLE ROW LEVEL SECURITY;`);
-  await pool.query(`ALTER TABLE speaking_evaluations ENABLE ROW LEVEL SECURITY;`);
+  return ensureSchemaReady(pool, "speaking correction");
 }
 
 const buildPendingEvaluation = (simulation, status, message, extra = {}) => ({

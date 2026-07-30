@@ -8,6 +8,7 @@ const mammoth = require("mammoth");
 const { parseB1StructuredLesenSeries } = require("./b1StructuredLesenParser");
 const { parseGoetheB2LesenSeries } = require("./goetheB2LesenParser");
 const { parseB2StructuredLesenSeries } = require("./b2StructuredLesenParser");
+const { ensureSchemaReady } = require("./schemaReadiness");
 
 const execFileAsync = promisify(execFile);
 
@@ -4785,156 +4786,8 @@ const analyzeExamDocument = async ({ buffer, filename, mimetype }) => {
   };
 };
 
-const ensureDocumentImportSchema = async (pool) => {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS exam_document_imports (
-      id SERIAL PRIMARY KEY,
-      document_hash TEXT UNIQUE NOT NULL,
-      filename TEXT NOT NULL,
-      mime_type TEXT,
-      size_bytes INTEGER,
-      provider TEXT,
-      exam_type TEXT,
-      level TEXT,
-      section_type TEXT,
-      total_series INTEGER NOT NULL DEFAULT 0,
-      total_sections INTEGER NOT NULL DEFAULT 0,
-      total_questions INTEGER NOT NULL DEFAULT 0,
-      extraction_method TEXT,
-      parse_status TEXT NOT NULL DEFAULT 'imported',
-      validation_warnings JSONB NOT NULL DEFAULT '[]'::jsonb,
-      raw_outline JSONB NOT NULL DEFAULT '{}'::jsonb,
-      draft_content JSONB NOT NULL DEFAULT '{}'::jsonb,
-      confidence JSONB NOT NULL DEFAULT '{}'::jsonb,
-      imported_exam_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
-      error_message TEXT,
-      created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      published_at TIMESTAMPTZ
-    );
-  `);
-  await pool.query(`ALTER TABLE exam_document_imports ADD COLUMN IF NOT EXISTS draft_content JSONB NOT NULL DEFAULT '{}'::jsonb;`);
-  await pool.query(`ALTER TABLE exam_document_imports ADD COLUMN IF NOT EXISTS confidence JSONB NOT NULL DEFAULT '{}'::jsonb;`);
-  await pool.query(`ALTER TABLE exam_document_imports ADD COLUMN IF NOT EXISTS error_message TEXT;`);
-  await pool.query(`ALTER TABLE exam_document_imports ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();`);
-  await pool.query(`ALTER TABLE exam_document_imports ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ;`);
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS exam_document_imports_created_idx
-      ON exam_document_imports(created_at DESC);
-  `);
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS exam_document_imports_status_idx
-      ON exam_document_imports(parse_status, updated_at DESC);
-  `);
-  await pool.query(`ALTER TABLE exam_document_imports ENABLE ROW LEVEL SECURITY;`);
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS exam_import_preferences (
-      id SERIAL PRIMARY KEY,
-      provider TEXT,
-      section_type TEXT,
-      preference_type TEXT NOT NULL,
-      source_key TEXT,
-      value JSONB NOT NULL DEFAULT '{}'::jsonb,
-      created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-  `);
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS exam_import_preferences_lookup_idx
-      ON exam_import_preferences(provider, section_type, preference_type, updated_at DESC);
-  `);
-  await pool.query(`ALTER TABLE exam_import_preferences ENABLE ROW LEVEL SECURITY;`);
-  await pool.query(`ALTER TABLE exams ADD COLUMN IF NOT EXISTS provider TEXT;`);
-  await pool.query(`ALTER TABLE exams ADD COLUMN IF NOT EXISTS section_type TEXT;`);
-  await pool.query(`ALTER TABLE exams ADD COLUMN IF NOT EXISTS series_number INTEGER;`);
-  await pool.query(`ALTER TABLE exams ADD COLUMN IF NOT EXISTS source_import_id INTEGER;`);
-  await pool.query(`ALTER TABLE exams ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb;`);
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS exams_source_import_idx
-      ON exams(source_import_id);
-  `);
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS exam_sections (
-      id SERIAL PRIMARY KEY,
-      exam_id INTEGER NOT NULL REFERENCES exams(id) ON DELETE CASCADE,
-      section_type TEXT NOT NULL,
-      part_number INTEGER NOT NULL DEFAULT 1,
-      title TEXT NOT NULL,
-      instructions TEXT,
-      duration_minutes INTEGER,
-      points NUMERIC(8,2),
-      scoring JSONB NOT NULL DEFAULT '{}'::jsonb,
-      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-      position INTEGER NOT NULL DEFAULT 0,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-  `);
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS exam_sections_exam_position_idx
-      ON exam_sections(exam_id, position, id);
-  `);
-  await pool.query(`ALTER TABLE exam_sections ADD COLUMN IF NOT EXISTS points NUMERIC(8,2);`);
-  await pool.query(`ALTER TABLE exam_sections ALTER COLUMN points TYPE NUMERIC(8,2) USING points::numeric;`);
-  await pool.query(`ALTER TABLE exam_sections ENABLE ROW LEVEL SECURITY;`);
-  await pool.query(`ALTER TABLE exam_questions ADD COLUMN IF NOT EXISTS section_id INTEGER REFERENCES exam_sections(id) ON DELETE SET NULL;`);
-  await pool.query(`ALTER TABLE exam_questions ADD COLUMN IF NOT EXISTS question_type TEXT;`);
-  await pool.query(`ALTER TABLE exam_questions ADD COLUMN IF NOT EXISTS transcript TEXT;`);
-  await pool.query(`ALTER TABLE exam_questions ADD COLUMN IF NOT EXISTS audio JSONB NOT NULL DEFAULT '{}'::jsonb;`);
-  await pool.query(`ALTER TABLE exam_questions ADD COLUMN IF NOT EXISTS scoring JSONB NOT NULL DEFAULT '{}'::jsonb;`);
-  await pool.query(`ALTER TABLE exam_questions ADD COLUMN IF NOT EXISTS source_metadata JSONB NOT NULL DEFAULT '{}'::jsonb;`);
-  await pool.query(`ALTER TABLE exam_sections ADD COLUMN IF NOT EXISTS global_duration_minutes INTEGER;`);
-  await pool.query(`ALTER TABLE exam_sections ADD COLUMN IF NOT EXISTS listening_count INTEGER;`);
-  await pool.query(`ALTER TABLE exam_sections ADD COLUMN IF NOT EXISTS audio_generation_status TEXT NOT NULL DEFAULT 'draft';`);
-  await pool.query(`ALTER TABLE exam_sections ADD COLUMN IF NOT EXISTS source_metadata JSONB NOT NULL DEFAULT '{}'::jsonb;`);
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS exam_listening_audio_items (
-      id SERIAL PRIMARY KEY,
-      exam_id INTEGER NOT NULL REFERENCES exams(id) ON DELETE CASCADE,
-      section_id INTEGER REFERENCES exam_sections(id) ON DELETE CASCADE,
-      source_import_id INTEGER REFERENCES exam_document_imports(id) ON DELETE SET NULL,
-      provider TEXT NOT NULL,
-      level TEXT,
-      series_number INTEGER,
-      part_number INTEGER NOT NULL DEFAULT 1,
-      item_number INTEGER NOT NULL DEFAULT 1,
-      title TEXT NOT NULL,
-      instructions TEXT,
-      admin_transcript TEXT,
-      audio_engine_settings JSONB NOT NULL DEFAULT '{}'::jsonb,
-      listening_count INTEGER,
-      duration_seconds NUMERIC(10,2),
-      generated_audio_url TEXT,
-      generated_audio_asset_id INTEGER,
-      audio_generation_status TEXT NOT NULL DEFAULT 'draft'
-        CHECK (audio_generation_status IN ('draft', 'queued', 'generating', 'generated', 'approved', 'published', 'failed')),
-      validation_warnings JSONB NOT NULL DEFAULT '[]'::jsonb,
-      source_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-      position INTEGER NOT NULL DEFAULT 0,
-      created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-  `);
-  await pool.query(`ALTER TABLE exam_listening_audio_items ADD COLUMN IF NOT EXISTS source_import_id INTEGER REFERENCES exam_document_imports(id) ON DELETE SET NULL;`);
-  await pool.query(`ALTER TABLE exam_listening_audio_items ADD COLUMN IF NOT EXISTS generated_audio_asset_id INTEGER;`);
-  await pool.query(`ALTER TABLE exam_listening_audio_items ADD COLUMN IF NOT EXISTS validation_warnings JSONB NOT NULL DEFAULT '[]'::jsonb;`);
-  await pool.query(`ALTER TABLE exam_listening_audio_items ENABLE ROW LEVEL SECURITY;`);
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS exam_listening_audio_items_lookup_idx
-      ON exam_listening_audio_items(exam_id, part_number, position, item_number);
-  `);
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS exam_listening_audio_items_status_idx
-      ON exam_listening_audio_items(audio_generation_status, updated_at DESC);
-  `);
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS exam_listening_audio_items_import_idx
-      ON exam_listening_audio_items(source_import_id);
-  `);
-};
+const ensureDocumentImportSchema = async (pool) =>
+  ensureSchemaReady(pool, "document import");
 
 const summarizeOutline = (parsed = {}) => ({
   title: parsed.metadata?.title || parsed.filename || "Imported document",

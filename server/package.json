@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node --test tests/schemaReadiness.test.js && node scripts/checkNoRuntimeDdl.js",
+    "check:runtime-ddl": "node scripts/checkNoRuntimeDdl.js",
     "dev": "nodemon server.js",
     "start": "node server.js",
     "repair:goethe-b1-hoeren": "node scripts/repairGoetheB1HoerenQuestions.js",
