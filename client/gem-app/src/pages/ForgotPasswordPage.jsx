@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import API from "../services/api";
 import logo from "../assets/images/logo.png";
 import "./LoginPage.css";
+import AppLoader from "../components/AppLoader";
 import BackButton from "../components/BackButton";
 
 export default function ForgotPasswordPage() {
@@ -76,7 +77,7 @@ export default function ForgotPasswordPage() {
               />
             </div>
             <button type="submit" className="btn-submit" disabled={status === "loading"}>
-              {status === "loading" ? <div className="spinner" /> : "Envoyer le lien"}
+              {status === "loading" ? <AppLoader fullScreen={false} size="small" text="Envoi en cours..." showText={false} /> : "Envoyer le lien"}
             </button>
           </form>
         </div>

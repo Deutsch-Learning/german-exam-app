@@ -9,14 +9,7 @@ import { getExamSimulation } from "../data/testSeries";
 import { fetchImportedSeries, hasPlayableImportedSeries } from "../services/importedExams";
 import { canOpenSeries, isVisitorSeriesAttempt } from "../utils/access";
 import { useSimulationLanguage } from "../utils/simulationLanguage";
-
-const LoadingDots = () => (
-  <span className="simple-loading-dots" aria-label="Serien werden geladen">
-    <span />
-    <span />
-    <span />
-  </span>
-);
+import AppLoader from "../components/AppLoader";
 
 export default function SeriesSelectionPage() {
   useSimulationLanguage();
@@ -72,7 +65,7 @@ export default function SeriesSelectionPage() {
         <header className="simple-hero compact">
           <p className="simple-eyebrow">Serienauswahl</p>
           <h1>{exam.name}-Serien</h1>
-          <p>{loadingImported ? <LoadingDots /> : "Waehlen Sie eine Serie, um fortzufahren."}</p>
+          <p>{loadingImported ? <AppLoader fullScreen={false} size="small" text="Serien werden geladen..." /> : "Waehlen Sie eine Serie, um fortzufahren."}</p>
         </header>
 
         {loadError ? (
@@ -87,7 +80,7 @@ export default function SeriesSelectionPage() {
         {!loadError ? <section className="series-minimal-grid" aria-label={`${exam.name}-Serien`}>
           {loadingImported ? Array.from({ length: 6 }).map((_, index) => (
             <span className="series-box series-box-skeleton" key={index}>
-              <LoadingDots />
+              <AppLoader fullScreen={false} size="small" text="Serien werden geladen..." showText={false} />
             </span>
           )) : series.map((item) => {
             const canOpen = canOpenSeries(item);

@@ -6,6 +6,7 @@ import RegisterPage from "./pages/Register";
 import { LanguageProvider } from "./context/LanguageContext";
 import { AdminRoute, ProtectedRoute, PublicOnlyRoute } from "./components/RouteGuards";
 import MotionShell from "./components/motion/MotionShell";
+import AppLoader from "./components/AppLoader";
 import API from "./services/api";
 import {
   clearAuthSession,
@@ -49,21 +50,7 @@ const ResetPasswordPage = lazy(() => import("./pages/ResetPasswordPage"));
 const AdminPanel = lazy(() => import("./pages/AdminPanel"));
 const AudioDiagnosticsPage = lazy(() => import("./pages/AudioDiagnosticsPage"));
 
-const RouteFallback = () => (
-  <div
-    style={{
-      minHeight: "100vh",
-      display: "grid",
-      placeItems: "center",
-      background: "#fffdf4",
-      color: "#111827",
-      fontFamily: "Inter, system-ui, sans-serif",
-      fontWeight: 800,
-    }}
-  >
-    Chargement...
-  </div>
-);
+const RouteFallback = () => <AppLoader fullScreen size="medium" />;
 
 function AppRoutes() {
   const location = useLocation();
@@ -140,7 +127,7 @@ function AppRoutes() {
   }, []);
 
   if (!authReady) {
-    return <div style={{ minHeight: "100vh", background: "#fff" }} aria-label="Loading session" />;
+    return <AppLoader fullScreen size="medium" />;
   }
 
   return (

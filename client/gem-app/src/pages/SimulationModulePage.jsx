@@ -57,24 +57,21 @@ import ComingSoonPage from "./ComingSoonPage";
 import { getModuleCountLabel, isTopicModule } from "../utils/moduleLabels";
 import { hasRichTextMarkup, richTextToPlainText, sanitizeRichTextHtml } from "../utils/richText";
 import { stripQuestionMaterial } from "../utils/examText";
+import AppLoader from "../components/AppLoader";
+import {
+  getExamSectionDurationMinutes,
+  harmonizeModuleDuration,
+} from "../utils/examDurations";
 
 const LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"];
 const PASS_SCORE = 70;
 const MOBILE_AUDIO_UNSUPPORTED_MESSAGE =
   "Fuer diese Hoeren-Aufgabe ist noch keine freigegebene Audiodatei verfuegbar. Bitte versuchen Sie es spaeter erneut.";
 const PART_TRANSITION_SECONDS = 10;
-const GLOBAL_TEST_DURATION_MINUTES = 60;
-const GLOBAL_TEST_DURATION_SECONDS = GLOBAL_TEST_DURATION_MINUTES * 60;
-const WRITING_GLOBAL_DURATION_MINUTES = GLOBAL_TEST_DURATION_MINUTES;
-const ECL_B1_GLOBAL_DURATION_MINUTES = 35;
 const NAVIGATION_DRAWER_MEDIA_QUERY = "(max-width: 1119px)";
 
-const ImportedLoadingDots = ({ label = "Importierte Aufgaben werden geladen" }) => (
-  <span className={styles.importedLoadingDots} role="status" aria-label={label}>
-    <span />
-    <span />
-    <span />
-  </span>
+const ImportedLoader = ({ label = "Importierte Aufgaben werden geladen" }) => (
+  <AppLoader fullScreen={false} size="small" text={label} showText={false} />
 );
 
 const cleanTeilTitle = (value = "") =>
@@ -1134,7 +1131,7 @@ const MODULES = {
     accent: "#c62828",
     soft: "#fff1f1",
     Icon: BookOpen,
-    simulationSeconds: 60 * 60,
+    simulationSeconds: getExamSectionDurationMinutes({ examId: "goethe-b2", moduleId: "read" }) * 60,
     tasks: readingTasks,
     passage: germanReadingPassage ?? readingPassage,
     focus: ["Repérage d'informations", "Vrai/Faux", "Titres à associer", "Vocabulaire en contexte"],
@@ -1153,7 +1150,7 @@ const MODULES = {
     accent: "#2563eb",
     soft: "#eff6ff",
     Icon: Headphones,
-    simulationSeconds: 60 * 60,
+    simulationSeconds: getExamSectionDurationMinutes({ examId: "goethe-b2", moduleId: "listen" }) * 60,
     tasks: listeningTasks,
     audio: {
       title: "Annonce en gare",
@@ -1181,8 +1178,8 @@ const MODULES = {
     accent: "#7c3aed",
     soft: "#f5f3ff",
     Icon: PencilLine,
-    simulationSeconds: 60 * 60,
-    globalDurationMinutes: WRITING_GLOBAL_DURATION_MINUTES,
+    simulationSeconds: getExamSectionDurationMinutes({ examId: "goethe-b2", moduleId: "write" }) * 60,
+    globalDurationMinutes: getExamSectionDurationMinutes({ examId: "goethe-b2", moduleId: "write" }),
     tasks: withMinimumWritingWords(withGermanPrompts(writingTasks, germanWritingPrompts)),
     focus: ["Plan clair", "Registre adapté", "Connecteurs", "Correction grammaticale"],
     advancement: [
@@ -1200,7 +1197,7 @@ const MODULES = {
     accent: "#059669",
     soft: "#ecfdf5",
     Icon: Mic,
-    simulationSeconds: 60 * 60,
+    simulationSeconds: getExamSectionDurationMinutes({ examId: "goethe-b2", moduleId: "speak" }) * 60,
     tasks: withGermanPrompts(speakingTasks, germanSpeakingPrompts),
     focus: ["Aussprache", "Fluidité", "Interaktion", "Organisation des idées"],
     advancement: [
@@ -1218,7 +1215,7 @@ const MODULES = {
     accent: "#b91c1c",
     soft: "#fff1f1",
     Icon: BookOpen,
-    simulationSeconds: 30 * 60,
+    simulationSeconds: getExamSectionDurationMinutes({ examId: "telc-b1", moduleId: "sprach" }) * 60,
     tasks: [],
     passage: { title: "Sprachbausteine", intro: "", paragraphs: [] },
     focus: ["Lueckentext", "Grammatik", "Wortschatz", "Antwortkasten"],
@@ -2142,10 +2139,16 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   const blockedModuleAccess = Boolean(selectedSeries && !canOpenSeriesModule(selectedSeries, baseModule.id));
   const blockedVisitorRefresh = visitorSeriesAttempt && !visitorAccessAllowed;
   const waitingForImportedSeries = Boolean(params.seriesId && !selectedSeries && importedModuleState.loading);
-  const module = useMemo(
-    () => buildSeriesModule(baseModule, selectedSeriesContent, selectedSeries),
-    [baseModule, selectedSeriesContent, selectedSeries]
-  );
+  const module = useMemo(() => {
+    const builtModule = buildSeriesModule(baseModule, selectedSeriesContent, selectedSeries);
+    const configuredDuration = getExamSectionDurationMinutes({
+      examId: selectedSeries?.examId || "goethe-b2",
+      level: selectedSeries?.level,
+      moduleId: builtModule.id,
+      fallback: builtModule.globalDurationMinutes || builtModule.durationMinutes || 60,
+    });
+    return harmonizeModuleDuration(builtModule, configuredDuration);
+  }, [baseModule, selectedSeriesContent, selectedSeries]);
   const shouldPersistProgress =
     !module.unavailable && !blockedSeriesAccess && !blockedModuleAccess && !blockedVisitorRefresh && !waitingForImportedSeries;
   const ModuleIcon = module.Icon;
@@ -2155,13 +2158,8 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     ? `${selectedSeries.examId}-${selectedSeries.id}-${module.id}`
     : module.id;
   const progressKey = getProgressKey(progressScopeId);
-  const isEclB1Test = selectedSeries?.examId === "ecl-b1";
-  const totalExamDurationMinutes = isEclB1Test
-    ? ECL_B1_GLOBAL_DURATION_MINUTES
-    : GLOBAL_TEST_DURATION_MINUTES;
-  const totalExamDuration = isEclB1Test
-    ? ECL_B1_GLOBAL_DURATION_MINUTES * 60
-    : GLOBAL_TEST_DURATION_SECONDS;
+  const totalExamDurationMinutes = Number(module.globalDurationMinutes) || 60;
+  const totalExamDuration = totalExamDurationMinutes * 60;
   const seriesRoute = selectedSeries
     ? `/simulations/${selectedSeries.examId}/${selectedSeries.id}`
     : "/simulations";
@@ -2580,8 +2578,16 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     const savedStartedAt = stored?.timerStartedAt ? new Date(stored.timerStartedAt).getTime() : Number.NaN;
     const hasPersistedDeadline =
       !stored?.completed && Number.isFinite(savedDeadlineAt) && Number.isFinite(savedStartedAt);
+    const inferredSavedDurationMinutes = hasPersistedDeadline
+      ? Math.round((savedDeadlineAt - savedStartedAt) / 60000)
+      : null;
+    const savedDurationMinutes = Number(stored?.totalExamDurationMinutes) || inferredSavedDurationMinutes;
+    const durationConfigurationChanged =
+      Number.isFinite(savedDurationMinutes) && savedDurationMinutes !== totalExamDurationMinutes;
     const restoredDeadlineAt = hasPersistedDeadline
-      ? Math.min(savedDeadlineAt, savedStartedAt + totalExamDuration * 1000)
+      ? durationConfigurationChanged
+        ? savedStartedAt + totalExamDuration * 1000
+        : Math.min(savedDeadlineAt, savedStartedAt + totalExamDuration * 1000)
       : null;
     const restoredTimerSeconds = hasPersistedDeadline
       ? Math.max(0, Math.ceil((restoredDeadlineAt - Date.now()) / 1000))
@@ -2620,7 +2626,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
     setSpeakingCorrectionError("");
     setSaveStatus(stored?.savedAt ? `Dernière sauvegarde ${formatClock(new Date(stored.savedAt))}` : "Sauvegarde locale prête");
     setRestoredKey(progressKey);
-  }, [armExamTimer, examParts, module, progressKey, shouldPersistProgress, totalExamDuration, totalTasks]);
+  }, [armExamTimer, examParts, module, progressKey, shouldPersistProgress, totalExamDuration, totalExamDurationMinutes, totalTasks]);
 
   useEffect(() => {
     if (completed) return undefined;
@@ -2856,6 +2862,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       flagged,
       notes,
       elapsedSeconds,
+      totalExamDurationMinutes,
       timerSeconds,
       timerStartedAt: timerStartedAtRef.current
         ? new Date(timerStartedAtRef.current).toISOString()
@@ -2898,6 +2905,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       simulationMode,
       skipped,
       timerSeconds,
+      totalExamDurationMinutes,
       totalTasks,
       writingVersions,
     ]
@@ -3788,12 +3796,12 @@ export default function SimulationModulePage({ moduleIdOverride }) {
           <p className={styles.sectionLabel}>Teil {currentPart?.number ?? currentPartIndex + 1}</p>
           <h2>{currentPart?.displayTitle ?? "Einleitung zum Teil"}</h2>
           <p className={styles.examTextIntroInstruction}>
-            Lesen Sie die Anweisungen aufmerksam. Die globale Zeit laeuft fuer den gesamten Test und wird zwischen den Teilen nicht neu gestartet.
+            Lesen Sie die Anweisungen aufmerksam. Die globale Zeit von {totalExamDurationMinutes} Minuten laeuft fuer das gesamte Modul und wird zwischen den Teilen nicht neu gestartet.
           </p>
         </div>
         <div className={styles.partMetaStack}>
           <span><ClipboardCheck size={16} /> {currentPartQuestionTotal} {currentPartQuestionTotal === 1 ? moduleItemSingular : moduleItemPlural}</span>
-          <span><Clock3 size={16} /> Gesamtzeit {formatExamTime(totalExamDuration)}</span>
+          <span><Clock3 size={16} /> Gesamtzeit {totalExamDurationMinutes} Minuten</span>
           {currentPart?.points ? <span><ShieldCheck size={16} /> {currentPart.points} pts</span> : null}
         </div>
       </div>
@@ -5644,7 +5652,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
         <section className={styles.aiCorrectionPanel} data-status="processing">
           <div className={styles.aiCorrectionHeader}>
             <span><WandSparkles size={18} /> KI-Korrektur</span>
-            <strong><ImportedLoadingDots label="KI-Korrektur laeuft" /></strong>
+            <strong><ImportedLoader label="KI-Korrektur laeuft" /></strong>
           </div>
           <p className={styles.aiCorrectionMessage}>Analyse der Aufgaben und Ihrer Antworten. Der Endscore erscheint, sobald die Korrektur abgeschlossen ist.</p>
           <div className={styles.aiProgressSteps} aria-hidden="true">
@@ -5891,7 +5899,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
         <section className={styles.aiCorrectionPanel} data-status="processing">
           <div className={styles.aiCorrectionHeader}>
             <span><WandSparkles size={18} /> KI-Korrektur Sprechen</span>
-            <strong><ImportedLoadingDots label="Sprechkorrektur laeuft" /></strong>
+            <strong><ImportedLoader label="Sprechkorrektur laeuft" /></strong>
           </div>
           <p className={styles.aiCorrectionMessage}>
             Analyse der Aufnahmen und Aufgaben. Der angezeigte Score bleibt eine Uebungseinschaetzung, keine offizielle Note.
@@ -6103,7 +6111,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
       const scoreHeading = displayedScore === null
         ? correctionFailed || speakingCorrectionBlocked
           ? isSpeakingResult ? "KI-Sprechkorrektur" : "KI-Korrektur"
-          : <ImportedLoadingDots label="KI-Korrektur laeuft" />
+          : <ImportedLoader label="KI-Korrektur laeuft" />
         : `${displayedScore}%`;
       const germanResultMessage = isWritingResult
         ? correctionScoreReady
@@ -6225,16 +6233,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
   };
 
   if (waitingForImportedSeries) {
-    return (
-      <div className={styles.page} style={{ "--module-accent": module.accent, "--module-soft": module.soft }}>
-        <section className={styles.resultPanel}>
-          <p className={styles.sectionLabel}>Serie</p>
-          <h2>
-            <ImportedLoadingDots />
-          </h2>
-        </section>
-      </div>
-    );
+    return <AppLoader fullScreen size="medium" text="Importierte Aufgaben werden geladen..." />;
   }
   if (!params.seriesId && !importedModuleState.loading) {
     return <ComingSoonPage title="Dieser Uebungsablauf ist noch nicht verfuegbar" />;
@@ -6368,7 +6367,7 @@ export default function SimulationModulePage({ moduleIdOverride }) {
             </span>
             <span className={styles.moduleBadge}>
               <Clock3 size={16} />
-              {simulationMode ? "Pruefungsmodus" : t.modulePage.freeTraining}
+              {simulationMode ? `${totalExamDurationMinutes} Minuten Gesamtzeit` : t.modulePage.freeTraining}
             </span>
             {simulationMode ? (
               <span className={styles.moduleBadge}>

@@ -3,6 +3,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import API from "../services/api";
 import logo from "../assets/images/logo.png";
 import "./LoginPage.css";
+import AppLoader from "../components/AppLoader";
 import BackButton from "../components/BackButton";
 
 export default function ResetPasswordPage() {
@@ -103,7 +104,7 @@ export default function ResetPasswordPage() {
                 />
               </div>
               <button type="submit" className="btn-submit" disabled={status === "loading"}>
-                {status === "loading" ? <div className="spinner" /> : "Mettre à jour"}
+                {status === "loading" ? <AppLoader fullScreen={false} size="small" text="Mise à jour..." showText={false} /> : "Mettre à jour"}
               </button>
             </form>
           )}

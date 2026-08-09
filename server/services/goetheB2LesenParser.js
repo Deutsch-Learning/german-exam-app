@@ -1,3 +1,5 @@
+const { getExamSectionDurationMinutes } = require("../config/examDurations");
+
 const normalizeLineBreaks = (value = "") =>
   String(value || "")
     .replace(/\r/g, "")
@@ -351,6 +353,7 @@ const parseGoetheB2LesenSection = (partBlock, seriesNumber) => {
 };
 
 const parseGoetheB2LesenSeries = (text, metadata = {}) => {
+  const globalDurationMinutes = getExamSectionDurationMinutes({ examId: "goethe-b2", moduleId: "read" });
   const clean = normalizeLineBreaks(text);
   if (!/DOCUMENT_USAGE_CONTRACT/.test(clean) || !/IMPORT SCHEMA REFERENCE/.test(clean)) return [];
   const examMatches = getLineMatches(clean, /(?:^|\n)PR(?:\u00dc|UE)FUNG\s+0?(\d{1,2})\s*[-\u2013\u2014]\s*([^\n]+)/giu);
@@ -368,10 +371,10 @@ const parseGoetheB2LesenSeries = (text, metadata = {}) => {
       title,
       examCode,
       sourceLabel: `Goethe B2 Lesen ${String(seriesNumber).padStart(2, "0")}`,
-      instructions: "Goethe-Zertifikat B2 Lesen: fuenf Teile, 65 Minuten, 30 Messpunkte.",
+      instructions: `Goethe-Zertifikat B2 Lesen: fuenf Teile, ${globalDurationMinutes} Minuten, 30 Messpunkte.`,
       scoring: {
         totalPoints: 30,
-        globalDurationMinutes: 65,
+        globalDurationMinutes,
         parts: { 1: 9, 2: 6, 3: 6, 4: 6, 5: 3 },
       },
       metadata: {
@@ -379,7 +382,7 @@ const parseGoetheB2LesenSeries = (text, metadata = {}) => {
         goetheB2Lesen: true,
         examCode,
         sourceWarning: warning,
-        globalDurationMinutes: 65,
+        globalDurationMinutes,
       },
       sections,
     };

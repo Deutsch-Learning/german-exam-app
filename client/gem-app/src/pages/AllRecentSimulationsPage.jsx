@@ -4,6 +4,7 @@ import BackButton from "../components/BackButton";
 import logo from "../assets/images/logo.png";
 import API from "../services/api";
 import styles from "./DashboardPage.module.css";
+import AppLoader from "../components/AppLoader";
 
 const formatDateTimeFr = (iso) => {
   try {
@@ -74,7 +75,7 @@ export default function AllRecentSimulationsPage() {
 
         {loading ? (
           <section className={styles.card}>
-            <h2 className={styles.cardTitle}>Loading...</h2>
+            <AppLoader fullScreen={false} size="medium" text="Loading simulations..." />
           </section>
         ) : simulations.length ? (
           <div className={styles.historyGrid}>

@@ -607,15 +607,6 @@
   animation: pricingButtonVerify 1s ease-in-out infinite;
 }
 
-.pricing-button-spinner {
-  width: 18px;
-  height: 18px;
-  border: 2px solid rgba(255, 255, 255, 0.45);
-  border-top-color: #ffffff;
-  border-radius: 999px;
-  animation: pricingSpin 0.78s linear infinite;
-}
-
 .pricing-certification-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1155,10 +1146,6 @@
     opacity: 1;
     transform: translateY(0) scale(1);
   }
-}
-
-@keyframes pricingSpin {
-  to { transform: rotate(360deg); }
 }
 
 @keyframes pricingPulse {

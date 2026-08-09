@@ -1,5 +1,6 @@
 const eclB2ReadingBanks = require("../data/eclB2ReadingBanks.json");
 const osdB2MissingLetterAnswers = require("../data/osdB2ReadingMissingLetterAnswers.json");
+const { getExamSectionDurationMinutes } = require("../config/examDurations");
 
 const normalizeLineBreaks = (value = "") =>
   String(value || "")
@@ -207,6 +208,7 @@ const parseEclPartTwoQuestions = (studentContent) => {
 };
 
 const parseEclSeries = (text, metadata) => {
+  const globalDurationMinutes = getExamSectionDurationMinutes({ examId: "ecl-b2", moduleId: "read" });
   const matches = getMatches(text, /(?:^|\n)SUJET\s+(\d{2})\s+-\s+([^\n]+)/gi);
   return makeSlices(text, matches).map((seriesBlock) => {
     const seriesNumber = Number(seriesBlock.match[1]);
@@ -302,11 +304,11 @@ const parseEclSeries = (text, metadata) => {
       seriesNumber,
       title,
       sourceLabel: `ECL B2 Lesen ${String(seriesNumber).padStart(2, "0")}`,
-      instructions: "ECL B2 Leseverstehen: zwei Teile, 45 Minuten, 25 Punkte.",
-      scoring: { totalPoints: 25, globalDurationMinutes: 45, parts: { 1: 12.5, 2: 12.5 } },
+      instructions: `ECL B2 Leseverstehen: zwei Teile, ${globalDurationMinutes} Minuten, 25 Punkte.`,
+      scoring: { totalPoints: 25, globalDurationMinutes, parts: { 1: 12.5, 2: 12.5 } },
       metadata: {
         ...metadata,
-        globalDurationMinutes: 45,
+        globalDurationMinutes,
         structuredB2Lesen: true,
         replacePublishedScope: true,
       },
@@ -389,6 +391,7 @@ const parseTelcPartThree = (studentContent) => {
 };
 
 const parseTelcSeries = (text, metadata) => {
+  const globalDurationMinutes = getExamSectionDurationMinutes({ examId: "telc-b2", moduleId: "read" });
   const matches = getMatches(text, /(?:^|\n)(?:ÜBUNGSHEFT|UEBUNGSHEFT)\s+(\d{2})\s+-\s+([^\n]+)/gi);
   return makeSlices(text, matches).map((seriesBlock) => {
     const seriesNumber = Number(seriesBlock.match[1]);
@@ -447,11 +450,11 @@ const parseTelcSeries = (text, metadata) => {
       seriesNumber,
       title,
       sourceLabel: `TELC B2 Lesen ${String(seriesNumber).padStart(2, "0")}`,
-      instructions: "TELC Deutsch B2 Lesen: drei Teile in einer Sitzung.",
-      scoring: { globalDurationMinutes: 65 },
+      instructions: `TELC Deutsch B2 Lesen: drei Teile in ${globalDurationMinutes} Minuten.`,
+      scoring: { globalDurationMinutes },
       metadata: {
         ...metadata,
-        globalDurationMinutes: 65,
+        globalDurationMinutes,
         structuredB2Lesen: true,
         sourceKeyReviewRequired: true,
         sourceWarnings: [
@@ -554,6 +557,7 @@ const splitOsdGapContent = (studentContent, partNumber) => {
 };
 
 const parseOsdSeries = (text, metadata) => {
+  const globalDurationMinutes = getExamSectionDurationMinutes({ examId: "osd-b2", moduleId: "read" });
   const matches = getMatches(text, /(?:^|\n)(?:PRÜFUNG|PRUEFUNG)\s+(\d{2})\s+-\s+([^\n]+)/gi);
   return makeSlices(text, matches).map((seriesBlock) => {
     const seriesNumber = Number(seriesBlock.match[1]);
@@ -672,11 +676,11 @@ const parseOsdSeries = (text, metadata) => {
       seriesNumber,
       title,
       sourceLabel: `ÖSD B2 Lesen ${String(seriesNumber).padStart(2, "0")}`,
-      instructions: "ÖSD Zertifikat B2 Lesen: vier Aufgaben, 90 Minuten, 20 Punkte.",
-      scoring: { totalPoints: 20, globalDurationMinutes: 90, parts: { 1: 5, 2: 5, 3: 5, 4: 5 } },
+      instructions: `ÖSD Zertifikat B2 Lesen: vier Aufgaben, ${globalDurationMinutes} Minuten, 20 Punkte.`,
+      scoring: { totalPoints: 20, globalDurationMinutes, parts: { 1: 5, 2: 5, 3: 5, 4: 5 } },
       metadata: {
         ...metadata,
-        globalDurationMinutes: 90,
+        globalDurationMinutes,
         structuredB2Lesen: true,
         sourceWarnings,
         replacePublishedScope: true,

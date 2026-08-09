@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { CheckCircle2, CreditCard, Landmark, Smartphone, X } from "lucide-react";
@@ -17,6 +17,7 @@ import {
 } from "../data/pricingPlans";
 import { useLanguage } from "../context/LanguageContext";
 import { languageOptions } from "../utils/language";
+import AppLoader from "../components/AppLoader";
 
 const offersCopy = {
   fr: {
@@ -633,7 +634,8 @@ const CheckoutModalV2 = ({
               onClick={onPayMobileMoney}
             >
               <Smartphone size={18} />
-              {loading ? modalCopy.paying : `${modalCopy.pay} ${visibleQuote ? formatMobileAmount(visibleQuote.paymentAmount, visibleQuote.paymentCurrency) : ""}`}
+              {loading ? <AppLoader fullScreen={false} size="small" text={modalCopy.paying} showText={false} /> : `${modalCopy.pay} ${visibleQuote ? formatMobileAmount(visibleQuote.paymentAmount, visibleQuote.paymentCurrency) : ""}`}
+              {loading ? <span>{modalCopy.paying}</span> : null}
             </button>
             <button className="pricing-modal-secondary" type="button" disabled={loading} onClick={onBack}>{modalCopy.back}</button>
           </>
@@ -655,7 +657,7 @@ const CheckoutModalV2 = ({
             ) : (
               <>
                 <button className={`pricing-modal-button ${verifying ? "verifying" : ""}`} type="button" disabled={verifying || verifyCooldown > 0} onClick={onVerifyPayment}>
-                  {verifying ? <span className="pricing-button-spinner" aria-hidden="true" /> : null}
+                  {verifying ? <AppLoader fullScreen={false} size="small" text={verificationButtonLabel} showText={false} /> : null}
                   {verificationButtonLabel}
                 </button>
                 <p className="pricing-verify-hint">
@@ -1099,6 +1101,7 @@ export default function OffersPage() {
                         disabled={loadingPlanId === plan.id}
                       >
                         <CheckCircle2 size={15} />
+                        {loadingPlanId === plan.id ? <AppLoader fullScreen={false} size="small" text={copy.preparing} showText={false} /> : null}
                         {loadingPlanId === plan.id ? copy.preparing : copy.subscribe}
                       </button>
                     </div>

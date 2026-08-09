@@ -22,6 +22,8 @@ import {
   SimulationTopNav,
 } from "./SimulationSelectionPage";
 import { getModuleCountLabel } from "../utils/moduleLabels";
+import AppLoader from "../components/AppLoader";
+import { getExamSectionDurationMinutes } from "../utils/examDurations";
 
 const moduleAssets = {
   read: { iconNode: <OpenBookIcon /> },
@@ -70,22 +72,7 @@ export default function SeriesSimulationPage() {
   const series = remoteMatchesRoute ? remoteSeriesState.series : null;
 
   if (!series && loadingRemoteSeries) {
-    return (
-      <div className="simple-page">
-        <main className="simple-shell">
-          <section className="simple-card status-panel">
-            <p className="simple-eyebrow">Serie</p>
-            <h1>
-              <span className="simple-loading-dots" aria-label="Importierte Serie wird geladen">
-                <span />
-                <span />
-                <span />
-              </span>
-            </h1>
-          </section>
-        </main>
-      </div>
-    );
+    return <AppLoader fullScreen size="medium" text="Importierte Serie wird geladen..." />;
   }
 
   if (!series) {
@@ -167,6 +154,16 @@ export default function SeriesSimulationPage() {
     }
   };
 
+  const getModuleDurationMinutes = (moduleId, content = {}) => getExamSectionDurationMinutes({
+    examId: series.examId ?? examId,
+    level: series.level,
+    moduleId,
+    fallback:
+      Number(content.durationMinutes) ||
+      Number(content.defaultMinutes) ||
+      (Number(content.simulationSeconds) ? Math.round(Number(content.simulationSeconds) / 60) : 60),
+  }) ?? 60;
+
   const getStartDetails = (moduleId) => {
     const baseModule = simulationModules.find((module) => module.id === moduleId);
     const content = series.modules?.[moduleId] ?? baseModule ?? {};
@@ -174,10 +171,7 @@ export default function SeriesSimulationPage() {
       Number(content.questionCount) ||
       (Array.isArray(content.taskOverrides) ? content.taskOverrides.length : 0) ||
       (Array.isArray(content.tasks) ? content.tasks.length : 0);
-    const durationMinutes =
-      Number(content.durationMinutes) ||
-      Number(content.defaultMinutes) ||
-      (Number(content.simulationSeconds) ? Math.round(Number(content.simulationSeconds) / 60) : 60);
+    const durationMinutes = getModuleDurationMinutes(moduleId, content);
 
     return {
       moduleType: t.modules?.[moduleId] ?? content.label ?? baseModule?.label ?? "Modul",
@@ -231,7 +225,7 @@ export default function SeriesSimulationPage() {
                   iconPath={moduleAssets[module.id]?.iconPath}
                   iconNode={moduleAssets[module.id]?.iconNode}
                   title={t.modules?.[module.id] ?? content.label ?? module.label}
-                  time={content.durationMinutes ?? 60}
+                  time={getModuleDurationMinutes(module.id, content)}
                   questions={content.questionCount ?? 39}
                   accent={content.accent ?? module.accent ?? series.accent}
                   badge={lockedForAccess ? "Premium" : unavailable ? "Non disponible" : undefined}
