@@ -7,14 +7,7 @@ import { examSimulations } from "../data/siteContent";
 import { fetchImportedSeries, hasPlayableImportedSeries } from "../services/importedExams";
 import { canOpenSeries, isVisitorSeriesAttempt } from "../utils/access";
 import { useSimulationLanguage } from "../utils/simulationLanguage";
-
-const LoadingDots = () => (
-  <span className="simple-loading-dots" aria-label="Serien werden geprueft">
-    <span />
-    <span />
-    <span />
-  </span>
-);
+import AppLoader from "../components/AppLoader";
 
 export default function StartPreparationPage() {
   useSimulationLanguage();
@@ -74,7 +67,7 @@ export default function StartPreparationPage() {
               <div className="series-minimal-grid">
                 {!checked ? (
                   <span className="series-box locked">
-                    <LoadingDots />
+                    <AppLoader fullScreen={false} size="small" text="Serien werden geprueft..." showText={false} />
                   </span>
                 ) : !hasPlayableImportedSeries(series) ? (
                   <Link className="series-box locked" to={`/coming-soon/${exam.id}`}>

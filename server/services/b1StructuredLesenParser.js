@@ -1,4 +1,5 @@
 const { getGoetheB1AdvertisementBank } = require("../data/goetheB1LesenAdvertisements");
+const { getExamSectionDurationMinutes } = require("../config/examDurations");
 
 const PARSER_VERSION = "b1StructuredLesen.v2";
 
@@ -222,6 +223,7 @@ const parseTelcAdvertisements = (partText) => {
 };
 
 const parseTelcSeries = (text, metadata) => {
+  const globalDurationMinutes = getExamSectionDurationMinutes({ examId: "telc-b1", moduleId: "read" });
   const clean = normalizeLineBreaks(text);
   const seriesMatches = getMatches(clean, /(?:^|\n)SUJET\s+(\d{2})\s*\/\s*20\s*·\s*Thème\s*:\s*([^\n]+)/gi);
   return makeSlices(clean, seriesMatches).map((seriesBlock) => {
@@ -287,12 +289,12 @@ const parseTelcSeries = (text, metadata) => {
       seriesNumber,
       title,
       sourceLabel: `TELC B1 Lesen ${String(seriesNumber).padStart(2, "0")}`,
-      instructions: "telc Deutsch B1 Lesen: drei Leseteile in einer Sitzung.",
-      scoring: { totalPoints: 75, globalDurationMinutes: 60, parts: { 1: 25, 2: 25, 3: 25 } },
+      instructions: `telc Deutsch B1 Lesen: drei Leseteile in ${globalDurationMinutes} Minuten.`,
+      scoring: { totalPoints: 75, globalDurationMinutes, parts: { 1: 25, 2: 25, 3: 25 } },
       metadata: {
         ...metadata,
         parserVersion: PARSER_VERSION,
-        globalDurationMinutes: 60,
+        globalDurationMinutes,
         structuredB1Lesen: true,
         replacePublishedScope: true,
       },
@@ -311,6 +313,7 @@ const parseEclCorrections = (raw) => {
 };
 
 const parseEclSeries = (text, metadata) => {
+  const globalDurationMinutes = getExamSectionDurationMinutes({ examId: "ecl-b1", moduleId: "read" });
   const clean = normalizeLineBreaks(text);
   const seriesMatches = getMatches(clean, /(?:^|\n)Sujet\s+(\d{2})\s+—\s+([^\n]+)/gi);
   return makeSlices(clean, seriesMatches).map((seriesBlock) => {
@@ -363,17 +366,17 @@ const parseEclSeries = (text, metadata) => {
       seriesNumber,
       title,
       sourceLabel: `ECL B1 Leseverstehen ${String(seriesNumber).padStart(2, "0")}`,
-      instructions: "ECL B1 Leseverstehen: zwei Aufgaben in 35 Minuten.",
+      instructions: `ECL B1 Leseverstehen: zwei Aufgaben in ${globalDurationMinutes} Minuten.`,
       scoring: {
         totalPoints: 18.75,
         sourceDeclaredPoints: 25,
-        globalDurationMinutes: 35,
+        globalDurationMinutes,
         parts: { 1: 12.5, 2: 6.25 },
       },
       metadata: {
         ...metadata,
         parserVersion: PARSER_VERSION,
-        globalDurationMinutes: 35,
+        globalDurationMinutes,
         structuredB1Lesen: true,
         sourceWarnings: [
           "The source overview declares 25 points at 1.25 points per item, while each series contains 15 supplied items. The 15 items and their keys are preserved unchanged.",
@@ -587,6 +590,7 @@ const separateGoetheTitle = (text, title) => {
 };
 
 const parseGoetheSeries = (text, metadata) => {
+  const globalDurationMinutes = getExamSectionDurationMinutes({ examId: "goethe-b1", moduleId: "read" });
   const clean = normalizeLineBreaks(text);
   const seriesMatches = getMatches(clean, /(?:^|\n)PRÜFUNGSHEFT\s+(\d{2})\s*\|\s*Thema\s*:\s*([^\n]+)/gi);
   return makeSlices(clean, seriesMatches).map((seriesBlock) => {
@@ -715,15 +719,15 @@ const parseGoetheSeries = (text, metadata) => {
       seriesNumber,
       title,
       sourceLabel,
-      instructions: "Goethe-Zertifikat B1 Lesen: fünf Teile in einer 60-minütigen Prüfung.",
-      scoring: { totalPoints: 30, globalDurationMinutes: 60, parts: GOETHE_PART_POINTS },
+      instructions: `Goethe-Zertifikat B1 Lesen: fünf Teile in ${globalDurationMinutes} Minuten.`,
+      scoring: { totalPoints: 30, globalDurationMinutes, parts: GOETHE_PART_POINTS },
       metadata: {
         ...metadata,
         title,
         theme: title,
         sourceLabel,
         parserVersion: PARSER_VERSION,
-        globalDurationMinutes: 60,
+        globalDurationMinutes,
         structuredB1Lesen: true,
         replacePublishedScope: true,
       },
@@ -733,6 +737,7 @@ const parseGoetheSeries = (text, metadata) => {
 };
 
 const parseOsdSeries = (text, metadata) => {
+  const globalDurationMinutes = getExamSectionDurationMinutes({ examId: "osd-b1", moduleId: "read" });
   const clean = normalizeLineBreaks(text);
   const seriesMatches = getMatches(clean, /(?:^|\n)MODELLSATZ\s+(\d{1,2})\s+—\s+Lesen\s*\(ÖSD B1\)/gi);
   return makeSlices(clean, seriesMatches).map((seriesBlock) => {
@@ -839,12 +844,12 @@ const parseOsdSeries = (text, metadata) => {
       seriesNumber,
       title: `Modellsatz ${String(seriesNumber).padStart(2, "0")}`,
       sourceLabel: `ÖSD B1 Lesen ${String(seriesNumber).padStart(2, "0")}`,
-      instructions: "ÖSD Zertifikat B1 Lesen: fünf Teile in 65 Minuten.",
-      scoring: { totalPoints: 30, globalDurationMinutes: 65, parts: OSD_PART_POINTS },
+      instructions: `ÖSD Zertifikat B1 Lesen: fünf Teile in ${globalDurationMinutes} Minuten.`,
+      scoring: { totalPoints: 30, globalDurationMinutes, parts: OSD_PART_POINTS },
       metadata: {
         ...metadata,
         parserVersion: PARSER_VERSION,
-        globalDurationMinutes: 65,
+        globalDurationMinutes,
         structuredB1Lesen: true,
         replacePublishedScope: true,
       },

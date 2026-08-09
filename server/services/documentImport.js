@@ -9,6 +9,7 @@ const { parseB1StructuredLesenSeries } = require("./b1StructuredLesenParser");
 const { parseGoetheB2LesenSeries } = require("./goetheB2LesenParser");
 const { parseB2StructuredLesenSeries } = require("./b2StructuredLesenParser");
 const { ensureSchemaReady } = require("./schemaReadiness");
+const { getExamSectionDurationMinutes } = require("../config/examDurations");
 
 const execFileAsync = promisify(execFile);
 
@@ -789,7 +790,7 @@ const parseWritingSeries = (text, metadata) => {
       seriesNumber,
       title: `Aufgabe ${seriesNumber}`,
       sourceLabel: `Aufgabe ${seriesNumber} / ${block.match[2]}`,
-      instructions: "Goethe B1 Schreiben: drei Schreibteile in 60 Minuten.",
+      instructions: `Goethe B1 Schreiben: drei Schreibteile in ${getExamSectionDurationMinutes({ examId: "goethe-b1", moduleId: "write" })} Minuten.`,
       scoring: { totalPoints: 100, parts: { 1: 40, 2: 40, 3: 20 } },
       metadata: { ...metadata, detectedTotal: Number(block.match[2]) },
       sections: sections.length ? sections : [
@@ -798,7 +799,7 @@ const parseWritingSeries = (text, metadata) => {
           partNumber: 1,
           title: "Schreiben",
           instructions: trimForDb(block.text, 3000),
-          durationMinutes: 60,
+          durationMinutes: getExamSectionDurationMinutes({ examId: "goethe-b1", moduleId: "write" }),
           points: 100,
           scoring: { points: 100 },
           metadata: {},
@@ -1031,7 +1032,7 @@ const parseReadingSeries = (text, metadata) => {
       seriesNumber,
       title,
       sourceLabel: `Pruefungsheft ${String(seriesNumber).padStart(2, "0")}`,
-      instructions: "Goethe B1 Lesen: 5 Teile, 65 Minuten, 30 Punkte.",
+      instructions: `Goethe B1 Lesen: 5 Teile, ${getExamSectionDurationMinutes({ examId: "goethe-b1", moduleId: "read" })} Minuten, 30 Punkte.`,
       scoring: { totalPoints: 30, parts: { 1: 6, 2: 6, 3: 7, 4: 7, 5: 4 } },
       metadata: {
         ...metadata,
@@ -1043,7 +1044,7 @@ const parseReadingSeries = (text, metadata) => {
           partNumber: 1,
           title: "Lesen",
           instructions: trimForDb(block.text, 4000),
-          durationMinutes: 65,
+          durationMinutes: getExamSectionDurationMinutes({ examId: "goethe-b1", moduleId: "read" }),
           points: 30,
           scoring: { points: 30 },
           metadata: {},
@@ -1349,7 +1350,7 @@ const parseOsdWritingSeries = (text, metadata) => {
       seriesNumber,
       title,
       sourceLabel: `Sujet ${String(seriesNumber).padStart(2, "0")}`,
-      instructions: "ÖSD B1 Schreiben: drei Schreibaufgaben in 60 Minuten.",
+      instructions: `ÖSD B1 Schreiben: drei Schreibaufgaben in ${getExamSectionDurationMinutes({ examId: "osd-b1", moduleId: "write" })} Minuten.`,
       scoring: { totalPoints: 100, parts: { 1: 40, 2: 40, 3: 20 } },
       metadata: { ...metadata, osdFormat: true },
       sections,
@@ -1566,7 +1567,7 @@ const parseEclReadingSeries = (text, metadata) => {
       seriesNumber,
       title,
       sourceLabel: `Sujet ${String(seriesNumber).padStart(2, "0")}`,
-      instructions: "ECL B1 Leseverstehen: zwei Leseteile, 35 Minuten, 25 Punkte.",
+      instructions: `ECL B1 Leseverstehen: zwei Leseteile, ${getExamSectionDurationMinutes({ examId: "ecl-b1", moduleId: "read" })} Minuten, 25 Punkte.`,
       scoring: { totalPoints: 25, parts: { 1: 12.5, 2: 12.5 } },
       metadata: { ...metadata, eclFormat: true, answerKeyDetected: answers.size > 0 },
       sections,
@@ -2645,7 +2646,7 @@ const parseGoetheListeningSeries = (text, metadata) => {
       seriesNumber,
       title,
       sourceLabel: `Sujet ${String(seriesNumber).padStart(2, "0")}`,
-      instructions: "Goethe-Zertifikat B1 Hören: vier Teile, 30 Aufgaben, ca. 40 Minuten.",
+      instructions: `Goethe-Zertifikat B1 Hören: vier Teile, 30 Aufgaben, ${getExamSectionDurationMinutes({ examId: "goethe-b1", moduleId: "listen" })} Minuten.`,
       scoring: { totalPoints: 30, parts: { 1: 10, 2: 5, 3: 7, 4: 8 } },
       metadata: { ...metadata, goetheFormat: true, listening: true },
       sections,
@@ -2653,9 +2654,9 @@ const parseGoetheListeningSeries = (text, metadata) => {
   });
 };
 
-const ECL_B1_WRITING_DURATION_MINUTES = 35;
+const ECL_B1_WRITING_DURATION_MINUTES = getExamSectionDurationMinutes({ examId: "ecl-b1", moduleId: "write" });
 const ECL_B1_WRITING_INSTRUCTIONS =
-  "ECL B1 Schriftliche Kommunikation: zwei Schreibaufgaben, 35 Minuten, 25 Punkte.";
+  `ECL B1 Schriftliche Kommunikation: zwei Schreibaufgaben, ${ECL_B1_WRITING_DURATION_MINUTES} Minuten, 25 Punkte.`;
 const ECL_B1_PAGE_HEADER_PATTERN =
   /ECL\s+B1\s*[\u2010-\u2015-]\s*Schriftliche Kommunikation\s*[·•]\s*(?:20\s+Sujets\s+Originaux(?:\s+Page\s+\d+)?)?/giu;
 
@@ -3314,7 +3315,7 @@ const parseTelcReadingSeries = (text, metadata) => {
       seriesNumber,
       title,
       sourceLabel: `Sujet ${String(seriesNumber).padStart(2, "0")}`,
-      instructions: "telc Deutsch B1 Lesen: drei Leseteile, 60 Minuten, 75 Punkte.",
+      instructions: `telc Deutsch B1 Lesen: drei Leseteile, ${getExamSectionDurationMinutes({ examId: "telc-b1", moduleId: "read" })} Minuten, 75 Punkte.`,
       scoring: { totalPoints: 75, parts: { 1: 25, 2: 25, 3: 25 } },
       metadata: { ...metadata, telcFormat: true, answerKeyDetected: answers.size > 0 },
       sections,

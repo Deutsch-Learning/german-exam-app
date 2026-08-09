@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import API from "../services/api";
+import AppLoader from "./AppLoader";
 
 const GOOGLE_SCRIPT_ID = "google-identity-services";
 const GOOGLE_SCOPE = "openid email profile";
@@ -112,7 +113,7 @@ export default function GoogleAuthButton({ label = "Continue with Google", onSuc
 
   return (
     <button type="button" className="btn-social btn-google" onClick={startGoogleAuth} disabled={loading}>
-      {loading ? <span className="spinner spinner-small" aria-hidden="true" /> : <GoogleIcon />}
+      {loading ? <AppLoader fullScreen={false} size="small" text="Connecting to Google..." showText={false} /> : <GoogleIcon />}
       <span>{loading ? "Connecting to Google..." : label}</span>
     </button>
   );

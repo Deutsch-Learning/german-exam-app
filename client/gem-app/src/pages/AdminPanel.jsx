@@ -47,6 +47,7 @@ import { clearAuthSession } from "../utils/access";
 import { examSimulations } from "../data/siteContent";
 import { clearImportedExamCache, fetchImportedSeries } from "../services/importedExams";
 import SmoothedAudioPlayer from "../components/SmoothedAudioPlayer";
+import AppLoader from "../components/AppLoader";
 import { hasRichTextMarkup, richTextToPlainText, sanitizeRichTextHtml } from "../utils/richText";
 import { stripQuestionMaterial } from "../utils/examText";
 import {
@@ -91,6 +92,10 @@ const useAdminData = (loader) => {
 
   return { data, loading, error, reload: load };
 };
+
+const AdminDataLoader = ({ text = "Loading..." }) => (
+  <AppLoader fullScreen={false} size="small" text={text} />
+);
 
 const LEVEL_OPTIONS = ["A1", "A2", "B1", "B2", "C1", "C2"];
 const MODULE_OPTIONS = [
@@ -455,7 +460,7 @@ function AdminDashboard() {
     <>
       <Header title="Analytics Dashboard" subtitle="Internal overview of users, exam usage, and recent admin actions." />
       {error ? <p className={styles.error}>{error}</p> : null}
-      {loading ? <p>Loading...</p> : null}
+      {loading ? <AdminDataLoader /> : null}
       <section className={styles.statGrid}>
         {stats.map(([label, value]) => (
           <article className={styles.statCard} key={label}>
@@ -528,7 +533,7 @@ function AdminUsers() {
       <Header title="User Management" subtitle="View users, suspend or activate accounts, and grant full or partial series access." />
       {status ? <p className={styles.status}>{status}</p> : null}
       {error ? <p className={styles.error}>{error}</p> : null}
-      {loading ? <p>Loading...</p> : null}
+      {loading ? <AdminDataLoader /> : null}
       <section className={styles.panel}>
         <div className={styles.tableWrap}>
           <table className={styles.table}>
@@ -744,7 +749,7 @@ function UserAccessControl({ user, onUpdate }) {
             return (
               <div key={examId} className={styles.multiAccessGroup}>
                 <p>{exam?.name ?? examId} series</p>
-                {loadingSeries ? <span className={styles.accessHint}>Loading series...</span> : null}
+                {loadingSeries ? <AdminDataLoader text="Loading series..." /> : null}
                 {!loadingSeries && !series.length ? <span className={styles.accessHint}>No series available</span> : null}
                 {!loadingSeries && series.length ? (
                   <div className={styles.multiAccessList}>
@@ -849,7 +854,7 @@ function AdminSubscriptions() {
       <Header title="Subscription Management" subtitle="Secure manual grants, plan quotas, and payment-ready subscription history." />
       {status ? <p className={styles.status}>{status}</p> : null}
       {error ? <p className={styles.error}>{error}</p> : null}
-      {loading ? <p>Loading...</p> : null}
+      {loading ? <AdminDataLoader /> : null}
       <section className={styles.panel}>
         <div className={styles.panelHeader}>
           <div>
@@ -1028,7 +1033,7 @@ function AdminAffiliates() {
       <Header title="Partner Programme" subtitle="Affiliate attribution, commissions, fraud review, and payout processing." />
       {status ? <p className={styles.status}>{status}</p> : null}
       {error ? <p className={styles.error}>{error}</p> : null}
-      {loading ? <p>Loading...</p> : null}
+      {loading ? <AdminDataLoader /> : null}
       {!loading && data ? (
         <>
           <section className={styles.statGrid}>
@@ -1155,7 +1160,7 @@ function AdminTestimonials() {
       <Header title="Testimonial Moderation" subtitle="Review, approve, reject, or lightly edit public student comments." />
       {status ? <p className={styles.status}>{status}</p> : null}
       {error ? <p className={styles.error}>{error}</p> : null}
-      {loading ? <p>Loading...</p> : null}
+      {loading ? <AdminDataLoader /> : null}
       <section className={styles.panel}>
         <div className={styles.tableWrap}>
           <table className={styles.table}>
@@ -1195,7 +1200,7 @@ function AdminApiUsage() {
     <>
       <Header title="API Usage Monitoring" subtitle="Track API calls per user, including AI-labelled consumption units." />
       {error ? <p className={styles.error}>{error}</p> : null}
-      {loading ? <p>Loading...</p> : null}
+      {loading ? <AdminDataLoader /> : null}
       <section className={styles.statGrid}>
         <article className={styles.statCard}>
           <span>AI requests</span>
@@ -2298,7 +2303,7 @@ function AdminExams() {
                       </button>
                     </div>
                   </div>
-                  {examAudioLoading ? <p className={styles.emptyState}>Checking production audio...</p> : null}
+                  {examAudioLoading ? <AdminDataLoader text="Checking production audio..." /> : null}
                   {examAudio?.error ? <p className={styles.error}>{examAudio.error}</p> : null}
                   {providerStatusLoaded && !anyTtsProviderConfigured ? (
                     <p className={styles.warningList}>No TTS provider key is configured on the backend yet. Add ELEVENLABS_API_KEY or another provider key before generating production audio.</p>
@@ -4617,7 +4622,7 @@ function AdminExamsLegacy() {
       {status ? <p className={styles.status}>{status}</p> : null}
       {error ? <p className={styles.error}>{error}</p> : null}
       {documentError ? <p className={styles.error}>{documentError}</p> : null}
-      {loading ? <p>Loading...</p> : null}
+      {loading ? <AdminDataLoader /> : null}
       <section className={styles.panel}>
         <div className={styles.panelHeader}>
           <div>

@@ -3,6 +3,7 @@ import { Link, useLocation, useParams, useSearchParams } from "react-router-dom"
 import API from "../services/api";
 import logo from "../assets/images/logo.png";
 import "./LoginPage.css";
+import AppLoader from "../components/AppLoader";
 import BackButton from "../components/BackButton";
 
 const normalizeCode = (value) => String(value || "").replace(/\D/g, "").slice(0, 6);
@@ -168,7 +169,7 @@ export default function VerifyEmailPage() {
               </div>
 
               <button type="submit" className="btn-submit" disabled={status === "loading"}>
-                {status === "loading" ? <div className="spinner" /> : "Vérifier le code"}
+                {status === "loading" ? <AppLoader fullScreen={false} size="small" text="Vérification..." showText={false} /> : "Vérifier le code"}
               </button>
               <button
                 type="button"

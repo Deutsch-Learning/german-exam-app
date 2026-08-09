@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import "./LoginPage.css";
+import AppLoader from "../components/AppLoader";
 import logo from "../assets/images/logo.png";
 import API from "../services/api";
 import { useLanguage } from "../context/LanguageContext";
@@ -420,7 +421,7 @@ export default function RegisterPage() {
             </div>
 
             <button type="submit" className="btn-submit" disabled={isLoading}>
-              {isLoading ? <div className="spinner" /> : t.auth.registerCta}
+              {isLoading ? <AppLoader fullScreen={false} size="small" text={t.common.loading} showText={false} /> : t.auth.registerCta}
             </button>
           </form>
 

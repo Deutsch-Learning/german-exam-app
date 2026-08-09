@@ -55,6 +55,10 @@ const {
 const { ensureSchemaReady } = require("./services/schemaReadiness");
 const { getStoredAudioPublicUrl } = require("./services/audioStorage");
 const { getOwnedPaymentTransaction, normalizePaymentReference } = require("./services/paymentStatusSecurity");
+const {
+  getExamSectionDurationMinutes,
+  harmonizeDurationText,
+} = require("./config/examDurations");
 const goetheB1HoerenQuestionFixes = require("./data/goetheB1HoerenQuestionFixes.json");
 const osdB1HoerenPart4Options = require("./data/osdB1HoerenPart4Options.json");
 const osdB2HoerenTeil2Fixes = require("./data/osdB2HoerenTeil2Fixes.json");
@@ -81,8 +85,6 @@ const CLIENT_DIST_DIR = SERVE_CLIENT
   : "";
 const CLIENT_INDEX_FILE = CLIENT_DIST_DIR ? path.join(CLIENT_DIST_DIR, "index.html") : "";
 const isProduction = process.env.NODE_ENV === "production";
-const WRITING_GLOBAL_DURATION_MINUTES = 60;
-const ECL_B1_GLOBAL_DURATION_MINUTES = 35;
 
 const normalizeOrigin = (value) =>
   String(value ?? "")
@@ -2159,7 +2161,7 @@ const PUBLIC_MODULE_META = {
     label: "Expression Écrite",
     shortLabel: "Written expression",
     description: "Imported writing prompts from the original exam document.",
-    defaultMinutes: WRITING_GLOBAL_DURATION_MINUTES,
+    defaultMinutes: 60,
   },
   speak: {
     id: "speak",
@@ -2179,7 +2181,7 @@ const PUBLIC_MODULE_META = {
 
 const MODULE_ORDER = ["read", "listen", "write", "speak", "sprach"];
 
-const buildUnavailableModuleMeta = (moduleId) => {
+const buildUnavailableModuleMeta = (moduleId, routeMeta = {}) => {
   const moduleMeta = PUBLIC_MODULE_META[moduleId];
   if (!moduleMeta) return null;
   return {
@@ -2191,7 +2193,7 @@ const buildUnavailableModuleMeta = (moduleId) => {
     title: moduleMeta.label,
     questionCount: 0,
     sectionCount: 0,
-    durationMinutes: moduleMeta.defaultMinutes,
+    durationMinutes: resolvePublicGlobalDurationMinutes({ routeMeta, moduleId, fallback: moduleMeta.defaultMinutes }),
   };
 };
 
@@ -2244,13 +2246,12 @@ const getProviderRouteMeta = (value) => {
 };
 
 const resolvePublicGlobalDurationMinutes = ({ routeMeta = {}, moduleId, metadata = {}, fallback = null }) => {
-  if (routeMeta.provider === "ecl" && routeMeta.level === "B1") {
-    return ECL_B1_GLOBAL_DURATION_MINUTES;
-  }
-  if (moduleId === "write") return WRITING_GLOBAL_DURATION_MINUTES;
-  return Number(metadata.globalDurationMinutes || metadata.scoring?.globalDurationMinutes) ||
-    Number(fallback) ||
-    null;
+  return getExamSectionDurationMinutes({
+    provider: routeMeta.publicProvider || routeMeta.provider,
+    level: routeMeta.level,
+    moduleId,
+    fallback: Number(metadata.globalDurationMinutes || metadata.scoring?.globalDurationMinutes) || fallback,
+  });
 };
 
 const toImportedSeriesId = (provider, level, seriesNumber) =>
@@ -2512,7 +2513,7 @@ const toPublicSeriesList = (rows, routeMeta = {}) => {
       : MODULE_ORDER.filter((moduleId) => moduleId !== "sprach");
     expectedModules.forEach((moduleId) => {
       if (!series.modules[moduleId]) {
-        series.modules[moduleId] = buildUnavailableModuleMeta(moduleId);
+        series.modules[moduleId] = buildUnavailableModuleMeta(moduleId, routeMeta);
       }
     });
     const moduleIds = expectedModules.filter((moduleId) => series.modules[moduleId]);
@@ -3218,6 +3219,12 @@ const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {},
   const moduleId = exam.section_type;
   const moduleMeta = PUBLIC_MODULE_META[moduleId] ?? PUBLIC_MODULE_META.read;
   const metadata = asJsonObject(exam.metadata);
+  const configuredDurationMinutes = resolvePublicGlobalDurationMinutes({
+    routeMeta,
+    moduleId,
+    metadata,
+    fallback: moduleMeta.defaultMinutes,
+  });
   const sourceLabel = applyExamAlias(
     metadata.sourceLabel || `Series ${String(exam.series_number).padStart(2, "0")}`,
     routeMeta
@@ -3232,16 +3239,16 @@ const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {},
     id: `part-${section.part_number || section.position}`,
     label: `Teil ${section.part_number || section.position}`,
     number: partNumber,
-    heading: isOsdB2Teil2
+    heading: harmonizeDurationText(isOsdB2Teil2
       ? `Aufgabe 2: ${osdB2HoerenTeil2.title}`
-      : applyExamAlias(section.title, routeMeta),
-    text: moduleId === "listen"
+      : applyExamAlias(section.title, routeMeta), configuredDurationMinutes),
+    text: harmonizeDurationText(moduleId === "listen"
       ? (isOsdB2Teil2 ? osdB2HoerenTeil2.instructions : LISTENING_STUDENT_INSTRUCTION)
-      : clipText(applyExamAlias(section.instructions || section.title, routeMeta), moduleId === "speak" ? 12000 : 2600),
-    instructions: moduleId === "listen"
+      : clipText(applyExamAlias(section.instructions || section.title, routeMeta), moduleId === "speak" ? 12000 : 2600), configuredDurationMinutes),
+    instructions: harmonizeDurationText(moduleId === "listen"
       ? (isOsdB2Teil2 ? osdB2HoerenTeil2.instructions : LISTENING_STUDENT_INSTRUCTION)
-      : clipText(applyExamAlias(section.instructions || section.title, routeMeta), moduleId === "speak" ? 12000 : 5200),
-    durationMinutes: Number(section.duration_minutes) || null,
+      : clipText(applyExamAlias(section.instructions || section.title, routeMeta), moduleId === "speak" ? 12000 : 5200), configuredDurationMinutes),
+    durationMinutes: configuredDurationMinutes,
     points: isOsdB2Teil2 ? Number(osdB2HoerenTeil2.points) : Number(section.points) || null,
     sourceMetadata: {
       ...stripStudentHiddenMetadata(asJsonObject(section.metadata)),
@@ -3327,7 +3334,10 @@ const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {},
       moduleId === "read" || moduleId === "sprach"
         ? {
             title: `${sourceLabel}: ${title}`,
-            intro: applyExamAlias(metadata.instructions || "Lisez les textes et répondez aux questions.", routeMeta),
+            intro: harmonizeDurationText(
+              applyExamAlias(metadata.instructions || "Lisez les textes et répondez aux questions.", routeMeta),
+              configuredDurationMinutes
+            ),
             paragraphs: sectionSummaries.length
               ? sectionSummaries
               : [{ id: "A", text: "Texte importé depuis le document source." }],
@@ -3341,7 +3351,7 @@ const buildImportedModuleContent = ({ exam, sections, questions, routeMeta = {},
             : stripPublicListeningTranscriptFields(audioSummary);
         })()
       : undefined,
-    globalDurationMinutes: resolvePublicGlobalDurationMinutes({ routeMeta, moduleId, metadata }),
+    globalDurationMinutes: configuredDurationMinutes,
     tasks,
     sourceExamId: exam.id,
   };

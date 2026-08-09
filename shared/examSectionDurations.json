@@ -1,0 +1,52 @@
+{
+  "goethe-b1": {
+    "read": 65,
+    "listen": 40,
+    "write": 60,
+    "speak": 15
+  },
+  "goethe-b2": {
+    "read": 65,
+    "listen": 40,
+    "write": 75,
+    "speak": 15
+  },
+  "osd-b1": {
+    "read": 65,
+    "listen": 40,
+    "write": 60,
+    "speak": 15
+  },
+  "osd-b2": {
+    "read": 90,
+    "listen": 30,
+    "write": 90,
+    "speak": 20
+  },
+  "ecl-b1": {
+    "read": 35,
+    "listen": 20,
+    "write": 35,
+    "speak": 10
+  },
+  "ecl-b2": {
+    "read": 45,
+    "listen": 30,
+    "write": 60,
+    "speak": 15
+  },
+  "telc-b1": {
+    "read": 65,
+    "sprach": 25,
+    "listen": 30,
+    "write": 30,
+    "speak": 35
+  },
+  "telc-b2": {
+    "read": 70,
+    "sprach": 20,
+    "listen": 20,
+    "write": 30,
+    "speak": 35
+  }
+}
