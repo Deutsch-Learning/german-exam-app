@@ -1,64 +1,43 @@
-# Split Deployment
+# Deployment Setup
 
-This is the recommended production setup:
+This is the production setup:
 
-- Vercel: React/Vite frontend from `client/gem-app`
-- Railway: Express backend from `server`
-- Supabase: PostgreSQL database
-- Hostinger: domain/DNS only
+* **GitHub:** Source code and repository
+* **Supabase:** Backend, database, authentication, and storage
+* **Vercel:** Application deployment and production URL
+* **Hostinger:** Domain and DNS management
 
-## Railway Backend
+## Vercel Deployment
 
-Create a Railway service from the GitHub repository.
+The application is deployed directly from the GitHub repository through Vercel.
 
-- Repository: `Deutsch Prüfungen/german-exam-app`
-- Branch: `feature/ui-improvements`
-- Build command: handled by `railway.json`
-- Start command: handled by `railway.json`
+* Repository: `Deutsch Prüfungen/german-exam-app`
+* Branch: `feature/ui-improvements`
+* Framework: Vite
+* Root Directory: `client/gem-app`
+* Build Command: `npm run build`
+* Output Directory: `dist`
 
-Railway environment variables:
+Vercel handles the production deployment and provides the application URL.
 
-```env
-NODE_ENV=production
-DATABASE_URL=postgresql://postgres.PROJECT_REF:ENCODED_PASSWORD@aws-1-eu-west-2.pooler.supabase.com:5432/postgres
-JWT_SECRET=generate-a-long-random-secret
-FRONTEND_URL=https://YOUR_VERCEL_APP.vercel.app
-CORS_ORIGINS=https://YOUR_VERCEL_APP.vercel.app,https://xn--n-deutschprfungen-d3b.com,https://www.xn--n-deutschprfungen-d3b.com
-```
+## Supabase
 
-Do not set `SERVE_CLIENT` on Railway.
+Supabase is used for the backend and PostgreSQL database.
 
-If your Supabase password contains reserved URL characters, encode them:
+The application connects to Supabase through its configured environment variables and client settings.
 
-- `@` becomes `%40`
-- `#` becomes `%23`
+## Domain
 
-For the current session-pooler shape:
+The custom domain is managed through **Hostinger DNS** and connected to the Vercel deployment.
 
-```env
-DATABASE_URL=postgresql://postgres.nkcvrumtjknbooboyvxe:ENCODED_PASSWORD@aws-1-eu-west-2.pooler.supabase.com:5432/postgres
-```
+* `xn--n-deutschprfungen-d3b.com`
+* `www.xn--n-deutschprfungen-d3b.com`
 
-## Vercel Frontend
+**Deployment flow:**
 
-Create a Vercel project from the same GitHub repository.
+`GitHub → Vercel → Production`
 
-- Framework: Vite
-- Root Directory: `client/gem-app`
-- Build Command: `npm run build`
-- Output Directory: `dist`
+`Application → Supabase`
 
-Vercel environment variables:
+`Domain/DNS → Hostinger`
 
-```env
-VITE_API_URL=https://YOUR_RAILWAY_BACKEND.up.railway.app
-```
-
-## Domain Later
-
-After both deployments are healthy:
-
-- Point `xn--n-deutschprfungen-d3b.com` and `www` to Vercel.
-- Point `api.xn--n-deutschprfungen-d3b.com` to Railway.
-- Update Railway `FRONTEND_URL` and `CORS_ORIGINS` to include the final domain.
-- Update Vercel `VITE_API_URL` to the final API domain if desired.
