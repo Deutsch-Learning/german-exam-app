@@ -1,29 +1,29 @@
-# 📘 German Learning App
+#  German Test Simulation App
 
-A simple and interactive application designed to help users learn and practice the German language effectively. Whether you're a beginner or improving your skills, this app provides structured lessons, exercises, and real-life practice.
-
----
-
-## 🚀 Features
-
-* 📖 Structured lessons (A1 → advanced)
-* 🧠 Vocabulary practice with quizzes
-* 🗣️ Pronunciation training
-* ✍️ Grammar exercises
-* 🎯 Progress tracking
-* 📱 Clean and user-friendly interface
+A simple and interactive application designed to help users learn and practice the German language test effectively. Whether you're a beginner or improving your skills, this app provides structured lessons, exercises, and real-life practice.
 
 ---
 
-## 🛠️ Tech Stack
+## Features
+
+*  Structured lessons (A1 → advanced)
+*  Vocabulary practice with quizzes
+*  Pronunciation training
+*  Grammar exercises
+*  Progress tracking
+*  Clean and user-friendly interface
+
+---
+
+##  Tech Stack
 
 * **Frontend:** React (inside `client/gem-app`)
 * **Backend:** Node.js (inside `server`)
-* **Database:** PostgreSQL
+* **Database:** greSQL
 
 ---
 
-## 📦 Installation
+## Installation
 
 ### 1. Clone the repository
 
@@ -50,7 +50,7 @@ npm install
 ```
 ---
 
-## ⚙️ Environment Variables
+##  Environment Variables
 
 Create a `.env` file in the appropriate directories.
 
@@ -68,13 +68,13 @@ DATABASE_URL=your_database_url
 SECRET_KEY=your_secret_key
 ```
 
-> ⚠️ Never commit your `.env` file
+>  Never commit your `.env` file
 
 ---
 
-## ▶️ Running the Project
+##  Running the Project
 
-### 🚀 Start Full Application (Frontend + Backend)
+###  Start Full Application (Frontend + Backend)
 
 From the root folder, run:
 
@@ -89,7 +89,7 @@ This will start:
 
 ---
 
-### 🔧 Run Separately (Optional)
+###  Run Separately (Optional)
 
 If you prefer to run them individually:
 
@@ -108,7 +108,7 @@ npm run dev
 ```
 ---
 
-## 📁 Project Structure
+##  Project Structure
 
 ```
 german-exam-app/
@@ -124,7 +124,7 @@ german-exam-app/
 ```
 ---
 
-## 🧪 Scripts
+##  Scripts
 
 ### Root (Run Full App)
 
@@ -149,7 +149,7 @@ npm start        # Production start
 ```
 ---
 
-## ❗ Important Notes
+##  Important Notes
 
 * `node_modules/` is excluded → run `npm install`
 * `.env` is not included → create it manually
@@ -161,7 +161,7 @@ npm start        # Production start
 
 ---
 
-## 🧪 Usage
+##  Usage
 
 1. Start backend server
 2. Start frontend app
@@ -171,7 +171,7 @@ npm start        # Production start
 
 ---
 
-## 🤝 Contributing
+##  Contributing
 
 Contributions are welcome!
 
@@ -184,13 +184,13 @@ Steps:
 
 ---
 
-## 📄 License
+##  License
 
 This project is licensed under the MIT License.
 
 ---
 
-## 📬 Contact
+##  Contact
 
 * GitHub: [https://github.com/Yong-Justice](https://github.com/Yong-Justice)
 * GitHub: [https://github.com/miaShiota](https://github.com/miaShiota)
