@@ -451,6 +451,16 @@ const eurToNotchPayAmount = (amountEur, currency = NOTCHPAY_CURRENCY) => {
   return Number(amount.toFixed(2));
 };
 
+const xafToNotchPayAmount = (amountXaf, currency = NOTCHPAY_CURRENCY) => {
+  const amount = Number(amountXaf);
+  if (!Number.isFinite(amount) || amount <= 0) return 0;
+  if (["XAF", "XOF"].includes(String(currency).toUpperCase())) return Math.round(amount);
+  return eurToNotchPayAmount(amount / NOTCHPAY_XAF_PER_EUR, currency);
+};
+
+const xafToEuroEquivalent = (amountXaf) =>
+  Number((Number(amountXaf || 0) / NOTCHPAY_XAF_PER_EUR).toFixed(2));
+
 const buildNotchPayReference = (transactionId) =>
   `ndp_${Date.now()}_${transactionId}_${crypto.randomBytes(4).toString("hex")}`;
 
@@ -698,7 +708,7 @@ const createNotchPayPayment = async ({
   user,
   transactionId,
   reference,
-  amountEur,
+  amountXaf,
   plan,
   selectedCertifications,
   callbackBaseUrl,
@@ -707,7 +717,7 @@ const createNotchPayPayment = async ({
   phone,
 }) => {
   const paymentCurrency = String(currency || NOTCHPAY_CURRENCY).toUpperCase();
-  const amount = eurToNotchPayAmount(amountEur, paymentCurrency);
+  const amount = xafToNotchPayAmount(amountXaf, paymentCurrency);
   if (!amount) {
     const error = new Error("Invalid Notch Pay amount.");
     error.status = 400;
@@ -733,7 +743,7 @@ const createNotchPayPayment = async ({
       level: plan.level,
       planKey: plan.plan_key,
       selectedCertifications,
-      amountEur,
+      amountXaf,
       amount,
       currency: paymentCurrency,
     },
@@ -910,7 +920,7 @@ const updateNotchPayTransactionPromptMetadata = async ({
 
 const getEnterpriseBillingPlan = async (client = pool) => {
   const result = await client.query(
-    `SELECT id, level, plan_key, plan_name, duration_days, price_eur, currency,
+    `SELECT id, level, plan_key, plan_name, duration_days, price_eur, price_xaf, currency,
             writing_simulator_attempts, speaking_simulator_quota, certifications, unlocked_sections
        FROM subscription_plans
       WHERE level = 'B2' AND plan_key = 'intensif' AND is_active = TRUE
@@ -956,10 +966,14 @@ const mapSubscriptionRow = (row) => ({
   startsAt: row.starts_at,
   expiresAt: row.expires_at,
   durationDays: Number(row.duration_days ?? 0),
-  priceEur: Number(row.price_eur ?? row.amount_paid ?? 0),
-  basePriceEur: Number(row.price_eur ?? 0),
-  finalPriceEur: Number(row.amount_paid ?? 0),
-  currency: row.currency || "EUR",
+  priceXaf: Number(row.price_xaf ?? 0),
+  priceEur: row.price_xaf != null ? xafToEuroEquivalent(row.price_xaf) : Number(row.price_eur ?? 0),
+  basePriceEur: row.price_xaf != null ? xafToEuroEquivalent(row.price_xaf) : Number(row.price_eur ?? 0),
+  finalPriceEur: ["XAF", "XOF"].includes(String(row.currency || "").toUpperCase())
+    ? xafToEuroEquivalent(row.amount_paid)
+    : Number(row.amount_paid ?? 0),
+  amountPaid: Number(row.amount_paid ?? 0),
+  currency: row.currency || "XAF",
   selectedCertifications: normalizeStringArray(row.selected_certifications, SUBSCRIPTION_CERTIFICATIONS),
   certifications: normalizeStringArray(row.selected_certifications, SUBSCRIPTION_CERTIFICATIONS),
   unlockedSections: normalizeStringArray(row.unlocked_sections, SUBSCRIPTION_SECTIONS),
@@ -979,7 +993,7 @@ const getActiveSubscriptionsForUser = async (userId) => {
     `SELECT us.id, us.plan_id, us.level, us.plan_key, us.status, us.starts_at, us.expires_at,
             us.amount_paid, us.currency, us.selected_certifications,
             us.speaking_simulator_quota_override,
-            sp.plan_name, sp.duration_days, sp.price_eur, sp.writing_simulator_attempts,
+            sp.plan_name, sp.duration_days, sp.price_eur, sp.price_xaf, sp.writing_simulator_attempts,
             sp.speaking_simulator_quota, sp.plan_category,
             sp.unlocked_sections,
             COALESCE(wsu.attempts_used, 0) AS writing_attempts_used
@@ -6477,7 +6491,7 @@ app.patch("/api/admin/affiliates/payouts/:payoutId", requireAdmin, async (req, r
 app.get("/api/subscription-plans", async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, level, plan_key, plan_name, duration_days, price_eur, currency,
+      `SELECT id, level, plan_key, plan_name, duration_days, price_eur, price_xaf, currency,
               writing_simulator_attempts, speaking_simulator_quota, certifications, unlocked_sections,
               plan_category, access_months, billed_months
        FROM subscription_plans
@@ -6485,7 +6499,7 @@ app.get("/api/subscription-plans", async (req, res) => {
        ORDER BY level, CASE plan_key WHEN 'starter' THEN 1 WHEN 'standard' THEN 2 ELSE 3 END`
     );
     const industrial = await pool.query(
-      `SELECT id, offer_key, label, duration_days, access_months, billed_months, price_eur, currency,
+      `SELECT id, offer_key, label, duration_days, access_months, billed_months, price_eur, price_xaf, currency,
               speaking_simulator_quota, certifications, unlocked_sections
          FROM industrial_subscription_offers
         WHERE is_active = TRUE
@@ -6499,8 +6513,9 @@ app.get("/api/subscription-plans", async (req, res) => {
         planKey: row.plan_key,
         planName: row.plan_name,
         durationDays: Number(row.duration_days),
-        priceEur: Number(row.price_eur),
-        currency: row.currency,
+        priceXaf: Number(row.price_xaf),
+        priceEur: xafToEuroEquivalent(row.price_xaf),
+        currency: row.currency || "XAF",
         writingSimulatorAttempts: Number(row.writing_simulator_attempts),
         speakingSimulatorQuota: Number(row.speaking_simulator_quota ?? 0),
         planCategory: row.plan_category || "standard",
@@ -6516,8 +6531,9 @@ app.get("/api/subscription-plans", async (req, res) => {
         durationDays: Number(row.duration_days),
         accessMonths: Number(row.access_months),
         billedMonths: Number(row.billed_months),
-        priceEur: Number(row.price_eur),
-        currency: row.currency,
+        priceXaf: Number(row.price_xaf),
+        priceEur: xafToEuroEquivalent(row.price_xaf),
+        currency: row.currency || "XAF",
         speakingSimulatorQuota: Number(row.speaking_simulator_quota),
         certifications: normalizeStringArray(row.certifications, SUBSCRIPTION_CERTIFICATIONS),
         unlockedSections: normalizeStringArray(row.unlocked_sections, SUBSCRIPTION_SECTIONS),
@@ -6564,7 +6580,7 @@ app.get("/api/subscriptions/access", requireAuth, async (req, res) => {
 
 const getCheckoutPlanAndQuote = async ({ level, planKey, selectedCertifications, country = "CM" }) => {
   const planResult = await pool.query(
-    `SELECT id, level, plan_key, plan_name, duration_days, price_eur, currency,
+    `SELECT id, level, plan_key, plan_name, duration_days, price_eur, price_xaf, currency,
             writing_simulator_attempts, speaking_simulator_quota, certifications, unlocked_sections
        FROM subscription_plans
        WHERE level = $1 AND plan_key = $2 AND is_active = TRUE
@@ -6575,11 +6591,11 @@ const getCheckoutPlanAndQuote = async ({ level, planKey, selectedCertifications,
   if (!plan) return { plan: null, quote: null };
   const countryCode = normalizeMobileMoneyCountry(country) || "CM";
   const countryConfig = MOBILE_MONEY_COUNTRIES[countryCode] || MOBILE_MONEY_COUNTRIES.CM;
-  const basePriceEur = Number(plan.price_eur);
+  const basePriceXaf = Number(plan.price_xaf);
   const selectedCertificationCount = selectedCertifications.length;
-  const finalPriceEur = Number((basePriceEur * selectedCertificationCount).toFixed(2));
+  const finalPriceXaf = basePriceXaf * selectedCertificationCount;
   const paymentCurrency = countryConfig.currency;
-  const paymentAmount = eurToNotchPayAmount(finalPriceEur, paymentCurrency);
+  const paymentAmount = xafToNotchPayAmount(finalPriceXaf, paymentCurrency);
   return {
     plan,
     quote: {
@@ -6587,10 +6603,12 @@ const getCheckoutPlanAndQuote = async ({ level, planKey, selectedCertifications,
       planKey: plan.plan_key,
       planName: plan.plan_name,
       durationDays: Number(plan.duration_days),
-      basePriceEur,
+      basePriceXaf,
+      basePriceEur: xafToEuroEquivalent(basePriceXaf),
       selectedCertifications,
       selectedCertificationCount,
-      finalPriceEur,
+      finalPriceXaf,
+      finalPriceEur: xafToEuroEquivalent(finalPriceXaf),
       paymentAmount,
       paymentCurrency,
       country: countryCode,
@@ -6605,7 +6623,7 @@ const getCheckoutPlanAndQuote = async ({ level, planKey, selectedCertifications,
 
 const getEnterpriseOfferAndQuote = async ({ offerKey, country = "CM" }) => {
   const offerResult = await pool.query(
-    `SELECT id, offer_key, label, duration_days, access_months, billed_months, price_eur, currency,
+    `SELECT id, offer_key, label, duration_days, access_months, billed_months, price_eur, price_xaf, currency,
             speaking_simulator_quota, certifications, unlocked_sections
        FROM industrial_subscription_offers
       WHERE offer_key = $1 AND is_active = TRUE
@@ -6619,9 +6637,9 @@ const getEnterpriseOfferAndQuote = async ({ offerKey, country = "CM" }) => {
   const countryCode = normalizeMobileMoneyCountry(country) || "CM";
   const countryConfig = MOBILE_MONEY_COUNTRIES[countryCode] || MOBILE_MONEY_COUNTRIES.CM;
   const selectedCertifications = normalizeStringArray(offer.certifications, SUBSCRIPTION_CERTIFICATIONS);
-  const finalPriceEur = Number(offer.price_eur);
+  const finalPriceXaf = Number(offer.price_xaf);
   const paymentCurrency = countryConfig.currency;
-  const paymentAmount = eurToNotchPayAmount(finalPriceEur, paymentCurrency);
+  const paymentAmount = xafToNotchPayAmount(finalPriceXaf, paymentCurrency);
   return {
     offer,
     billingPlan,
@@ -6635,10 +6653,12 @@ const getEnterpriseOfferAndQuote = async ({ offerKey, country = "CM" }) => {
       durationDays: Number(offer.duration_days),
       accessMonths: Number(offer.access_months),
       billedMonths: Number(offer.billed_months),
-      basePriceEur: finalPriceEur,
+      basePriceXaf: finalPriceXaf,
+      basePriceEur: xafToEuroEquivalent(finalPriceXaf),
       selectedCertifications,
       selectedCertificationCount: selectedCertifications.length,
-      finalPriceEur,
+      finalPriceXaf,
+      finalPriceEur: xafToEuroEquivalent(finalPriceXaf),
       paymentAmount,
       paymentCurrency,
       country: countryCode,
@@ -6773,7 +6793,7 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
                 user: req.user,
                 transactionId: existingTransaction.id,
                 reference: existingMerchantReference,
-                amountEur: quote.finalPriceEur,
+                amountXaf: quote.finalPriceXaf,
                 plan,
                 selectedCertifications: selectedForTransaction,
                 callbackBaseUrl: publicBaseUrl,
@@ -6884,7 +6904,7 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
         user: req.user,
         transactionId,
         reference: merchantReference,
-        amountEur: quote.finalPriceEur,
+        amountXaf: quote.finalPriceXaf,
         plan,
         selectedCertifications: selectedForTransaction,
         callbackBaseUrl: publicBaseUrl,
@@ -6947,7 +6967,7 @@ app.post("/api/checkout/session", requireAuth, async (req, res) => {
         merchantReference,
         authorizationUrl,
         planId: plan.id,
-        amount: quote.finalPriceEur,
+        amount: quote.finalPriceXaf,
         ...quote,
         certifications: selectedForTransaction,
         unlockedSections: normalizeStringArray(plan.unlocked_sections, SUBSCRIPTION_SECTIONS),
@@ -7154,14 +7174,14 @@ app.get("/api/admin/subscriptions", requireAdmin, async (req, res) => {
   try {
     const [plans, industrialOffers, subscriptions, events] = await Promise.all([
       pool.query(
-        `SELECT id, level, plan_key, plan_name, duration_days, price_eur, currency,
+        `SELECT id, level, plan_key, plan_name, duration_days, price_eur, price_xaf, currency,
                 writing_simulator_attempts, speaking_simulator_quota, certifications, unlocked_sections
            FROM subscription_plans
           WHERE is_active = TRUE
           ORDER BY level, CASE plan_key WHEN 'starter' THEN 1 WHEN 'standard' THEN 2 ELSE 3 END`
       ),
       pool.query(
-        `SELECT id, offer_key, label, duration_days, access_months, billed_months, price_eur, currency,
+        `SELECT id, offer_key, label, duration_days, access_months, billed_months, price_eur, price_xaf, currency,
                 speaking_simulator_quota, certifications, unlocked_sections
            FROM industrial_subscription_offers
           WHERE is_active = TRUE
@@ -7172,7 +7192,7 @@ app.get("/api/admin/subscriptions", requireAdmin, async (req, res) => {
                 us.starts_at, us.expires_at, us.selected_certifications, us.amount_paid, us.currency,
                 us.payment_provider, us.payment_reference, us.speaking_simulator_quota_override,
                 us.revoked_at, us.grant_reason, us.created_at, us.updated_at,
-                sp.plan_name, sp.duration_days, sp.price_eur, sp.writing_simulator_attempts,
+                sp.plan_name, sp.duration_days, sp.price_eur, sp.price_xaf, sp.writing_simulator_attempts,
                 sp.speaking_simulator_quota, sp.unlocked_sections
            FROM user_subscriptions us
            JOIN users u ON u.id = us.user_id
@@ -7199,8 +7219,9 @@ app.get("/api/admin/subscriptions", requireAdmin, async (req, res) => {
         planKey: row.plan_key,
         planName: row.plan_name,
         durationDays: Number(row.duration_days),
-        priceEur: Number(row.price_eur),
-        currency: row.currency,
+        priceXaf: Number(row.price_xaf),
+        priceEur: xafToEuroEquivalent(row.price_xaf),
+        currency: row.currency || "XAF",
         writingSimulatorAttempts: Number(row.writing_simulator_attempts),
         speakingSimulatorQuota: Number(row.speaking_simulator_quota ?? 0),
         certifications: normalizeStringArray(row.certifications, SUBSCRIPTION_CERTIFICATIONS),
@@ -7213,8 +7234,9 @@ app.get("/api/admin/subscriptions", requireAdmin, async (req, res) => {
         durationDays: Number(row.duration_days),
         accessMonths: Number(row.access_months),
         billedMonths: Number(row.billed_months),
-        priceEur: Number(row.price_eur),
-        currency: row.currency,
+        priceXaf: Number(row.price_xaf),
+        priceEur: xafToEuroEquivalent(row.price_xaf),
+        currency: row.currency || "XAF",
         speakingSimulatorQuota: Number(row.speaking_simulator_quota),
       })),
       subscriptions: subscriptions.rows.map((row) => ({
@@ -7276,7 +7298,7 @@ app.post("/api/admin/subscriptions/manual-grant", requireAdmin, async (req, res)
       return res.status(404).json({ ok: false, error: "User not found" });
     }
     const planResult = await client.query(
-      `SELECT id, level, plan_key, plan_name, duration_days, price_eur, currency, writing_simulator_attempts
+      `SELECT id, level, plan_key, plan_name, duration_days, price_eur, price_xaf, currency, writing_simulator_attempts
          FROM subscription_plans
         WHERE id = $1 AND is_active = TRUE`,
       [planId]
@@ -7294,7 +7316,7 @@ app.post("/api/admin/subscriptions/manual-grant", requireAdmin, async (req, res)
       return res.status(400).json({ ok: false, error: "End date must be after start date" });
     }
 
-    const finalPrice = Number((Number(plan.price_eur) * selectedCertifications.length).toFixed(2));
+    const finalPrice = Number(plan.price_xaf) * selectedCertifications.length;
     const inserted = await client.query(
       `INSERT INTO user_subscriptions (
          user_id, plan_id, level, plan_key, status, starts_at, expires_at,

@@ -9,9 +9,11 @@ import { getAuthSession, getAuthUser, storeAuthSession, updateStoredUser } from 
 import { SUPPORT_WHATSAPP_NUMBER } from "../config/support";
 import {
   certificationOptions,
+  calculateOfferTotalXaf,
   enrichPricingPlan,
   enterpriseOffers,
-  formatEuro,
+  formatEuroEquivalent,
+  formatXaf,
   pricingSections,
   unlockedSections,
 } from "../data/pricingPlans";
@@ -61,7 +63,7 @@ const offersCopy = {
       duration: "Duree",
       quantity: "Quantite",
       price: "Prix",
-      total: "Total EUR",
+      total: "Total XAF",
       paymentCurrency: "Devise paiement",
       reference: "Reference",
       none: "Aucune selection",
@@ -147,7 +149,7 @@ const offersCopy = {
       duration: "Duration",
       quantity: "Quantity",
       price: "Price",
-      total: "Total EUR",
+      total: "Total XAF",
       paymentCurrency: "Payment currency",
       reference: "Reference",
       none: "No selection",
@@ -233,7 +235,7 @@ const offersCopy = {
       duration: "Dauer",
       quantity: "Anzahl",
       price: "Preis",
-      total: "Total EUR",
+      total: "Gesamt XAF",
       paymentCurrency: "Zahlungswaehrung",
       reference: "Referenz",
       none: "Keine Auswahl",
@@ -287,14 +289,14 @@ const buildEnterprisePlan = (offer) => ({
   level: "B1 + B2",
   planKey: "enterprise",
   planName: offer.label,
-  priceEur: Number(offer.priceEur),
-  displayPrice: offer.displayPrice,
+  priceXaf: Number(offer.priceXaf),
+  displayPrice: `${formatXaf(offer.priceXaf)} (${formatEuroEquivalent(offer.priceXaf)})`,
   durationDays: offer.durationDays || offer.accessDays || 30,
   writingSimulatorAttempts: 10,
   availableCertifications: certificationOptions,
   unlockedSections: unlockedSections.map((section) => section.title),
   sectionDetails: unlockedSections,
-  currency: "EUR",
+  currency: "XAF",
   accessLabel: offer.accessLabel,
   billedLabel: offer.billedLabel,
   speakingSimulatorQuota: offer.speakingSimulatorQuota,
@@ -303,13 +305,11 @@ const buildEnterprisePlan = (offer) => ({
 const getSupportName = (user) =>
   user?.name || user?.full_name || user?.fullName || user?.username || user?.email || "Client";
 
-const PriceText = ({ value }) => {
-  const [euros, cents = ""] = String(value).replace(/\u20ac/g, "").split(",");
+const PriceText = ({ valueXaf }) => {
   return (
     <div className="official-price">
-      <span>{"\u20ac"}</span>
-      <strong>{euros}</strong>
-      <small>,{cents}</small>
+      <strong>{formatXaf(valueXaf)}</strong>
+      <small>({formatEuroEquivalent(valueXaf)})</small>
     </div>
   );
 };
@@ -357,14 +357,12 @@ const normalizeMobilePhoneForUi = (value, countryKey) => {
 const formatMobileAmount = (amount, currency) =>
   `${Number(amount || 0).toLocaleString("fr-FR")} ${currency || ""}`.trim();
 
-const CLIENT_EUR_TO_XAF = 656;
-
-const buildEstimatedQuote = (priceEur, countryKey) => {
-  const amount = Math.round(Number(priceEur || 0) * CLIENT_EUR_TO_XAF);
+const buildEstimatedQuote = (priceXaf, countryKey) => {
+  const amount = Math.round(Number(priceXaf || 0));
   if (!amount) return null;
   return {
     paymentAmount: amount,
-    paymentCurrency: countryKey === "CM" ? "XAF" : countryKey,
+    paymentCurrency: countryKey === "CM" ? "XAF" : "XOF",
     estimated: true,
   };
 };
@@ -405,9 +403,7 @@ const CheckoutModalV2 = ({
 
   const isEnterprise = Boolean(plan.isEnterprise);
   const selectedCount = isEnterprise ? 1 : selectedCertifications.length;
-  const totalPrice = isEnterprise
-    ? Number(plan.priceEur)
-    : Number((plan.priceEur * selectedCount).toFixed(2));
+  const totalPriceXaf = calculateOfferTotalXaf(plan, selectedCount);
   const selectedLabels = certificationOptions
     .filter((option) => selectedCertifications.includes(option.key))
     .map((option) => (isEnterprise ? `${option.label} B1 + B2` : `${option.label} ${plan.level}`));
@@ -415,7 +411,7 @@ const CheckoutModalV2 = ({
   const providerOptions = Object.entries(country.providers);
   const selectedProviderConfig = country.providers[mobileProvider];
   const normalizedPhone = normalizeMobilePhoneForUi(mobilePhone, mobileCountry);
-  const estimatedQuote = buildEstimatedQuote(totalPrice, mobileCountry);
+  const estimatedQuote = buildEstimatedQuote(totalPriceXaf, mobileCountry);
   const visibleQuote = quote || estimatedQuote;
   const clientPhoneLooksValid =
     Boolean(selectedProviderConfig) &&
@@ -478,8 +474,8 @@ const CheckoutModalV2 = ({
           <div><span>{modalCopy.exams}</span><strong>{selectedLabels.length ? selectedLabels.join(", ") : modalCopy.none}</strong></div>
           <div><span>{modalCopy.duration}</span><strong>{plan.accessLabel || `${plan.durationDays} jours`}</strong></div>
           <div><span>{modalCopy.quantity}</span><strong>{selectedCount || 0}</strong></div>
-          <div><span>{modalCopy.price}</span><strong>{formatEuro(plan.priceEur)}</strong></div>
-          <div><span>{modalCopy.total}</span><strong>{formatEuro(totalPrice)}</strong></div>
+          <div><span>{modalCopy.price}</span><strong>{formatXaf(plan.priceXaf)} ({formatEuroEquivalent(plan.priceXaf)})</strong></div>
+          <div><span>{modalCopy.total}</span><strong>{formatXaf(totalPriceXaf)} ({formatEuroEquivalent(totalPriceXaf)})</strong></div>
           <div>
             <span>{modalCopy.paymentCurrency}</span>
             <strong>
@@ -904,14 +900,13 @@ export default function OffersPage() {
     setCheckoutError("");
     setLoadingPlanId(activePlanKey);
     try {
-      const finalPriceEur = Number((selectedPlan.priceEur * selectedCertifications.length).toFixed(2));
       const session = await createCheckoutSession({
         offerKey: selectedPlan.offerKey,
         ...selectedPlan,
-        basePriceEur: selectedPlan.priceEur,
+        basePriceXaf: selectedPlan.priceXaf,
         selectedCertifications,
         selectedCertificationCount: selectedCertifications.length,
-        finalPriceEur: selectedPlan.isEnterprise ? selectedPlan.priceEur : finalPriceEur,
+        finalPriceXaf: calculateOfferTotalXaf(selectedPlan, selectedCertifications.length),
         paymentMethod: "mobile_money",
         mobileMoney: {
           country: mobileCountry,
@@ -1080,7 +1075,7 @@ export default function OffersPage() {
                       <p>{plan.formulaLabel}</p>
                     </div>
                     <div className="pricing-card-body">
-                      <PriceText value={plan.displayPrice} />
+                      <PriceText valueXaf={plan.priceXaf} />
                       <div className="pricing-feature-list">
                         {plan.sectionDetails.map((feature) => (
                           <div className="pricing-feature" key={feature.title}>
@@ -1124,7 +1119,7 @@ export default function OffersPage() {
                 <div className="enterprise-card-top">
                   <span>{offer.subtitle}</span>
                   <h3>{offer.label}</h3>
-                  <PriceText value={offer.displayPrice} />
+                  <PriceText valueXaf={offer.priceXaf} />
                 </div>
                 <div className="enterprise-card-body">
                   <p>{offer.description}</p>
@@ -1198,6 +1193,3 @@ export default function OffersPage() {
     </div>
   );
 }
-
-
-

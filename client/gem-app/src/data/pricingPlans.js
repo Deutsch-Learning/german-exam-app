@@ -15,8 +15,18 @@ export const certificationOptions = [
 export const certificationLabels = certificationOptions.map((option) => option.label);
 export const certificationKeys = certificationOptions.map((option) => option.key);
 
-export const formatEuro = (value) =>
-  `\u20ac${Number(value || 0).toFixed(2).replace(".", ",")}`;
+export const XAF_PER_EUR = 656;
+
+export const formatXaf = (value) =>
+  `${Number(value || 0).toLocaleString("fr-FR", { maximumFractionDigits: 0 })} XAF`;
+
+export const formatEuroEquivalent = (valueXaf) =>
+  `\u20ac${(Number(valueXaf || 0) / XAF_PER_EUR).toFixed(2).replace(".", ",")}`;
+
+export const calculateOfferTotalXaf = (offer, quantity) => {
+  const priceXaf = Number(offer?.priceXaf || 0);
+  return offer?.isEnterprise ? priceXaf : priceXaf * Math.max(0, Number(quantity) || 0);
+};
 
 export const pricingSections = [
   {
@@ -26,8 +36,7 @@ export const pricingSections = [
         planKey: "starter",
         planName: "Starter",
         formulaLabel: "Formule 5 Jours",
-        priceEur: 14.99,
-        displayPrice: "€14,99",
+        priceXaf: 2500,
         durationDays: 5,
         writingSimulatorAttempts: 3,
         speakingSimulatorQuota: 20,
@@ -36,8 +45,7 @@ export const pricingSections = [
         planKey: "standard",
         planName: "Standard",
         formulaLabel: "Formule 15 Jours",
-        priceEur: 29.99,
-        displayPrice: "€29,99",
+        priceXaf: 5900,
         durationDays: 15,
         writingSimulatorAttempts: 6,
         speakingSimulatorQuota: 45,
@@ -46,8 +54,7 @@ export const pricingSections = [
         planKey: "intensif",
         planName: "Intensif",
         formulaLabel: "Formule 30 Jours",
-        priceEur: 54.99,
-        displayPrice: "€54,99",
+        priceXaf: 8900,
         durationDays: 30,
         writingSimulatorAttempts: 10,
         speakingSimulatorQuota: 65,
@@ -61,8 +68,7 @@ export const pricingSections = [
         planKey: "starter",
         planName: "Starter",
         formulaLabel: "Formule 5 Jours",
-        priceEur: 19.99,
-        displayPrice: "€19,99",
+        priceXaf: 2500,
         durationDays: 5,
         writingSimulatorAttempts: 3,
         speakingSimulatorQuota: 20,
@@ -71,8 +77,7 @@ export const pricingSections = [
         planKey: "standard",
         planName: "Standard",
         formulaLabel: "Formule 15 Jours",
-        priceEur: 34.99,
-        displayPrice: "€34,99",
+        priceXaf: 5900,
         durationDays: 15,
         writingSimulatorAttempts: 6,
         speakingSimulatorQuota: 45,
@@ -81,8 +86,7 @@ export const pricingSections = [
         planKey: "intensif",
         planName: "Intensif",
         formulaLabel: "Formule 30 Jours",
-        priceEur: 64.99,
-        displayPrice: "€64,99",
+        priceXaf: 8900,
         durationDays: 30,
         writingSimulatorAttempts: 10,
         speakingSimulatorQuota: 65,
@@ -96,8 +100,7 @@ export const enterpriseOffers = [
     offerKey: "industrial_1_month",
     label: "Établissement 1 mois",
     subtitle: "Accès école intensif",
-    priceEur: 450.99,
-    displayPrice: "€450,99",
+    priceXaf: 150000,
     accessLabel: "1 mois",
     billedLabel: "1 mois facturé",
     speakingSimulatorQuota: 240,
@@ -107,8 +110,7 @@ export const enterpriseOffers = [
     offerKey: "industrial_6_months",
     label: "Établissement 6 mois",
     subtitle: "Programme semestriel",
-    priceEur: 2500.99,
-    displayPrice: "€2500,99",
+    priceXaf: 600000,
     accessLabel: "6 mois",
     billedLabel: "6 mois facturés",
     speakingSimulatorQuota: 600,
@@ -118,8 +120,7 @@ export const enterpriseOffers = [
     offerKey: "industrial_12_plus_2",
     label: "Établissement annuel",
     subtitle: "12 mois payés + 2 mois offerts",
-    priceEur: 5000.99,
-    displayPrice: "€5000,99",
+    priceXaf: 1000000,
     accessLabel: "14 mois",
     billedLabel: "12 mois facturés",
     speakingSimulatorQuota: 1000,
@@ -134,11 +135,12 @@ export const enrichPricingPlan = (level, plan) => ({
   ...plan,
   id: buildPlanId(level, plan.planKey),
   level,
+  displayPrice: `${formatXaf(plan.priceXaf)} (${formatEuroEquivalent(plan.priceXaf)})`,
   availableCertifications: certificationOptions,
   certificationLabels,
   unlockedSections: unlockedSections.map((section) => section.title),
   sectionDetails: unlockedSections,
-  currency: "EUR",
+  currency: "XAF",
 });
 
 export const pricingPlans = pricingSections.flatMap((section) =>

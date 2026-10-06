@@ -920,7 +920,7 @@ function AdminSubscriptions() {
               {(data?.industrialOffers ?? []).map((offer) => (
                 <tr key={offer.id}>
                   <td>{offer.label}</td>
-                  <td>€{Number(offer.priceEur).toFixed(2)}</td>
+                  <td>{Number(offer.priceXaf).toLocaleString("fr-FR")} XAF ({Number(offer.priceEur).toFixed(2)} €)</td>
                   <td>{offer.accessMonths} months ({offer.billedMonths} billed)</td>
                   <td>{offer.speakingSimulatorQuota}</td>
                 </tr>
