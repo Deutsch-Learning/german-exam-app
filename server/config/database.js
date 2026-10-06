@@ -18,6 +18,12 @@ const shouldPreferTransactionPooler = (env) => {
 
 const normalizeSupabasePoolerUrl = (databaseUrl, env) => {
   const url = new URL(databaseUrl);
+  // node-postgres replaces an explicitly supplied `ssl` object when the URL
+  // contains SSL query parameters. Keep TLS configuration centralized in
+  // buildSslOptions so DATABASE_SSL_CA_* is honored for Vercel URLs.
+  for (const parameter of ["sslmode", "sslrootcert", "sslcert", "sslkey"]) {
+    url.searchParams.delete(parameter);
+  }
   if (isSupabasePoolerHost(url.hostname) && shouldPreferTransactionPooler(env) && (!url.port || url.port === "5432")) {
     url.port = "6543";
   }
@@ -72,7 +78,11 @@ const buildSharedPoolOptions = (env) => {
 };
 
 function buildPoolConfig(env = process.env) {
-  const databaseUrl = env.DATABASE_URL?.trim();
+  const databaseUrl =
+    env.DATABASE_URL?.trim() ||
+    env.POSTGRES_URL?.trim() ||
+    env.POSTGRES_URL_NON_POOLING?.trim() ||
+    env.POSTGRES_PRISMA_URL?.trim();
   const shared = buildSharedPoolOptions(env);
   if (databaseUrl) {
     const normalizedUrl = normalizeSupabasePoolerUrl(databaseUrl, env);
@@ -84,8 +94,8 @@ function buildPoolConfig(env = process.env) {
     };
   }
 
-  const host = env.DB_HOST;
-  const requestedPort = env.DB_PORT;
+  const host = env.DB_HOST || env.POSTGRES_HOST;
+  const requestedPort = env.DB_PORT || env.POSTGRES_PORT;
   const port =
     isSupabasePoolerHost(host) && shouldPreferTransactionPooler(env) && (!requestedPort || requestedPort === "5432")
       ? 6543
@@ -95,9 +105,9 @@ function buildPoolConfig(env = process.env) {
     ...shared,
     host,
     port,
-    user: env.DB_USER,
-    password: env.DB_PASSWORD,
-    database: env.DB_NAME,
+    user: env.DB_USER || env.POSTGRES_USER,
+    password: env.DB_PASSWORD || env.POSTGRES_PASSWORD,
+    database: env.DB_NAME || env.POSTGRES_DATABASE,
     ssl: buildSslOptions({ env, host }),
   };
 }

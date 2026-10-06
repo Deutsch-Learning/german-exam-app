@@ -3988,7 +3988,19 @@ const verifyEmailPostHandler = async (req, res) => {
     const user = req.body?.token
       ? await verifyEmailToken(req.body.token)
       : await verifyEmailCode(req.body?.email, req.body?.code);
-    if (!user) return res.status(400).json({ ok: false, error: "Invalid or expired verification code" });
+    if (!user) {
+      const normalizedEmail = normalizeEmail(req.body?.email);
+      if (!req.body?.token && isEmail(normalizedEmail)) {
+        const existing = await pool.query(
+          `SELECT 1 FROM users WHERE email = $1 AND email_verified = TRUE`,
+          [normalizedEmail]
+        );
+        if (existing.rowCount > 0) {
+          return res.json({ ok: true, alreadyVerified: true });
+        }
+      }
+      return res.status(400).json({ ok: false, error: "Invalid or expired verification code" });
+    }
     await sendWelcomeEmailOnce(user);
     return res.json({ ok: true, user: await sanitizeUserWithSubscriptions(user) });
   } catch (err) {
